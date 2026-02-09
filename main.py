@@ -138,37 +138,80 @@ with tab1:
                 st.error("L'input et l'output sont obligatoires.")
 
 # --- TAB 2 : EDITION BI-DIRECTIONNELLE ---
+# --- TAB 2 : NAVIGATION & ÉDITION DE FICHES ---
 with tab2:
-    st.subheader("Base de données complète")
-    
-    # On s'assure que toutes les colonnes attendues existent pour éviter les erreurs d'affichage
-    expected_cols = ["id", "date", "type", "forme", "ton", "support", "input", "output", "statut", "notes"]
-    for col in expected_cols:
-        if col not in df.columns:
-            df[col] = ""
+    if df.empty:
+        st.warning("Le dataset est vide. Ajoutez une entrée pour commencer.")
+    else:
+        # 1. FILTRAGE
+        st.subheader("🔍 Filtrer les fiches")
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            filtre_statut = st.multiselect(
+                "Afficher uniquement les statuts :", 
+                LISTE_STATUTS, 
+                default=LISTE_STATUTS
+            )
+        
+        # Filtrage du DataFrame
+        df_view = df[df['statut'].isin(filtre_statut)].reset_index()
 
-    # Configuration de l'éditeur de données corrigée
-    edited_df = st.data_editor(
-        df,
-        num_rows="dynamic", 
-        width="stretch", # Correction de l'erreur use_container_width
-        column_config={
-            "id": st.column_config.TextColumn("ID", disabled=True),
-            "date": st.column_config.TextColumn("Date", disabled=True),
-            "type": st.column_config.SelectboxColumn("Type", options=LISTE_TYPES),
-            "forme": st.column_config.SelectboxColumn("Forme", options=LISTE_FORMES),
-            "ton": st.column_config.SelectboxColumn("Ton", options=LISTE_TONS),
-            "support": st.column_config.SelectboxColumn("Support", options=LISTE_SUPPORTS),
-            "statut": st.column_config.SelectboxColumn("Statut", options=LISTE_STATUTS),
-            "input": st.column_config.TextColumn("Input", width="medium"),
-            "output": st.column_config.TextColumn("Output", width="large"),
-            "notes": st.column_config.TextColumn("Notes", width="small"),
-        },
-    )
+        if df_view.empty:
+            st.info("Aucune fiche ne correspond à ces critères.")
+        else:
+            # 2. NAVIGATION DANS LES FICHES
+            if 'index_fiche' not in st.session_state:
+                st.session_state.index_fiche = 0
+            
+            # Sécurité pour l'index si le filtre change
+            if st.session_state.index_fiche >= len(df_view):
+                st.session_state.index_fiche = 0
 
-    if st.button("💾 Sauvegarder les modifications"):
-        try:
-            conn.update(data=edited_df)
-            st.success("Google Sheet mis à jour !")
-        except Exception as e:
-            st.error(f"Erreur de sauvegarde : {e}")
+            # Barre de navigation
+            c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
+            with c_nav1:
+                if st.button("⬅️ Précédent"):
+                    st.session_state.index_fiche = max(0, st.session_state.index_fiche - 1)
+            with c_nav2:
+                # On affiche où on en est
+                st.markdown(f"<center>Fiche <b>{st.session_state.index_fiche + 1}</b> sur {len(df_view)}</center>", unsafe_allow_html=True)
+            with c_nav3:
+                if st.button("Suivant ➡️"):
+                    st.session_state.index_fiche = min(len(df_view) - 1, st.session_state.index_fiche + 1)
+
+            # 3. AFFICHAGE DE LA FICHE SÉLECTIONNÉE
+            current_row = df_view.iloc[st.session_state.index_fiche]
+            
+            st.divider()
+            
+            # Formulaire d'édition pour la fiche actuelle
+            with st.container():
+                col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+                edit_type = col_e1.selectbox("Type", LISTE_TYPES, index=LISTE_TYPES.index(current_row['type']) if current_row['type'] in LISTE_TYPES else 0, key="ed_type")
+                edit_forme = col_e2.selectbox("Forme", LISTE_FORMES, index=LISTE_FORMES.index(current_row['forme']) if current_row['forme'] in LISTE_FORMES else 0, key="ed_forme")
+                edit_ton = col_e3.selectbox("Ton", LISTE_TONS, index=LISTE_TONS.index(current_row['ton']) if current_row['ton'] in LISTE_TONS else 0, key="ed_ton")
+                edit_support = col_e4.selectbox("Support", LISTE_SUPPORTS, index=LISTE_SUPPORTS.index(current_row['support']) if current_row['support'] in LISTE_SUPPORTS else 0, key="ed_supp")
+
+                edit_input = st.text_area("Brouillon (Input)", value=current_row['input'], height=150, key="ed_input")
+                edit_output = st.text_area("Prose (Output)", value=current_row['output'], height=300, key="ed_output")
+
+                col_e5, col_e6 = st.columns(2)
+                edit_statut = col_e5.selectbox("Statut", LISTE_STATUTS, index=LISTE_STATUTS.index(current_row['statut']) if current_row['statut'] in LISTE_STATUTS else 0, key="ed_statut")
+                edit_notes = col_e6.text_input("Notes libres", value=current_row['notes'], key="ed_notes")
+
+                # 4. SAUVEGARDE
+                if st.button("💾 Enregistrer les modifications de cette fiche", type="primary"):
+                    # On retrouve l'index original dans le vrai DF via l'ID unique
+                    row_id = current_row['id']
+                    
+                    # Mise à jour des valeurs dans le DataFrame principal
+                    df.loc[df['id'] == row_id, ['type', 'forme', 'ton', 'support', 'input', 'output', 'statut', 'notes']] = [
+                        edit_type, edit_forme, edit_ton, edit_support, edit_input, edit_output, edit_statut, edit_notes
+                    ]
+                    
+                    try:
+                        conn.update(data=df)
+                        st.success(f"Fiche {row_id} mise à jour dans Google Sheets !")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Erreur lors de la mise à jour : {e}")
