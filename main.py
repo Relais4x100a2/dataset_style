@@ -137,81 +137,80 @@ with tab1:
             else:
                 st.error("L'input et l'output sont obligatoires.")
 
-# --- TAB 2 : EDITION BI-DIRECTIONNELLE ---
-# --- TAB 2 : NAVIGATION & ÉDITION DE FICHES ---
+# --- TAB 2 : NAVIGATION & ÉDITION DE FICHES BI-DIRECTIONNELLE ---
 with tab2:
     if df.empty:
-        st.warning("Le dataset est vide. Ajoutez une entrée pour commencer.")
+        st.warning("Le dataset est vide.")
     else:
         # 1. FILTRAGE
         st.subheader("🔍 Filtrer les fiches")
-        col_f1, col_f2 = st.columns([2, 1])
-        with col_f1:
-            filtre_statut = st.multiselect(
-                "Afficher uniquement les statuts :", 
-                LISTE_STATUTS, 
-                default=LISTE_STATUTS
-            )
+        filtre_statut = st.multiselect(
+            "Statuts à afficher :", 
+            LISTE_STATUTS, 
+            default=LISTE_STATUTS
+        )
         
-        # Filtrage du DataFrame
-        df_view = df[df['statut'].isin(filtre_statut)].reset_index()
+        df_view = df[df['statut'].isin(filtre_statut)].reset_index(drop=True)
 
         if df_view.empty:
-            st.info("Aucune fiche ne correspond à ces critères.")
+            st.info("Aucune fiche trouvée.")
         else:
-            # 2. NAVIGATION DANS LES FICHES
+            # 2. NAVIGATION
             if 'index_fiche' not in st.session_state:
                 st.session_state.index_fiche = 0
             
-            # Sécurité pour l'index si le filtre change
-            if st.session_state.index_fiche >= len(df_view):
-                st.session_state.index_fiche = 0
+            # Ajustement de l'index si on filtre
+            st.session_state.index_fiche = min(st.session_state.index_fiche, len(df_view) - 1)
 
-            # Barre de navigation
             c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
             with c_nav1:
-                if st.button("⬅️ Précédent"):
-                    st.session_state.index_fiche = max(0, st.session_state.index_fiche - 1)
+                if st.button("⬅️ Précédent") and st.session_state.index_fiche > 0:
+                    st.session_state.index_fiche -= 1
+                    st.rerun() # On force le rafraîchissement immédiat
             with c_nav2:
-                # On affiche où on en est
-                st.markdown(f"<center>Fiche <b>{st.session_state.index_fiche + 1}</b> sur {len(df_view)}</center>", unsafe_allow_html=True)
+                st.markdown(f"<center><h3>Fiche {st.session_state.index_fiche + 1} / {len(df_view)}</h3></center>", unsafe_allow_html=True)
             with c_nav3:
-                if st.button("Suivant ➡️"):
-                    st.session_state.index_fiche = min(len(df_view) - 1, st.session_state.index_fiche + 1)
+                if st.button("Suivant ➡️") and st.session_state.index_fiche < len(df_view) - 1:
+                    st.session_state.index_fiche += 1
+                    st.rerun()
 
-            # 3. AFFICHAGE DE LA FICHE SÉLECTIONNÉE
+            # 3. RÉCUPÉRATION DE LA DONNÉE
             current_row = df_view.iloc[st.session_state.index_fiche]
-            
+            row_id = current_row['id'] # On utilise l'ID pour verrouiller le contenu
+
             st.divider()
+
+            # 4. FORMULAIRE AVEC KEYS DYNAMIQUES
+            # En ajoutant row_id à la key, Streamlit recharge le contenu à chaque changement
+            col_e1, col_e2, col_e3, col_e4 = st.columns(4)
             
-            # Formulaire d'édition pour la fiche actuelle
-            with st.container():
-                col_e1, col_e2, col_e3, col_e4 = st.columns(4)
-                edit_type = col_e1.selectbox("Type", LISTE_TYPES, index=LISTE_TYPES.index(current_row['type']) if current_row['type'] in LISTE_TYPES else 0, key="ed_type")
-                edit_forme = col_e2.selectbox("Forme", LISTE_FORMES, index=LISTE_FORMES.index(current_row['forme']) if current_row['forme'] in LISTE_FORMES else 0, key="ed_forme")
-                edit_ton = col_e3.selectbox("Ton", LISTE_TONS, index=LISTE_TONS.index(current_row['ton']) if current_row['ton'] in LISTE_TONS else 0, key="ed_ton")
-                edit_support = col_e4.selectbox("Support", LISTE_SUPPORTS, index=LISTE_SUPPORTS.index(current_row['support']) if current_row['support'] in LISTE_SUPPORTS else 0, key="ed_supp")
+            # On utilise .get() ou des index sécurisés
+            try:
+                idx_type = LISTE_TYPES.index(current_row['type'])
+                idx_forme = LISTE_FORMES.index(current_row['forme'])
+                idx_ton = LISTE_TONS.index(current_row['ton'])
+                idx_supp = LISTE_SUPPORTS.index(current_row['support'])
+                idx_statut = LISTE_STATUTS.index(current_row['statut'])
+            except:
+                idx_type = idx_forme = idx_ton = idx_supp = idx_statut = 0
 
-                edit_input = st.text_area("Brouillon (Input)", value=current_row['input'], height=150, key="ed_input")
-                edit_output = st.text_area("Prose (Output)", value=current_row['output'], height=300, key="ed_output")
+            edit_type = col_e1.selectbox("Type", LISTE_TYPES, index=idx_type, key=f"type_{row_id}")
+            edit_forme = col_e2.selectbox("Forme", LISTE_FORMES, index=idx_forme, key=f"forme_{row_id}")
+            edit_ton = col_e3.selectbox("Ton", LISTE_TONS, index=idx_ton, key=f"ton_{row_id}")
+            edit_support = col_e4.selectbox("Support", LISTE_SUPPORTS, index=idx_supp, key=f"supp_{row_id}")
 
-                col_e5, col_e6 = st.columns(2)
-                edit_statut = col_e5.selectbox("Statut", LISTE_STATUTS, index=LISTE_STATUTS.index(current_row['statut']) if current_row['statut'] in LISTE_STATUTS else 0, key="ed_statut")
-                edit_notes = col_e6.text_input("Notes libres", value=current_row['notes'], key="ed_notes")
+            edit_input = st.text_area("Brouillon (Input)", value=current_row['input'], height=150, key=f"in_{row_id}")
+            edit_output = st.text_area("Prose (Output)", value=current_row['output'], height=350, key=f"out_{row_id}")
 
-                # 4. SAUVEGARDE
-                if st.button("💾 Enregistrer les modifications de cette fiche", type="primary"):
-                    # On retrouve l'index original dans le vrai DF via l'ID unique
-                    row_id = current_row['id']
-                    
-                    # Mise à jour des valeurs dans le DataFrame principal
-                    df.loc[df['id'] == row_id, ['type', 'forme', 'ton', 'support', 'input', 'output', 'statut', 'notes']] = [
-                        edit_type, edit_forme, edit_ton, edit_support, edit_input, edit_output, edit_statut, edit_notes
-                    ]
-                    
-                    try:
-                        conn.update(data=df)
-                        st.success(f"Fiche {row_id} mise à jour dans Google Sheets !")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Erreur lors de la mise à jour : {e}")
+            col_e5, col_e6 = st.columns([1, 2])
+            edit_statut = col_e5.selectbox("Statut", LISTE_STATUTS, index=idx_statut, key=f"stat_{row_id}")
+            edit_notes = col_e6.text_input("Notes libres", value=current_row['notes'], key=f"note_{row_id}")
+
+            # 5. SAUVEGARDE
+            if st.button("💾 Enregistrer les modifications", type="primary", use_container_width=True):
+                # On met à jour le DF original
+                df.loc[df['id'] == row_id, ['type', 'forme', 'ton', 'support', 'input', 'output', 'statut', 'notes']] = [
+                    edit_type, edit_forme, edit_ton, edit_support, edit_input, edit_output, edit_statut, edit_notes
+                ]
+                conn.update(data=df)
+                st.success(f"Fiche {row_id} mise à jour !")
