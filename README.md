@@ -7,6 +7,7 @@ Ce projet est une interface de curation de données conçue pour créer des data
 * **Frontend :** [Streamlit](https://streamlit.io/) (Déployé sur Streamlit Community Cloud).
 * **Base de données :** [Google Sheets](https://www.google.com/sheets/about/) via l'API Google Sheets.
 * **Connexion :** `st-gsheets-connection` avec authentification par compte de service.
+* **Format d'export :** CSV (brut) et JSONL (Format ChatML avec thinking traces et tokens d'entropie).
 
 ---
 
@@ -89,11 +90,16 @@ streamlit run main.py
 
 ## 📊 Structure du Dataset
 
-Le fichier généré en export contient les colonnes suivantes :
-
 * `id` : Identifiant unique de l'entrée.
 * `type` : Normalisation ou Normalisation & Expansion.
 * `forme` : Narration, Description, Dialogue, etc.
 * `ton` : Lyrique, Mélancolique, Tendu, etc.
 * `input` : La note brute (brouillon).
 * `output` : Le texte stylisé final.
+
+## ✨ Fonctionnalités d'Export
+
+L'application propose deux modes d'export pour les lignes marquées comme **"Fait et validé"** :
+
+* **CSV :** Pour une analyse tabulaire classique. 
+* **JSONL Baguettotron :** Génère automatiquement les balises de raisonnement `<think>` (basées sur la Forme et le Ton) et les marqueurs d'entropie `<H≈0.3>` (Normalisation) ou `<H≈1.5>` (Expansion).
