@@ -3,6 +3,8 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 import uuid
+import json 
+import io   
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Baguettotron Dataset Studio", layout="wide")
@@ -18,6 +20,36 @@ def load_data():
     return data
 
 df = load_data()
+
+# --- FONCTION D'EXPORT BAGUETTOTRON (JSONL) ---
+def convert_to_baguettotron_jsonl(df):
+    jsonl_output = io.StringIO()
+    # On ne prend que ce qui est validé
+    df_valid = df[df['statut'] == "Fait et validé"]
+    
+    for _, row in df_valid.iterrows():
+        # 1. Détermination de l'entropie selon le type
+        h_token = "<H≈0.3>" if row['type'] == "Normalisation" else "<H≈1.5>"
+        
+        # 2. Construction de la trace de pensée (Thinking Trace)
+        # Format: Forme → Ton ※ Mots-clés de l'input ∴ Type
+        short_input = " ".join(row['input'].split()[:5]) + "..." # Extrait court pour la trace
+        trace = f"{row['forme']} → {row['ton']} ※ {short_input} ∴ {row['type']}"
+        
+        # 3. Construction de l'instruction (User)
+        instruction = f"Réécris ce brouillon. Forme : {row['forme']}. Ton : {row['ton']}. Support : {row['support']}."
+        
+        # 4. Formatage ChatML complet
+        prompt = f"<|im_start|>user\n{instruction}\n\nBrouillon : {row['input']}<|im_end|>\n<|im_start|>assistant"
+        response = f"<think>\n{trace}\n</think>\n{h_token} {row['output']}<|im_end|>"
+        
+        # Structure finale JSONL
+        entry = {
+            "text": f"{prompt}{response}"
+        }
+        jsonl_output.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    
+    return jsonl_output.getvalue()
 
 # --- DÉFINITION DES OPTIONS (Listes fermées) ---
 # Mise à jour des types selon ta demande
@@ -36,15 +68,20 @@ with st.sidebar:
     st.divider()
     st.subheader("🚀 Export Fine-tuning")
     if not df.empty:
-        df_export = df[df['statut'] == "Fait et validé"]
-        csv = df_export.to_csv(index=False).encode('utf-8')
+        # Export CSV (Standard)
+        csv = df[df['statut'] == "Fait et validé"].to_csv(index=False).encode('utf-8')
+        st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv")
+        
+        # Export JSONL (Spécifique Baguettotron)
+        jsonl_data = convert_to_baguettotron_jsonl(df)
         st.download_button(
-            label="Télécharger le Dataset Validé",
-            data=csv,
-            file_name=f"dataset_baguettotron_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
+            label="✨ Télécharger JSONL Baguettotron",
+            data=jsonl_data,
+            file_name=f"baguettotron_train_{datetime.now().strftime('%Y%m%d')}.jsonl",
+            mime="application/jsonl"
         )
-    st.info("L'export ne contient que les lignes 'Fait et validé'.")
+    
+    st.info("Le format JSONL inclut les balises <think> et <H≈X.X> de PleIAs. L'export ne contient que les lignes 'Fait et validé'.")
 
 # --- INTERFACE PRINCIPALE ---
 st.title("✒️ Baguettotron Style Manager")
