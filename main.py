@@ -11,13 +11,17 @@ st.set_page_config(page_title="Baguettotron Dataset Studio", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    # On force le rafraîchissement pour éviter le cache lors des éditions bi-directionnelles
-    return conn.read(ttl="0")
+    # On force le rafraîchissement (ttl=0)
+    data = conn.read(ttl="0")
+    # NETTOYAGE CRUCIAL : On force tout en texte pour éviter l'erreur FLOAT sur les colonnes vides
+    data = data.astype(str).replace(['nan', 'None', '<NA>'], '')
+    return data
 
 df = load_data()
 
-# --- DEFINITION DES OPTIONS (Listes fermées) ---
-LISTE_TYPES = ["Normalisation", "Expansion & Suite"]
+# --- DÉFINITION DES OPTIONS (Listes fermées) ---
+# Mise à jour des types selon ta demande
+LISTE_TYPES = ["Normalisation", "Normalisation & Expansion"]
 LISTE_FORMES = ["Narration", "Description", "Portrait", "Dialogue", "Monologue intérieur", "Réflexion", "Scène"]
 LISTE_TONS = ["Neutre", "Lyrique", "Mélancolique", "Tendu", "Sardonique", "Chaleureux", "Clinique"]
 LISTE_SUPPORTS = ["Narratif", "Épistolaire", "Instantané", "Formel", "Journal intime"]
@@ -32,20 +36,18 @@ with st.sidebar:
     st.divider()
     st.subheader("🚀 Export Fine-tuning")
     if not df.empty:
-        # On n'exporte que ce qui est validé
         df_export = df[df['statut'] == "Fait et validé"]
         csv = df_export.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Télécharger JSONL/CSV Prêt",
+            label="Télécharger le Dataset Validé",
             data=csv,
             file_name=f"dataset_baguettotron_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
         )
-    st.info("L'export ne contient que les lignes marquées 'Fait et validé'.")
+    st.info("L'export ne contient que les lignes 'Fait et validé'.")
 
 # --- INTERFACE PRINCIPALE ---
 st.title("✒️ Baguettotron Style Manager")
-st.markdown("Structurez votre dataset de style pour PleIAs.")
 
 tab1, tab2 = st.tabs(["➕ Nouvelle Entrée", "📂 Gestion & Édition"])
 
@@ -55,7 +57,7 @@ with tab1:
         st.subheader("Paramètres de Style")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            val_type = st.selectbox("Type", LISTE_TYPES)
+            val_type = st.selectbox("Type", LISTE_TYPES, help="Normalisation = Transcription simple | Expansion = Développement ou suite")
         with c2:
             val_forme = st.selectbox("Forme", LISTE_FORMES)
         with c3:
@@ -65,8 +67,8 @@ with tab1:
         
         st.divider()
         st.subheader("Contenu Littéraire")
-        val_input = st.text_area("Brouillon Synthétique (Input)", placeholder="jhon arrive chateu, triste...")
-        val_output = st.text_area("Prose Développée (Output)", placeholder="John poussa les lourdes portes...")
+        val_input = st.text_area("Brouillon Synthétique (Input)", placeholder="Note brute avec fautes...")
+        val_output = st.text_area("Prose Développée (Output)", placeholder="Texte final dans votre style...")
         
         st.divider()
         c5, c6 = st.columns(2)
@@ -79,7 +81,6 @@ with tab1:
 
         if submit:
             if val_input and val_output:
-                # Création de la nouvelle ligne
                 new_row = pd.DataFrame([{
                     "id": str(uuid.uuid4())[:8],
                     "date": datetime.now().strftime("%d/%m/%Y"),
@@ -92,11 +93,9 @@ with tab1:
                     "statut": val_statut,
                     "notes": val_notes
                 }])
-                
-                # Mise à jour du Google Sheet
                 updated_df = pd.concat([df, new_row], ignore_index=True)
                 conn.update(data=updated_df)
-                st.success("Entrée enregistrée avec succès !")
+                st.success("Entrée enregistrée !")
                 st.rerun()
             else:
                 st.error("L'input et l'output sont obligatoires.")
@@ -104,13 +103,18 @@ with tab1:
 # --- TAB 2 : EDITION BI-DIRECTIONNELLE ---
 with tab2:
     st.subheader("Base de données complète")
-    st.info("Vous pouvez modifier les cellules directement ci-dessous. N'oubliez pas de sauvegarder.")
+    
+    # On s'assure que toutes les colonnes attendues existent pour éviter les erreurs d'affichage
+    expected_cols = ["id", "date", "type", "forme", "ton", "support", "input", "output", "statut", "notes"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = ""
 
-    # Configuration de l'éditeur de données
+    # Configuration de l'éditeur de données corrigée
     edited_df = st.data_editor(
         df,
-        num_rows="dynamic", # Permet de supprimer des lignes
-        use_container_width=True,
+        num_rows="dynamic", 
+        width="stretch", # Correction de l'erreur use_container_width
         column_config={
             "id": st.column_config.TextColumn("ID", disabled=True),
             "date": st.column_config.TextColumn("Date", disabled=True),
@@ -123,12 +127,11 @@ with tab2:
             "output": st.column_config.TextColumn("Output", width="large"),
             "notes": st.column_config.TextColumn("Notes", width="small"),
         },
-        hide_index=True,
     )
 
-    if st.button("💾 Sauvegarder les modifications vers Google Sheets"):
+    if st.button("💾 Sauvegarder les modifications"):
         try:
             conn.update(data=edited_df)
             st.success("Google Sheet mis à jour !")
         except Exception as e:
-            st.error(f"Erreur lors de la mise à jour : {e}")
+            st.error(f"Erreur de sauvegarde : {e}")
