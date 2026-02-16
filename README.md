@@ -55,6 +55,8 @@ spreadsheet = "URL_DE_VOTRE_GOOGLE_SHEET"
 2. `App Settings` > `Secrets`.
 3. Copiez-collez le contenu du fichier `secrets.toml` ci-dessus.
 
+**Important (spaCy / blis) :** L’app utilise spaCy et le modèle français. Si le déploiement échoue avec une erreur du type `Failed building wheel for blis`, c’est souvent dû à Python 3.13. **Lors du déploiement**, dans **Advanced settings**, choisissez **Python 3.12** (le fichier `runtime.txt` à la racine demande déjà 3.12 ; si la plateforme l’ignore, sélectionnez 3.12 manuellement). Puis redéployez (ou créez une nouvelle app avec le même dépôt et Python 3.12).
+
 ---
 
 ## 🛡️ Contrôle d'accès (Emails spécifiques)
