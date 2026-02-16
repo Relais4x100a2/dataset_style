@@ -31,14 +31,17 @@ df = load_data()
 @st.cache_resource
 def load_nlp():
     """
-    Charge le modèle spaCy français une seule fois. Retourne None si absent.
-    Sur Streamlit Cloud, le modèle doit être déclaré dans requirements.txt (wheel).
+    Charge le modèle spaCy français une seule fois. Retourne None si absent ou
+    en cas d'erreur (ex. incompatibilité binaire numpy/thinc sur Cloud).
     """
     try:
         import spacy
         return spacy.load("fr_core_news_sm")
     except OSError as e:
         logger.warning("Modèle spaCy fr_core_news_sm non trouvé: %s", e)
+        return None
+    except (ValueError, ImportError, Exception) as e:
+        logger.warning("spaCy non disponible (numpy/thinc ou autre): %s", e)
         return None
 
 
