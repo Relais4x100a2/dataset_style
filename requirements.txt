@@ -1,7 +1,7 @@
+numpy>=2.0.0,<3
+pandas>=2.2.2
 streamlit
 st-gsheets-connection
-pandas
-numpy>=2,<3
 spacy
 # Modèle français : en local si besoin : python -m spacy download fr_core_news_sm
 https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.7.0/fr_core_news_sm-3.7.0-py3-none-any.whl
