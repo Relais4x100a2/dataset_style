@@ -1,5 +1,5 @@
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
@@ -30,7 +30,10 @@ df = load_data()
 # --- MODÈLE NLP (spaCy) ---
 @st.cache_resource
 def load_nlp():
-    """Charge le modèle spaCy français une seule fois. Retourne None si absent."""
+    """
+    Charge le modèle spaCy français une seule fois. Retourne None si absent.
+    Sur Streamlit Cloud, le modèle doit être déclaré dans requirements.txt (wheel).
+    """
     try:
         import spacy
         return spacy.load("fr_core_news_sm")
@@ -64,10 +67,12 @@ def get_linguistic_insights(
     lemmes_out = {t.lemma_.lower() for t in doc_out if not t.is_punct}
     richesse = len(lemmes_out) / max(1, len_out)
 
-    # TTR (Type-Token Ratio) et mots répétés
+    # TTR (Type-Token Ratio) et mots répétés (hors stop words : mots porteurs de sens)
     types_out = len(lemmes_out)
     ttr = types_out / max(1, len_out)
-    comptage = Counter(t.lemma_.lower() for t in doc_out if not t.is_punct)
+    comptage = Counter(
+        t.lemma_.lower() for t in doc_out if not t.is_punct and not t.is_stop
+    )
     mots_repetes = [lem for lem, n in comptage.items() if n >= seuil_repetition]
 
     # Longueur moyenne des phrases (en mots)
@@ -87,21 +92,70 @@ def get_linguistic_insights(
     }
 
 
+@st.cache_data(ttl=300)
+def compute_audit_global(data_json: str) -> list[dict]:
+    """
+    Calcule l'audit global sur les lignes validées. Mis en cache par contenu
+    (recalcul uniquement si les données changent). TTL 5 min pour limiter la mémoire.
+    """
+    nlp = load_nlp()
+    if nlp is None:
+        return []
+    df_audit = pd.read_json(data_json)
+    rows_audit = []
+    for _, row in df_audit.iterrows():
+        ins = get_linguistic_insights(
+            row.get("input", ""), row.get("output", ""), nlp
+        )
+        if ins is None:
+            continue
+        alertes = []
+        if "Expansion" in str(row.get("type", "")) and ins["ratio"] < 2:
+            alertes.append("Expansion faible")
+        if ins["perdues"]:
+            alertes.append("Entités perdues")
+        if ins["ttr"] < 0.5 and ins["mots_out"] > 20:
+            alertes.append("Répétitions")
+        rows_audit.append({
+            "id": row.get("id", ""),
+            "type": row.get("type", ""),
+            "ratio": round(ins["ratio"], 1),
+            "richesse": f"{ins['richesse']:.0%}",
+            "entités perdues": "oui" if ins["perdues"] else "non",
+            "moy. mots/phrase": round(ins["long_moy_phrases"], 0),
+            "TTR": round(ins["ttr"], 2),
+            "alertes": " ; ".join(alertes) if alertes else "—",
+        })
+    return rows_audit
+
+
 # --- FONCTION D'EXPORT BAGUETTOTRON (JSONL) ---
-def convert_to_baguettotron_jsonl(df):
+LABELS_NER_FR = {"LOC": "Lieux", "PER": "Personnes", "ORG": "Organisations", "MISC": "Autres", "GPE": "Lieux"}
+
+
+def _trace_avec_ner(input_text: str, forme: str, ton: str, type_row: str, nlp) -> str:
+    """Construit une trace de pensée enrichie avec les entités NER du brouillon."""
+    if not input_text or nlp is None:
+        return f"{forme} → {ton} ※ {' '.join(input_text.split()[:5])}... ∴ {type_row}"
+    doc = nlp(input_text)
+    entites_par_label: dict[str, set[str]] = defaultdict(set)
+    for ent in doc.ents:
+        label_fr = LABELS_NER_FR.get(ent.label_, ent.label_)
+        entites_par_label[label_fr].add(ent.text)
+    if not entites_par_label:
+        return f"{forme} → {ton} ※ {' '.join(input_text.split()[:5])}... ∴ {type_row}"
+    parties = [f"{label}: [{', '.join(sorted(ents))}]" for label, ents in sorted(entites_par_label.items())]
+    return f"{forme} → {ton} ※ {' '.join(parties)} ∴ {type_row}"
+
+
+def convert_to_baguettotron_jsonl(df: pd.DataFrame, nlp=None):
     jsonl_output = io.StringIO()
-    # On ne prend que ce qui est validé
     df_valid = df[df['statut'] == "Fait et validé"]
-    
     for _, row in df_valid.iterrows():
-        # 1. Détermination de l'entropie selon le type
         h_token = "<H≈0.3>" if row['type'] == "Normalisation" else "<H≈1.5>"
-        
-        # 2. Construction de la trace de pensée (Thinking Trace)
-        # Format: Forme → Ton ※ Mots-clés de l'input ∴ Type
-        short_input = " ".join(row['input'].split()[:5]) + "..." # Extrait court pour la trace
-        trace = f"{row['forme']} → {row['ton']} ※ {short_input} ∴ {row['type']}"
-        
+        trace = _trace_avec_ner(
+            row.get("input", ""), row["forme"], row["ton"], row["type"], nlp
+        )
         # 3. Construction de l'instruction (User)
         instruction = f"Réécris ce brouillon. Forme : {row['forme']}. Ton : {row['ton']}. Support : {row['support']}."
         
@@ -137,9 +191,9 @@ with st.sidebar:
         # Export CSV (Standard)
         csv = df[df['statut'] == "Fait et validé"].to_csv(index=False).encode('utf-8')
         st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv")
-        
-        # Export JSONL (Spécifique Baguettotron)
-        jsonl_data = convert_to_baguettotron_jsonl(df)
+        # Export JSONL (trace enrichie NER si spaCy disponible)
+        nlp_export = load_nlp()
+        jsonl_data = convert_to_baguettotron_jsonl(df, nlp_export)
         st.download_button(
             label="✨ Télécharger JSONL Baguettotron",
             data=jsonl_data,
@@ -210,34 +264,12 @@ with tab2:
     else:
         nlp = load_nlp()
 
-        # --- AUDIT GLOBAL (Fait et validé) ---
+        # --- AUDIT GLOBAL (Fait et validé), mis en cache ---
         df_valid = df[df["statut"] == "Fait et validé"]
         if not df_valid.empty and nlp is not None:
             with st.expander("📋 Résumé audit dataset (Fait et validé)", expanded=False):
-                rows_audit = []
-                for _, row in df_valid.iterrows():
-                    ins = get_linguistic_insights(
-                        row.get("input", ""), row.get("output", ""), nlp
-                    )
-                    if ins is None:
-                        continue
-                    alertes = []
-                    if "Expansion" in str(row.get("type", "")) and ins["ratio"] < 2:
-                        alertes.append("Expansion faible")
-                    if ins["perdues"]:
-                        alertes.append("Entités perdues")
-                    if ins["ttr"] < 0.5 and ins["mots_out"] > 20:
-                        alertes.append("Répétitions")
-                    rows_audit.append({
-                        "id": row.get("id", ""),
-                        "type": row.get("type", ""),
-                        "ratio": round(ins["ratio"], 1),
-                        "richesse": f"{ins['richesse']:.0%}",
-                        "entités perdues": "oui" if ins["perdues"] else "non",
-                        "moy. mots/phrase": round(ins["long_moy_phrases"], 0),
-                        "TTR": round(ins["ttr"], 2),
-                        "alertes": " ; ".join(alertes) if alertes else "—",
-                    })
+                data_key = df_valid[["id", "input", "output", "type"]].to_json()
+                rows_audit = compute_audit_global(data_key)
                 if rows_audit:
                     st.dataframe(pd.DataFrame(rows_audit), use_container_width=True)
                 else:
