@@ -41,7 +41,8 @@ def load_nlp():
         logger.warning("Modèle spaCy fr_core_news_sm non trouvé: %s", e)
         return None
     except (ValueError, ImportError, Exception) as e:
-        logger.warning("spaCy non disponible (numpy/thinc ou autre): %s", e)
+        logger.warning("spaCy non disponible sur cet environnement.")
+        logger.debug("Détail: %s", e)
         return None
 
 
@@ -279,8 +280,8 @@ with tab2:
                     st.info("Aucune fiche analysable (input/output vides).")
         elif not df_valid.empty and nlp is None:
             st.warning(
-                "Modèle spaCy manquant : exécutez `python -m spacy download fr_core_news_sm` "
-                "pour activer l’audit linguistique."
+                "Fonctions linguistiques (spaCy) non disponibles sur cet environnement. "
+                "L'audit et l'export JSONL utilisent la version sans NER."
             )
 
         # 1. FILTRAGE
@@ -352,7 +353,7 @@ with tab2:
             with st.expander("🔍 Diagnostics Linguistiques (spaCy)", expanded=True):
                 if nlp is None:
                     st.warning(
-                        "Modèle spaCy manquant. Exécutez : `python -m spacy download fr_core_news_sm`"
+                        "Fonctions linguistiques (spaCy) non disponibles. Export et diagnostics utilisent la version simple."
                     )
                 else:
                     stats = get_linguistic_insights(edit_input, edit_output, nlp)

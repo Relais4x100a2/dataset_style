@@ -55,7 +55,7 @@ spreadsheet = "URL_DE_VOTRE_GOOGLE_SHEET"
 2. `App Settings` > `Secrets`.
 3. Copiez-collez le contenu du fichier `secrets.toml` ci-dessus.
 
-**Important (spaCy / blis) :** L’app utilise spaCy et le modèle français. Si le déploiement échoue avec une erreur du type `Failed building wheel for blis`, c’est souvent dû à Python 3.13. **Lors du déploiement**, dans **Advanced settings**, choisissez **Python 3.12** (le fichier `runtime.txt` à la racine demande déjà 3.12 ; si la plateforme l’ignore, sélectionnez 3.12 manuellement). Puis redéployez (ou créez une nouvelle app avec le même dépôt et Python 3.12).
+**Important (spaCy) :** L’app utilise **spaCy 3.8** et le modèle **fr_core_news_sm 3.8** avec **NumPy 2.0.x** pour éviter l’erreur « numpy.dtype size changed » sur Streamlit Cloud. Si l’app affiche « Fonctions linguistiques (spaCy) non disponibles » après déploiement : dans les paramètres de l’app, faites **Reboot** ou **Clear cache and redeploy** pour forcer une réinstallation des dépendances. Choisir **Python 3.12** dans Advanced settings au déploiement reste recommandé (évite les soucis avec blis sous 3.13).
 
 ---
 
