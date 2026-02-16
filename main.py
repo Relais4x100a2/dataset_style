@@ -1,10 +1,15 @@
+import logging
+from collections import Counter
+
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 import uuid
-import json 
-import io   
+import json
+import io
+
+logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Baguettotron Dataset Studio", layout="wide")
@@ -20,6 +25,67 @@ def load_data():
     return data
 
 df = load_data()
+
+
+# --- MODÈLE NLP (spaCy) ---
+@st.cache_resource
+def load_nlp():
+    """Charge le modèle spaCy français une seule fois. Retourne None si absent."""
+    try:
+        import spacy
+        return spacy.load("fr_core_news_sm")
+    except OSError as e:
+        logger.warning("Modèle spaCy fr_core_news_sm non trouvé: %s", e)
+        return None
+
+
+def get_linguistic_insights(
+    text_in: str, text_out: str, nlp, seuil_repetition: int = 3
+) -> dict | None:
+    """
+    Analyse linguistique input/output : ratio d'expansion, entités perdues,
+    richesse lexicale, TTR, mots répétés, longueur moyenne des phrases.
+    Retourne None si nlp est None ou textes vides.
+    """
+    if nlp is None or not (text_in and text_out):
+        return None
+    doc_in = nlp(text_in)
+    doc_out = nlp(text_out)
+    tokens_in = [t for t in doc_in if not t.is_punct]
+    tokens_out = [t for t in doc_out if not t.is_punct]
+    len_in = len(tokens_in)
+    len_out = len(tokens_out)
+    ratio = len_out / max(1, len_in)
+
+    ents_in = {ent.text.lower() for ent in doc_in.ents}
+    ents_out = {ent.text.lower() for ent in doc_out.ents}
+    perdues = ents_in - ents_out
+
+    lemmes_out = {t.lemma_.lower() for t in doc_out if not t.is_punct}
+    richesse = len(lemmes_out) / max(1, len_out)
+
+    # TTR (Type-Token Ratio) et mots répétés
+    types_out = len(lemmes_out)
+    ttr = types_out / max(1, len_out)
+    comptage = Counter(t.lemma_.lower() for t in doc_out if not t.is_punct)
+    mots_repetes = [lem for lem, n in comptage.items() if n >= seuil_repetition]
+
+    # Longueur moyenne des phrases (en mots)
+    sents = list(doc_out.sents)
+    long_phrases = [len([t for t in s if not t.is_punct]) for s in sents]
+    long_moy_phrases = sum(long_phrases) / max(1, len(long_phrases))
+
+    return {
+        "ratio": ratio,
+        "perdues": perdues,
+        "richesse": richesse,
+        "mots_in": len_in,
+        "mots_out": len_out,
+        "ttr": ttr,
+        "mots_repetes": mots_repetes,
+        "long_moy_phrases": long_moy_phrases,
+    }
+
 
 # --- FONCTION D'EXPORT BAGUETTOTRON (JSONL) ---
 def convert_to_baguettotron_jsonl(df):
@@ -142,6 +208,46 @@ with tab2:
     if df.empty:
         st.warning("Le dataset est vide.")
     else:
+        nlp = load_nlp()
+
+        # --- AUDIT GLOBAL (Fait et validé) ---
+        df_valid = df[df["statut"] == "Fait et validé"]
+        if not df_valid.empty and nlp is not None:
+            with st.expander("📋 Résumé audit dataset (Fait et validé)", expanded=False):
+                rows_audit = []
+                for _, row in df_valid.iterrows():
+                    ins = get_linguistic_insights(
+                        row.get("input", ""), row.get("output", ""), nlp
+                    )
+                    if ins is None:
+                        continue
+                    alertes = []
+                    if "Expansion" in str(row.get("type", "")) and ins["ratio"] < 2:
+                        alertes.append("Expansion faible")
+                    if ins["perdues"]:
+                        alertes.append("Entités perdues")
+                    if ins["ttr"] < 0.5 and ins["mots_out"] > 20:
+                        alertes.append("Répétitions")
+                    rows_audit.append({
+                        "id": row.get("id", ""),
+                        "type": row.get("type", ""),
+                        "ratio": round(ins["ratio"], 1),
+                        "richesse": f"{ins['richesse']:.0%}",
+                        "entités perdues": "oui" if ins["perdues"] else "non",
+                        "moy. mots/phrase": round(ins["long_moy_phrases"], 0),
+                        "TTR": round(ins["ttr"], 2),
+                        "alertes": " ; ".join(alertes) if alertes else "—",
+                    })
+                if rows_audit:
+                    st.dataframe(pd.DataFrame(rows_audit), use_container_width=True)
+                else:
+                    st.info("Aucune fiche analysable (input/output vides).")
+        elif not df_valid.empty and nlp is None:
+            st.warning(
+                "Modèle spaCy manquant : exécutez `python -m spacy download fr_core_news_sm` "
+                "pour activer l’audit linguistique."
+            )
+
         # 1. FILTRAGE
         st.subheader("🔍 Filtrer les fiches")
         filtre_statut = st.multiselect(
@@ -191,7 +297,7 @@ with tab2:
                 idx_ton = LISTE_TONS.index(current_row['ton'])
                 idx_supp = LISTE_SUPPORTS.index(current_row['support'])
                 idx_statut = LISTE_STATUTS.index(current_row['statut'])
-            except:
+            except (ValueError, KeyError):
                 idx_type = idx_forme = idx_ton = idx_supp = idx_statut = 0
 
             edit_type = col_e1.selectbox("Type", LISTE_TYPES, index=idx_type, key=f"type_{row_id}")
@@ -205,6 +311,40 @@ with tab2:
             col_e5, col_e6 = st.columns([1, 2])
             edit_statut = col_e5.selectbox("Statut", LISTE_STATUTS, index=idx_statut, key=f"stat_{row_id}")
             edit_notes = col_e6.text_input("Notes libres", value=current_row['notes'], key=f"note_{row_id}")
+
+            # --- PANNEAU DIAGNOSTICS LINGUISTIQUES ---
+            st.divider()
+            with st.expander("🔍 Diagnostics Linguistiques (spaCy)", expanded=True):
+                if nlp is None:
+                    st.warning(
+                        "Modèle spaCy manquant. Exécutez : `python -m spacy download fr_core_news_sm`"
+                    )
+                else:
+                    stats = get_linguistic_insights(edit_input, edit_output, nlp)
+                    if stats:
+                        c_st1, c_st2, c_st3 = st.columns(3)
+                        with c_st1:
+                            st.metric("Ratio d'expansion", f"x{stats['ratio']:.1f}")
+                            st.caption(f"Brouillon : {stats['mots_in']} mots | Prose : {stats['mots_out']} mots")
+                        with c_st2:
+                            if stats["perdues"]:
+                                st.error(f"⚠️ Oubli potentiel : {', '.join(stats['perdues'])}")
+                            else:
+                                st.success("✅ Entités préservées")
+                        with c_st3:
+                            st.metric("Diversité lexicale", f"{stats['richesse']:.0%}")
+                            st.metric("Moy. mots/phrase", f"{stats['long_moy_phrases']:.0f}")
+
+                        if stats["mots_repetes"]:
+                            st.caption(f"Répétitions (≥3×) : {', '.join(stats['mots_repetes'][:10])}{'…' if len(stats['mots_repetes']) > 10 else ''}")
+                        st.caption(f"TTR (types/tokens) : {stats['ttr']:.2f}")
+
+                        if edit_type == "Normalisation & Expansion" and stats["ratio"] < 2:
+                            st.warning(
+                                "💡 Conseil : pour une « Expansion », essayez de développer davantage."
+                            )
+                    else:
+                        st.info("Remplissez l’Input et l’Output pour voir l’analyse.")
 
             # 5. SAUVEGARDE
             if st.button("💾 Enregistrer les modifications", type="primary", use_container_width=True):
