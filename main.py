@@ -367,9 +367,16 @@ with tab2:
             st.divider()
             with st.expander("🔍 Diagnostics Linguistiques (spaCy)", expanded=True):
                 if nlp is None:
-                    st.warning(
-                        "Fonctions linguistiques (spaCy) non disponibles. Export et diagnostics utilisent la version simple."
-                    )
+                    if st.session_state.spacy_activated:
+                        st.warning(
+                            "Le modèle spaCy n'a pas pu se charger (environnement ou dépendances). "
+                            "L'export et l'édition fonctionnent normalement."
+                        )
+                    else:
+                        st.info(
+                            "Cochez « Activer les diagnostics linguistiques (spaCy) » en haut de l'onglet "
+                            "pour afficher les métriques et le radar."
+                        )
                 else:
                     stats = get_linguistic_insights(edit_input, edit_output, nlp)
                     if stats:
