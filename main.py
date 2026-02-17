@@ -91,6 +91,35 @@ def get_linguistic_insights(
     }
 
 
+def _interpretation_palier(indicateur: str, value: float) -> str:
+    """Retourne l'interprétation du palier correspondant à la valeur."""
+    if indicateur == "ratio":
+        if value < 1.3:
+            return "Tu restes proche du brouillon."
+        if value < 2.0:
+            return "Tu développes."
+        if value < 2.5:
+            return "Tu as bien développé l'idée."
+        return "Tu déploies beaucoup."
+    if indicateur == "ttr":
+        if value < 0.50:
+            return "Vocabulaire répétitif."
+        if value < 0.65:
+            return "Vocabulaire correct."
+        if value < 0.80:
+            return "Vocabulaire soutenu."
+        return "Vocabulaire très riche."
+    if indicateur == "moy_phrases":
+        if value < 10:
+            return "Rythme vif, phrases courtes."
+        if value < 18:
+            return "Rythme équilibré."
+        if value < 25:
+            return "Rythme ample."
+        return "Phrases très longues."
+    return ""
+
+
 def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
     """
     Signature stylométrique (ADN stylistique) : ratios POS, ponctuation,
@@ -393,26 +422,13 @@ with tab2:
                         if stats["mots_repetes"]:
                             st.caption(f"Répétitions (≥3×) : {', '.join(stats['mots_repetes'][:10])}{'…' if len(stats['mots_repetes']) > 10 else ''}")
 
-                        # Légendes Info spaCy (paliers gradués)
-                        st.markdown("**Info spaCy — Paliers par indicateur**")
-                        st.markdown(
-                            "| Indicateur | Palier | Interprétation |\n"
-                            "|------------|--------|----------------|\n"
-                            "| **Ratio** | x1.0 – x1.3 | Tu restes proche du brouillon. |\n"
-                            "| | x1.3 – x2.0 | Tu développes. |\n"
-                            "| | x2.0 – x2.5 | Tu as bien développé l'idée. |\n"
-                            "| | > x2.5 | Tu déploies beaucoup. |\n"
-                            "| **TTR** | < 0.50 | Vocabulaire répétitif. |\n"
-                            "| | 0.50 – 0.65 | Vocabulaire correct. |\n"
-                            "| | 0.65 – 0.80 | Vocabulaire soutenu. |\n"
-                            "| | > 0.80 | Vocabulaire très riche. |\n"
-                            "| **Moy. mots/phrase** | < 10 | Rythme vif, phrases courtes. |\n"
-                            "| | 10 – 18 | Rythme équilibré. |\n"
-                            "| | 18 – 25 | Rythme ample. |\n"
-                            "| | > 25 | Phrases très longues. |"
-                        )
+                        # Légende : uniquement le palier correspondant à chaque indicateur
+                        st.markdown("**Info spaCy**")
+                        st.caption(f"**Ratio x{stats['ratio']:.1f}** — {_interpretation_palier('ratio', stats['ratio'])}")
+                        st.caption(f"**TTR {stats['ttr']:.2f}** — {_interpretation_palier('ttr', stats['ttr'])}")
+                        st.caption(f"**Moy. {stats['long_moy_phrases']:.0f} mots/phrase** — {_interpretation_palier('moy_phrases', stats['long_moy_phrases'])}")
 
-                        # Radar de cohérence stylométrique
+                        # Radar de cohérence stylométrique (normalisation 0–1 pour rendre tous les axes visibles)
                         sig_fiche = get_stylometric_signature(edit_output, nlp)
                         if not df_valid.empty:
                             data_key = df_valid[["id", "input", "output", "type"]].to_json()
@@ -421,9 +437,22 @@ with tab2:
                             sig_dataset = None
                         if sig_fiche and sig_dataset:
                             categories = list(sig_fiche.keys())
+                            v_fiche = [sig_fiche[k] for k in categories]
+                            v_dataset = [sig_dataset[k] for k in categories]
+                            # Normaliser chaque dimension dans [0, 1] pour que le radar soit lisible (ratios ~0.1 vs longueur ~5)
+                            r_fiche_norm, r_dataset_norm = [], []
+                            for i, k in enumerate(categories):
+                                mn = min(v_fiche[i], v_dataset[i])
+                                mx = max(v_fiche[i], v_dataset[i])
+                                if mx - mn < 1e-6:
+                                    r_fiche_norm.append(0.5)
+                                    r_dataset_norm.append(0.5)
+                                else:
+                                    r_fiche_norm.append((v_fiche[i] - mn) / (mx - mn))
+                                    r_dataset_norm.append((v_dataset[i] - mn) / (mx - mn))
                             theta = categories + [categories[0]]
-                            r_fiche = [sig_fiche[k] for k in categories] + [sig_fiche[categories[0]]]
-                            r_dataset = [sig_dataset[k] for k in categories] + [sig_dataset[categories[0]]]
+                            r_fiche = r_fiche_norm + [r_fiche_norm[0]]
+                            r_dataset = r_dataset_norm + [r_dataset_norm[0]]
                             fig = go.Figure()
                             fig.add_trace(
                                 go.Scatterpolar(
@@ -435,7 +464,12 @@ with tab2:
                                     r=r_dataset, theta=theta, name="Dataset (moy.)", fill="toself", line=dict(color="rgb(200,80,0)", dash="dash")
                                 )
                             )
-                            fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=True, title="Radar de signature stylistique", height=400)
+                            fig.update_layout(
+                                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                                showlegend=True,
+                                title="Radar de signature stylistique (normalisé par axe)",
+                                height=400,
+                            )
                             st.plotly_chart(fig, use_container_width=True)
                         elif sig_fiche:
                             st.caption("Radar : ajoute des fiches « Fait et validé » pour comparer ta fiche au dataset.")
