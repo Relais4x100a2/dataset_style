@@ -276,7 +276,15 @@ with tab2:
     if df.empty:
         st.warning("Le dataset est vide.")
     else:
-        nlp = load_nlp()
+        # Chargement spaCy à la demande pour éviter timeout/OOM au démarrage (Streamlit Cloud)
+        if "spacy_activated" not in st.session_state:
+            st.session_state.spacy_activated = False
+        st.session_state.spacy_activated = st.checkbox(
+            "Activer les diagnostics linguistiques (spaCy)",
+            value=st.session_state.spacy_activated,
+            help="Charge le modèle français (~50 Mo). À activer uniquement quand vous en avez besoin.",
+        )
+        nlp = load_nlp() if st.session_state.spacy_activated else None
 
         # --- AUDIT GLOBAL (Fait et validé), mis en cache ---
         df_valid = df[df["statut"] == "Fait et validé"]
@@ -289,10 +297,7 @@ with tab2:
                 else:
                     st.info("Aucune fiche analysable (input/output vides).")
         elif not df_valid.empty and nlp is None:
-            st.warning(
-                "Fonctions linguistiques (spaCy) non disponibles sur cet environnement. "
-                "L'audit et l'export JSONL restent disponibles."
-            )
+            st.info("Cochez « Activer les diagnostics linguistiques (spaCy) » ci‑dessus pour afficher l'audit et le radar.")
 
         # 1. FILTRAGE
         st.subheader("🔍 Filtrer les fiches")
