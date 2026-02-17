@@ -93,7 +93,7 @@ streamlit run main.py
 ## 📊 Structure du Dataset
 
 * `id` : Identifiant unique de l'entrée.
-* `type` : Normalisation ou Normalisation & Expansion.
+* `type` : Normalisation ou Expansion.
 * `forme` : Narration, Description, Dialogue, etc.
 * `ton` : Lyrique, Mélancolique, Tendu, etc.
 * `input` : La note brute (brouillon).

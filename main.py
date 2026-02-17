@@ -323,7 +323,7 @@ def convert_to_baguettotron_jsonl(df: pd.DataFrame):
 
 # --- DÉFINITION DES OPTIONS (Listes fermées) ---
 # Mise à jour des types selon ta demande
-LISTE_TYPES = ["Normalisation", "Normalisation & Expansion"]
+LISTE_TYPES = ["Normalisation", "Expansion"]
 LISTE_FORMES = ["Narration", "Description", "Portrait", "Dialogue", "Monologue intérieur", "Réflexion", "Scène"]
 LISTE_TONS = ["Neutre", "Lyrique", "Mélancolique", "Tendu", "Sardonique", "Chaleureux", "Clinique"]
 LISTE_SUPPORTS = ["Narratif", "Épistolaire", "Instantané", "Formel", "Journal intime"]
@@ -619,7 +619,7 @@ with tab2:
                         elif sig_fiche:
                             st.caption("Radar : ajoute des fiches « Fait et validé » pour comparer ta fiche au dataset.")
 
-                        if edit_type == "Normalisation & Expansion" and stats["ratio"] < 2:
+                        if edit_type == "Expansion" and stats["ratio"] < 2:
                             st.warning(
                                 "💡 Conseil : pour une « Expansion », essayez de développer davantage."
                             )
