@@ -151,12 +151,14 @@ def _palier_details(indicateur: str, value: float) -> tuple[str, str]:
 
 def _normalize_signature(indicateur: str, value: float) -> float:
     """Normalise la signature stylométrique sur une échelle [0,1] stable par axe."""
-    bornes = {
-        "Nominalité": (0.0, 0.60),
-        "Action (Verbes)": (0.0, 0.40),
-        "Complexité (Adverbes)": (0.0, 0.30),
+    bornes: dict[str, tuple[float, float]] = {
+        "Noms & adjectifs": (0.0, 0.60),
+        "Verbes d'action": (0.0, 0.40),
+        "Nuances (adverbes)": (0.0, 0.30),
         "Ponctuation": (0.0, 0.35),
-        "Longueur moy. mots": (3.0, 10.0),
+        "Longueur des mots": (3.0, 10.0),
+        "Participes vs conjugués": (0.0, 1.0),
+        "Déterminants définis": (0.0, 1.0),
     }
     mn, mx = bornes.get(indicateur, (0.0, 1.0))
     if mx - mn < 1e-6:
@@ -194,41 +196,127 @@ def _compute_coherence_score(
 def _prioritized_actions(
     stats: dict, deltas: dict[str, float], max_actions: int = 3
 ) -> list[str]:
-    """Génère les actions UX les plus utiles à partir des métriques courantes."""
+    """Génère des conseils d'écriture concrets à partir des métriques courantes."""
     actions: list[str] = []
     if stats["ratio"] < 1.3:
-        actions.append("Développe davantage les idées (ratio trop proche du brouillon).")
+        actions.append(
+            "Ta prose reste très proche du brouillon — essaie d'ajouter des "
+            "détails, des images ou des précisions pour enrichir le texte."
+        )
     elif stats["ratio"] > 3.0:
-        actions.append("Condense légèrement certains passages (ratio très élevé).")
+        actions.append(
+            "Tu développes beaucoup — vérifie que chaque ajout apporte du sens, "
+            "sinon élague les passages redondants."
+        )
 
     if stats["ttr"] < 0.50:
-        actions.append("Varie le vocabulaire (TTR bas).")
+        actions.append(
+            "Plusieurs mots reviennent souvent — cherche des synonymes ou "
+            "reformule pour diversifier le vocabulaire."
+        )
     elif stats["ttr"] > 0.85:
-        actions.append("Stabilise le registre lexical (TTR très élevé).")
+        actions.append(
+            "Le vocabulaire est très varié — assure-toi que le registre reste "
+            "cohérent d'une fiche à l'autre."
+        )
 
     if stats["long_moy_phrases"] < 10:
-        actions.append("Allonge quelques phrases pour un rythme moins haché.")
+        actions.append(
+            "Tes phrases sont courtes — essaie d'en relier certaines pour "
+            "obtenir un rythme plus fluide."
+        )
     elif stats["long_moy_phrases"] > 25:
-        actions.append("Raccourcis certaines phrases pour améliorer la lisibilité.")
+        actions.append(
+            "Tes phrases sont longues — découpe-en quelques-unes pour "
+            "faciliter la lecture."
+        )
 
     if stats["mots_repetes"]:
-        sample = ", ".join(stats["mots_repetes"][:3])
-        actions.append(f"Réduis les répétitions fréquentes (ex: {sample}).")
+        sample = ", ".join(f"« {m} »" for m in stats["mots_repetes"][:3])
+        actions.append(
+            f"Les mots {sample} reviennent souvent — remplace-en "
+            "certains par des synonymes."
+        )
 
     top_deltas = sorted(deltas.items(), key=lambda x: x[1], reverse=True)[:2]
     for axis, delta in top_deltas:
         if delta > 0.35:
-            actions.append(f"Rapproche ta fiche de la moyenne dataset sur l'axe « {axis} ».")
+            actions.append(
+                f"Ta fiche s'écarte de la moyenne du dataset sur « {axis} » — "
+                "rapproche-toi du style général pour garder la cohérence."
+            )
 
-    # Déduplication en conservant l'ordre
     dedup = list(dict.fromkeys(actions))
     return dedup[:max_actions]
 
 
-def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
+_POS_FR: dict[str, str] = {
+    "ADJ": "Adj",
+    "ADP": "Prép",
+    "ADV": "Adv",
+    "AUX": "Aux",
+    "CCONJ": "Conj",
+    "DET": "Dét",
+    "INTJ": "Intj",
+    "NOUN": "Nom",
+    "NUM": "Num",
+    "PART": "Part",
+    "PRON": "Pron",
+    "PROPN": "NomPr",
+    "PUNCT": "Ponct",
+    "SCONJ": "SubConj",
+    "SYM": "Sym",
+    "VERB": "Verbe",
+    "X": "Autre",
+}
+
+
+def _translate_trigram(trigram: str) -> str:
+    """Traduit un trigramme POS (ex. 'DET-NOUN-VERB') en français lisible."""
+    return " · ".join(_POS_FR.get(tag, tag) for tag in trigram.split("-"))
+
+
+def get_pos_trigrams(text: str, nlp) -> Counter | None:
+    """Extrait les trigrammes POS d'un texte.
+
+    Args:
+        text: Texte à analyser.
+        nlp: Pipeline spaCy chargé.
+
+    Returns:
+        Counter des trigrammes (ex. "DET-NOUN-VERB") ou None.
     """
-    Signature stylométrique (ADN stylistique) : ratios POS, ponctuation,
-    longueur moyenne des mots. Retourne None si nlp absent ou texte vide.
+    if nlp is None or not text:
+        return None
+    doc = nlp(text)
+    tags = [t.pos_ for t in doc if not t.is_space]
+    if len(tags) < 3:
+        return None
+    trigrams = [f"{tags[i]}-{tags[i + 1]}-{tags[i + 2]}" for i in range(len(tags) - 2)]
+    return Counter(trigrams)
+
+
+@st.cache_data(ttl=300)
+def compute_avg_pos_trigrams(data_json: str) -> Counter | None:
+    """Distribution agrégée des trigrammes POS sur les outputs validés."""
+    nlp = load_nlp()
+    if nlp is None:
+        return None
+    df_audit = pd.read_json(io.StringIO(data_json))
+    total: Counter = Counter()
+    for _, row in df_audit.iterrows():
+        tri = get_pos_trigrams(str(row.get("output", "")), nlp)
+        if tri:
+            total += tri
+    return total if total else None
+
+
+def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
+    """Signature stylométrique (ADN stylistique).
+
+    Ratios POS, ponctuation, longueur moyenne des mots, ratio participes /
+    formes verbales, ratio déterminants définis / total déterminants.
+    Retourne None si nlp absent ou texte vide.
     """
     if nlp is None or not text:
         return None
@@ -237,12 +325,27 @@ def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
     nb_tokens = max(1, len(tokens))
     counts = Counter(t.pos_ for t in doc)
     nb_punct = len([t for t in doc if t.is_punct])
+
+    # Participes vs formes conjuguées (finies)
+    verbs = [t for t in doc if t.pos_ in ("VERB", "AUX")]
+    participes = sum(1 for t in verbs if "Part" in t.morph.get("VerbForm", []))
+    conjugues = sum(1 for t in verbs if "Fin" in t.morph.get("VerbForm", []))
+    ratio_part = participes / max(1, participes + conjugues)
+
+    # Déterminants définis vs indéfinis
+    dets = [t for t in doc if t.pos_ == "DET"]
+    dets_def = sum(1 for t in dets if "Def" in t.morph.get("Definite", []))
+    dets_indef = sum(1 for t in dets if "Ind" in t.morph.get("Definite", []))
+    ratio_def = dets_def / max(1, dets_def + dets_indef)
+
     return {
-        "Nominalité": (counts.get("NOUN", 0) + counts.get("ADJ", 0)) / nb_tokens,
-        "Action (Verbes)": counts.get("VERB", 0) / nb_tokens,
-        "Complexité (Adverbes)": counts.get("ADV", 0) / nb_tokens,
+        "Noms & adjectifs": (counts.get("NOUN", 0) + counts.get("ADJ", 0)) / nb_tokens,
+        "Verbes d'action": counts.get("VERB", 0) / nb_tokens,
+        "Nuances (adverbes)": counts.get("ADV", 0) / nb_tokens,
         "Ponctuation": nb_punct / nb_tokens,
-        "Longueur moy. mots": sum(len(t.text) for t in tokens) / nb_tokens,
+        "Longueur des mots": sum(len(t.text) for t in tokens) / nb_tokens,
+        "Participes vs conjugués": ratio_part,
+        "Déterminants définis": ratio_def,
     }
 
 
@@ -252,7 +355,7 @@ def compute_avg_stylometric_signature(data_json: str) -> dict[str, float] | None
     nlp = load_nlp()
     if nlp is None:
         return None
-    df_audit = pd.read_json(data_json)
+    df_audit = pd.read_json(io.StringIO(data_json))
     sigs = []
     for _, row in df_audit.iterrows():
         s = get_stylometric_signature(str(row.get("output", "")), nlp)
@@ -273,7 +376,7 @@ def compute_audit_global(data_json: str) -> list[dict]:
     nlp = load_nlp()
     if nlp is None:
         return []
-    df_audit = pd.read_json(data_json)
+    df_audit = pd.read_json(io.StringIO(data_json))
     rows_audit = []
     for _, row in df_audit.iterrows():
         ins = get_linguistic_insights(
@@ -499,132 +602,373 @@ with tab2:
 
             # --- PANNEAU DIAGNOSTICS LINGUISTIQUES ---
             st.divider()
-            with st.expander("🔍 Diagnostics Linguistiques (spaCy)", expanded=True):
+            with st.expander("🔍 Analyse de ta prose", expanded=True):
                 if nlp is None:
                     if st.session_state.spacy_activated:
                         st.warning(
-                            "Le modèle spaCy n'a pas pu se charger (environnement ou dépendances). "
-                            "L'export et l'édition fonctionnent normalement."
+                            "Le modèle d'analyse n'a pas pu se charger "
+                            "(environnement ou dépendances). L'export et "
+                            "l'édition fonctionnent normalement."
                         )
                     else:
                         st.info(
-                            "Cochez « Activer les diagnostics linguistiques (spaCy) » en haut de l'onglet "
-                            "pour afficher les métriques et le radar."
+                            "Cochez « Activer les diagnostics linguistiques » "
+                            "en haut de l'onglet pour voir comment améliorer "
+                            "ta prose."
                         )
                 else:
                     stats = get_linguistic_insights(edit_input, edit_output, nlp)
                     if stats:
+                        # Introduction pédagogique
+                        st.caption(
+                            "Ces indicateurs t'aident à écrire une prose "
+                            "cohérente et à construire un dataset de qualité. "
+                            "L'objectif : que chaque fiche ait un style proche "
+                            "de la moyenne du dataset."
+                        )
+
+                        # ═══════════════════════════════════════
+                        # SECTION 1 — Ton écriture en un coup d'œil
+                        # ═══════════════════════════════════════
+                        st.markdown("#### Ton écriture en un coup d'œil")
                         c_st1, c_st2, c_st3 = st.columns(3)
                         with c_st1:
-                            st.metric("Ratio d'expansion", f"x{stats['ratio']:.1f}")
-                            st.caption(f"Brouillon : {stats['mots_in']} mots | Prose : {stats['mots_out']} mots")
+                            st.metric(
+                                "Amplification",
+                                f"x{stats['ratio']:.1f}",
+                                help=(
+                                    "Combien de fois ta prose est plus longue "
+                                    "que le brouillon. x1 = identique, "
+                                    "x2 = deux fois plus long."
+                                ),
+                            )
+                            st.caption(
+                                f"Brouillon : {stats['mots_in']} mots — "
+                                f"Prose : {stats['mots_out']} mots"
+                            )
                         with c_st2:
-                            st.metric("TTR (diversité)", f"{stats['ttr']:.2f}")
-                            st.caption("Types / Tokens")
+                            st.metric(
+                                "Variété du vocabulaire",
+                                f"{stats['ttr']:.0%}",
+                                help=(
+                                    "Pourcentage de mots différents (lemmes) "
+                                    "dans ta prose. Plus c'est haut, plus ton "
+                                    "vocabulaire est riche."
+                                ),
+                            )
                         with c_st3:
-                            st.metric("Moy. mots/phrase", f"{stats['long_moy_phrases']:.0f}")
-
-                        if stats["mots_repetes"]:
-                            st.caption(f"Répétitions (≥3×) : {', '.join(stats['mots_repetes'][:10])}{'…' if len(stats['mots_repetes']) > 10 else ''}")
-
-                        # Lecture UX ciblée : uniquement le palier courant de chaque indicateur
-                        ratio_lvl, ratio_txt = _palier_details("ratio", stats["ratio"])
-                        ttr_lvl, ttr_txt = _palier_details("ttr", stats["ttr"])
-                        rythme_lvl, rythme_txt = _palier_details("moy_phrases", stats["long_moy_phrases"])
-
-                        st.markdown("#### Lecture instantanée")
-                        f1, f2, f3 = st.columns(3)
-                        with f1:
-                            st.info(f"**Ratio x{stats['ratio']:.1f}**  \nNiveau : **{ratio_lvl}**  \n{ratio_txt}")
-                        with f2:
-                            st.info(f"**TTR {stats['ttr']:.2f}**  \nNiveau : **{ttr_lvl}**  \n{ttr_txt}")
-                        with f3:
-                            st.info(
-                                f"**Moy. {stats['long_moy_phrases']:.0f} mots/phrase**  \n"
-                                f"Niveau : **{rythme_lvl}**  \n{rythme_txt}"
+                            st.metric(
+                                "Longueur des phrases",
+                                f"{stats['long_moy_phrases']:.0f} mots",
+                                help=(
+                                    "Nombre moyen de mots par phrase. "
+                                    "10-18 = rythme équilibré, <10 = vif, "
+                                    ">25 = ample."
+                                ),
                             )
 
-                        # Radar de cohérence stylométrique (normalisation stable par axe)
+                        if stats["mots_repetes"]:
+                            mots_list = ", ".join(
+                                f"**{m}**"
+                                for m in stats["mots_repetes"][:8]
+                            )
+                            suffix = (
+                                "..." if len(stats["mots_repetes"]) > 8 else ""
+                            )
+                            st.warning(
+                                f"Mots qui reviennent souvent (3 fois ou "
+                                f"plus) : {mots_list}{suffix} — pense à "
+                                "varier.",
+                                icon="🔁",
+                            )
+
+                        # Interprétation — un verdict clair par indicateur
+                        ratio_lvl, ratio_txt = _palier_details(
+                            "ratio", stats["ratio"]
+                        )
+                        ttr_lvl, ttr_txt = _palier_details(
+                            "ttr", stats["ttr"]
+                        )
+                        rythme_lvl, rythme_txt = _palier_details(
+                            "moy_phrases", stats["long_moy_phrases"]
+                        )
+
+                        st.markdown("##### Ce que ça veut dire")
+                        f1, f2, f3 = st.columns(3)
+                        with f1:
+                            st.info(
+                                f"**Amplification x{stats['ratio']:.1f}**\n\n"
+                                f"Niveau : **{ratio_lvl}**\n\n{ratio_txt}"
+                            )
+                        with f2:
+                            st.info(
+                                f"**Variété {stats['ttr']:.0%}**\n\n"
+                                f"Niveau : **{ttr_lvl}**\n\n{ttr_txt}"
+                            )
+                        with f3:
+                            st.info(
+                                f"**{stats['long_moy_phrases']:.0f} "
+                                f"mots/phrase**\n\n"
+                                f"Niveau : **{rythme_lvl}**\n\n{rythme_txt}"
+                            )
+
+                        # ═══════════════════════════════════════
+                        # SECTION 2 — Empreinte stylistique
+                        # ═══════════════════════════════════════
                         sig_fiche = get_stylometric_signature(edit_output, nlp)
                         if not df_valid.empty:
-                            data_key = df_valid[["id", "input", "output", "type"]].to_json()
-                            sig_dataset = compute_avg_stylometric_signature(data_key)
+                            data_key = df_valid[
+                                ["id", "input", "output", "type"]
+                            ].to_json()
+                            sig_dataset = compute_avg_stylometric_signature(
+                                data_key
+                            )
                         else:
                             sig_dataset = None
                         if sig_fiche and sig_dataset:
+                            st.markdown("#### Empreinte stylistique")
+                            st.caption(
+                                "Ce radar compare ta fiche (bleu) à la "
+                                "moyenne du dataset (orange). Plus les "
+                                "formes se superposent, plus ton style est "
+                                "cohérent avec l'ensemble."
+                            )
                             categories = list(sig_fiche.keys())
                             v_fiche = [sig_fiche[k] for k in categories]
                             v_dataset = [sig_dataset[k] for k in categories]
-                            r_fiche_norm = [_normalize_signature(k, v) for k, v in zip(categories, v_fiche)]
-                            r_dataset_norm = [_normalize_signature(k, v) for k, v in zip(categories, v_dataset)]
+                            r_fiche_norm = [
+                                _normalize_signature(k, v)
+                                for k, v in zip(categories, v_fiche)
+                            ]
+                            r_dataset_norm = [
+                                _normalize_signature(k, v)
+                                for k, v in zip(categories, v_dataset)
+                            ]
                             theta = categories + [categories[0]]
                             r_fiche = r_fiche_norm + [r_fiche_norm[0]]
                             r_dataset = r_dataset_norm + [r_dataset_norm[0]]
                             fig = go.Figure()
                             fig.add_trace(
                                 go.Scatterpolar(
-                                    r=r_fiche, theta=theta, name="Ta fiche", fill="toself", line=dict(color="rgb(0,120,200)")
+                                    r=r_fiche,
+                                    theta=theta,
+                                    name="Ta fiche",
+                                    fill="toself",
+                                    line=dict(color="rgb(0,120,200)"),
                                 )
                             )
                             fig.add_trace(
                                 go.Scatterpolar(
-                                    r=r_dataset, theta=theta, name="Dataset (moy.)", fill="toself", line=dict(color="rgb(200,80,0)", dash="dash")
+                                    r=r_dataset,
+                                    theta=theta,
+                                    name="Moyenne dataset",
+                                    fill="toself",
+                                    line=dict(
+                                        color="rgb(200,80,0)", dash="dash"
+                                    ),
                                 )
                             )
                             fig.update_layout(
-                                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                                polar=dict(
+                                    radialaxis=dict(
+                                        visible=True, range=[0, 1]
+                                    )
+                                ),
                                 showlegend=True,
                                 title="Radar de signature stylistique",
-                                height=400,
+                                height=420,
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                            df_comp = pd.DataFrame(
-                                {
-                                    "Indicateur": categories,
-                                    "Ta fiche": [round(v, 3) for v in v_fiche],
-                                    "Dataset (moy.)": [round(v, 3) for v in v_dataset],
-                                    "Écart (%)": [
-                                        round(((v_fiche[i] - v_dataset[i]) / max(1e-6, v_dataset[i])) * 100, 1)
-                                        for i in range(len(categories))
-                                    ],
-                                }
-                            )
-                            st.dataframe(df_comp, width="stretch", hide_index=True)
 
-                            # Score global + recommandations actionnables
+                            with st.expander(
+                                "Détails chiffrés du radar", expanded=False
+                            ):
+                                df_comp = pd.DataFrame(
+                                    {
+                                        "Axe": categories,
+                                        "Ta fiche": [
+                                            round(v, 3) for v in v_fiche
+                                        ],
+                                        "Moy. dataset": [
+                                            round(v, 3) for v in v_dataset
+                                        ],
+                                        "Écart (%)": [
+                                            round(
+                                                (
+                                                    (v_fiche[i] - v_dataset[i])
+                                                    / max(1e-6, v_dataset[i])
+                                                )
+                                                * 100,
+                                                1,
+                                            )
+                                            for i in range(len(categories))
+                                        ],
+                                    }
+                                )
+                                st.dataframe(
+                                    df_comp,
+                                    width="stretch",
+                                    hide_index=True,
+                                )
+
+                            # ═══════════════════════════════════════
+                            # SECTION 3 — Constructions de phrases
+                            # ═══════════════════════════════════════
+                            st.markdown(
+                                "#### Tes constructions de phrases favorites"
+                            )
+                            st.caption(
+                                "Quels enchaînements grammaticaux reviennent "
+                                "le plus dans ta prose ? Par exemple "
+                                "« Dét · Nom · Verbe » = un déterminant suivi "
+                                "d'un nom puis d'un verbe."
+                            )
+                            tri_fiche = get_pos_trigrams(edit_output, nlp)
+                            if not df_valid.empty:
+                                tri_dataset = compute_avg_pos_trigrams(
+                                    data_key
+                                )
+                            else:
+                                tri_dataset = None
+                            if tri_fiche:
+                                total_tri_fiche = sum(tri_fiche.values())
+                                top5 = tri_fiche.most_common(5)
+                                rows_tri: list[dict] = []
+                                for gram, count in top5:
+                                    pct_fiche = (
+                                        count / max(1, total_tri_fiche) * 100
+                                    )
+                                    if tri_dataset:
+                                        total_tri_ds = sum(
+                                            tri_dataset.values()
+                                        )
+                                        pct_ds = (
+                                            tri_dataset.get(gram, 0)
+                                            / max(1, total_tri_ds)
+                                            * 100
+                                        )
+                                        delta_pct = round(
+                                            pct_fiche - pct_ds, 1
+                                        )
+                                        delta_str = (
+                                            f"+{delta_pct}"
+                                            if delta_pct >= 0
+                                            else str(delta_pct)
+                                        )
+                                    else:
+                                        pct_ds = None
+                                        delta_str = "—"
+                                    rows_tri.append(
+                                        {
+                                            "Construction": _translate_trigram(
+                                                gram
+                                            ),
+                                            "Occurrences": count,
+                                            "Ta fiche (%)": f"{pct_fiche:.1f}",
+                                            "Dataset (%)": (
+                                                f"{pct_ds:.1f}"
+                                                if pct_ds is not None
+                                                else "—"
+                                            ),
+                                            "Écart": delta_str,
+                                        }
+                                    )
+                                st.dataframe(
+                                    pd.DataFrame(rows_tri),
+                                    width="stretch",
+                                    hide_index=True,
+                                )
+                                st.caption(
+                                    "Écart = différence en points de "
+                                    "pourcentage entre ta fiche et la "
+                                    "moyenne du dataset. Un écart élevé "
+                                    "signale un tic syntaxique."
+                                )
+                            else:
+                                st.caption(
+                                    "Texte trop court pour analyser les "
+                                    "constructions de phrases."
+                                )
+
+                            # ═══════════════════════════════════════
+                            # SECTION 4 — Score + conseils
+                            # ═══════════════════════════════════════
                             score, deltas = _compute_coherence_score(
-                                sig_fiche, sig_dataset, stats["mots_repetes"]
+                                sig_fiche,
+                                sig_dataset,
+                                stats["mots_repetes"],
                             )
                             level_label, tone = _coherence_level(score)
-                            st.markdown("#### Cohérence globale")
+                            st.markdown("#### Cohérence avec le dataset")
+                            st.caption(
+                                "Ce score mesure à quel point ta fiche "
+                                "ressemble au style moyen de ton dataset. "
+                                "100 = parfaitement aligné."
+                            )
                             c_score1, c_score2 = st.columns([1, 2])
                             with c_score1:
-                                st.metric("Score de cohérence", f"{score}/100")
+                                st.metric(
+                                    "Score",
+                                    f"{score} / 100",
+                                    help=(
+                                        "100 = ta fiche est parfaitement "
+                                        "alignée avec le style moyen du "
+                                        "dataset."
+                                    ),
+                                )
                             with c_score2:
-                                msg = f"Niveau: **{level_label}** — basé sur les écarts stylométriques vs dataset."
-                                if tone == "success":
-                                    st.success(msg)
-                                elif tone == "info":
-                                    st.info(msg)
-                                elif tone == "warning":
-                                    st.warning(msg)
-                                else:
-                                    st.error(msg)
+                                _MSG = {
+                                    "success": (
+                                        f"**{level_label}** — ton style "
+                                        "est bien aligné avec le dataset. "
+                                        "Continue comme ça !"
+                                    ),
+                                    "info": (
+                                        f"**{level_label}** — quelques "
+                                        "petits écarts, rien de bloquant. "
+                                        "Consulte les conseils."
+                                    ),
+                                    "warning": (
+                                        f"**{level_label}** — ta fiche "
+                                        "s'éloigne du style général. "
+                                        "Lis les conseils ci-dessous."
+                                    ),
+                                    "error": (
+                                        f"**{level_label}** — gros écart "
+                                        "de style. Relis le texte et "
+                                        "ajuste selon les conseils."
+                                    ),
+                                }
+                                getattr(st, tone)(
+                                    _MSG.get(tone, "")
+                                )
 
                             actions = _prioritized_actions(stats, deltas)
                             if actions:
-                                st.markdown("#### Top actions prioritaires")
-                                for i, action in enumerate(actions, start=1):
+                                st.markdown("#### Conseils pour cette fiche")
+                                for i, action in enumerate(
+                                    actions, start=1
+                                ):
                                     st.write(f"{i}. {action}")
                         elif sig_fiche:
-                            st.caption("Radar : ajoute des fiches « Fait et validé » pour comparer ta fiche au dataset.")
+                            st.caption(
+                                "Ajoute des fiches « Fait et validé » "
+                                "pour débloquer le radar et la comparaison "
+                                "avec le dataset."
+                            )
 
                         if edit_type == "Expansion" and stats["ratio"] < 2:
                             st.warning(
-                                "💡 Conseil : pour une « Expansion », essayez de développer davantage."
+                                "Pour une fiche de type « Expansion », "
+                                "essaie de développer davantage le "
+                                "brouillon (au moins x2).",
+                                icon="💡",
                             )
                     else:
-                        st.info("Remplissez l’Input et l’Output pour voir l’analyse.")
+                        st.info(
+                            "Remplis le Brouillon et la Prose pour voir "
+                            "l'analyse de ton écriture."
+                        )
 
             # 5. SAUVEGARDE
             if st.button("💾 Enregistrer les modifications", type="primary", width="stretch"):
