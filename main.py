@@ -120,6 +120,111 @@ def _interpretation_palier(indicateur: str, value: float) -> str:
     return ""
 
 
+def _palier_details(indicateur: str, value: float) -> tuple[str, str]:
+    """Retourne (niveau, interpretation) pour un indicateur."""
+    if indicateur == "ratio":
+        if value < 1.3:
+            return "Minimal", _interpretation_palier(indicateur, value)
+        if value < 2.0:
+            return "Progressif", _interpretation_palier(indicateur, value)
+        if value < 2.5:
+            return "Solide", _interpretation_palier(indicateur, value)
+        return "Amplifié", _interpretation_palier(indicateur, value)
+    if indicateur == "ttr":
+        if value < 0.50:
+            return "Bas", _interpretation_palier(indicateur, value)
+        if value < 0.65:
+            return "Intermédiaire", _interpretation_palier(indicateur, value)
+        if value < 0.80:
+            return "Élevé", _interpretation_palier(indicateur, value)
+        return "Très élevé", _interpretation_palier(indicateur, value)
+    if indicateur == "moy_phrases":
+        if value < 10:
+            return "Court", _interpretation_palier(indicateur, value)
+        if value < 18:
+            return "Équilibré", _interpretation_palier(indicateur, value)
+        if value < 25:
+            return "Ample", _interpretation_palier(indicateur, value)
+        return "Très ample", _interpretation_palier(indicateur, value)
+    return "—", ""
+
+
+def _normalize_signature(indicateur: str, value: float) -> float:
+    """Normalise la signature stylométrique sur une échelle [0,1] stable par axe."""
+    bornes = {
+        "Nominalité": (0.0, 0.60),
+        "Action (Verbes)": (0.0, 0.40),
+        "Complexité (Adverbes)": (0.0, 0.30),
+        "Ponctuation": (0.0, 0.35),
+        "Longueur moy. mots": (3.0, 10.0),
+    }
+    mn, mx = bornes.get(indicateur, (0.0, 1.0))
+    if mx - mn < 1e-6:
+        return 0.0
+    return min(1.0, max(0.0, (value - mn) / (mx - mn)))
+
+
+def _coherence_level(score: int) -> tuple[str, str]:
+    """Retourne (label, tonalité streamlit) pour un score de cohérence."""
+    if score >= 80:
+        return "Excellent", "success"
+    if score >= 65:
+        return "Bon", "info"
+    if score >= 45:
+        return "À surveiller", "warning"
+    return "Critique", "error"
+
+
+def _compute_coherence_score(
+    sig_fiche: dict[str, float], sig_dataset: dict[str, float], mots_repetes: list[str]
+) -> tuple[int, dict[str, float]]:
+    """Calcule un score global de cohérence (0-100) à partir des écarts stylométriques."""
+    deltas: dict[str, float] = {}
+    for k in sig_fiche:
+        nf = _normalize_signature(k, sig_fiche[k])
+        nd = _normalize_signature(k, sig_dataset[k])
+        deltas[k] = abs(nf - nd)
+    avg_delta = sum(deltas.values()) / max(1, len(deltas))
+    base_score = 100 * (1 - avg_delta)
+    rep_penalty = min(20, max(0, len(mots_repetes) - 1) * 2)
+    final_score = int(max(0, min(100, round(base_score - rep_penalty))))
+    return final_score, deltas
+
+
+def _prioritized_actions(
+    stats: dict, deltas: dict[str, float], max_actions: int = 3
+) -> list[str]:
+    """Génère les actions UX les plus utiles à partir des métriques courantes."""
+    actions: list[str] = []
+    if stats["ratio"] < 1.3:
+        actions.append("Développe davantage les idées (ratio trop proche du brouillon).")
+    elif stats["ratio"] > 3.0:
+        actions.append("Condense légèrement certains passages (ratio très élevé).")
+
+    if stats["ttr"] < 0.50:
+        actions.append("Varie le vocabulaire (TTR bas).")
+    elif stats["ttr"] > 0.85:
+        actions.append("Stabilise le registre lexical (TTR très élevé).")
+
+    if stats["long_moy_phrases"] < 10:
+        actions.append("Allonge quelques phrases pour un rythme moins haché.")
+    elif stats["long_moy_phrases"] > 25:
+        actions.append("Raccourcis certaines phrases pour améliorer la lisibilité.")
+
+    if stats["mots_repetes"]:
+        sample = ", ".join(stats["mots_repetes"][:3])
+        actions.append(f"Réduis les répétitions fréquentes (ex: {sample}).")
+
+    top_deltas = sorted(deltas.items(), key=lambda x: x[1], reverse=True)[:2]
+    for axis, delta in top_deltas:
+        if delta > 0.35:
+            actions.append(f"Rapproche ta fiche de la moyenne dataset sur l'axe « {axis} ».")
+
+    # Déduplication en conservant l'ordre
+    dedup = list(dict.fromkeys(actions))
+    return dedup[:max_actions]
+
+
 def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
     """
     Signature stylométrique (ADN stylistique) : ratios POS, ponctuation,
@@ -422,13 +527,24 @@ with tab2:
                         if stats["mots_repetes"]:
                             st.caption(f"Répétitions (≥3×) : {', '.join(stats['mots_repetes'][:10])}{'…' if len(stats['mots_repetes']) > 10 else ''}")
 
-                        # Légende : uniquement le palier correspondant à chaque indicateur
-                        st.markdown("**Info spaCy**")
-                        st.caption(f"**Ratio x{stats['ratio']:.1f}** — {_interpretation_palier('ratio', stats['ratio'])}")
-                        st.caption(f"**TTR {stats['ttr']:.2f}** — {_interpretation_palier('ttr', stats['ttr'])}")
-                        st.caption(f"**Moy. {stats['long_moy_phrases']:.0f} mots/phrase** — {_interpretation_palier('moy_phrases', stats['long_moy_phrases'])}")
+                        # Lecture UX ciblée : uniquement le palier courant de chaque indicateur
+                        ratio_lvl, ratio_txt = _palier_details("ratio", stats["ratio"])
+                        ttr_lvl, ttr_txt = _palier_details("ttr", stats["ttr"])
+                        rythme_lvl, rythme_txt = _palier_details("moy_phrases", stats["long_moy_phrases"])
 
-                        # Radar de cohérence stylométrique (normalisation 0–1 pour rendre tous les axes visibles)
+                        st.markdown("#### Lecture instantanée")
+                        f1, f2, f3 = st.columns(3)
+                        with f1:
+                            st.info(f"**Ratio x{stats['ratio']:.1f}**  \nNiveau : **{ratio_lvl}**  \n{ratio_txt}")
+                        with f2:
+                            st.info(f"**TTR {stats['ttr']:.2f}**  \nNiveau : **{ttr_lvl}**  \n{ttr_txt}")
+                        with f3:
+                            st.info(
+                                f"**Moy. {stats['long_moy_phrases']:.0f} mots/phrase**  \n"
+                                f"Niveau : **{rythme_lvl}**  \n{rythme_txt}"
+                            )
+
+                        # Radar de cohérence stylométrique (normalisation stable par axe)
                         sig_fiche = get_stylometric_signature(edit_output, nlp)
                         if not df_valid.empty:
                             data_key = df_valid[["id", "input", "output", "type"]].to_json()
@@ -439,17 +555,8 @@ with tab2:
                             categories = list(sig_fiche.keys())
                             v_fiche = [sig_fiche[k] for k in categories]
                             v_dataset = [sig_dataset[k] for k in categories]
-                            # Normaliser chaque dimension dans [0, 1] pour que le radar soit lisible (ratios ~0.1 vs longueur ~5)
-                            r_fiche_norm, r_dataset_norm = [], []
-                            for i, k in enumerate(categories):
-                                mn = min(v_fiche[i], v_dataset[i])
-                                mx = max(v_fiche[i], v_dataset[i])
-                                if mx - mn < 1e-6:
-                                    r_fiche_norm.append(0.5)
-                                    r_dataset_norm.append(0.5)
-                                else:
-                                    r_fiche_norm.append((v_fiche[i] - mn) / (mx - mn))
-                                    r_dataset_norm.append((v_dataset[i] - mn) / (mx - mn))
+                            r_fiche_norm = [_normalize_signature(k, v) for k, v in zip(categories, v_fiche)]
+                            r_dataset_norm = [_normalize_signature(k, v) for k, v in zip(categories, v_dataset)]
                             theta = categories + [categories[0]]
                             r_fiche = r_fiche_norm + [r_fiche_norm[0]]
                             r_dataset = r_dataset_norm + [r_dataset_norm[0]]
@@ -467,10 +574,48 @@ with tab2:
                             fig.update_layout(
                                 polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
                                 showlegend=True,
-                                title="Radar de signature stylistique (normalisé par axe)",
+                                title="Radar de signature stylistique",
                                 height=400,
                             )
                             st.plotly_chart(fig, use_container_width=True)
+                            df_comp = pd.DataFrame(
+                                {
+                                    "Indicateur": categories,
+                                    "Ta fiche": [round(v, 3) for v in v_fiche],
+                                    "Dataset (moy.)": [round(v, 3) for v in v_dataset],
+                                    "Écart (%)": [
+                                        round(((v_fiche[i] - v_dataset[i]) / max(1e-6, v_dataset[i])) * 100, 1)
+                                        for i in range(len(categories))
+                                    ],
+                                }
+                            )
+                            st.dataframe(df_comp, width="stretch", hide_index=True)
+
+                            # Score global + recommandations actionnables
+                            score, deltas = _compute_coherence_score(
+                                sig_fiche, sig_dataset, stats["mots_repetes"]
+                            )
+                            level_label, tone = _coherence_level(score)
+                            st.markdown("#### Cohérence globale")
+                            c_score1, c_score2 = st.columns([1, 2])
+                            with c_score1:
+                                st.metric("Score de cohérence", f"{score}/100")
+                            with c_score2:
+                                msg = f"Niveau: **{level_label}** — basé sur les écarts stylométriques vs dataset."
+                                if tone == "success":
+                                    st.success(msg)
+                                elif tone == "info":
+                                    st.info(msg)
+                                elif tone == "warning":
+                                    st.warning(msg)
+                                else:
+                                    st.error(msg)
+
+                            actions = _prioritized_actions(stats, deltas)
+                            if actions:
+                                st.markdown("#### Top actions prioritaires")
+                                for i, action in enumerate(actions, start=1):
+                                    st.write(f"{i}. {action}")
                         elif sig_fiche:
                             st.caption("Radar : ajoute des fiches « Fait et validé » pour comparer ta fiche au dataset.")
 
