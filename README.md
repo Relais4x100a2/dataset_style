@@ -57,6 +57,8 @@ spreadsheet = "URL_DE_VOTRE_GOOGLE_SHEET"
 
 **Important (spaCy) :** L’app utilise **spaCy 3.8** et le modèle **fr_core_news_sm 3.8** avec **NumPy 2.0.x** pour éviter l’erreur « numpy.dtype size changed » sur Streamlit Cloud. Si l’app affiche « Fonctions linguistiques (spaCy) non disponibles » après déploiement : dans les paramètres de l’app, faites **Reboot** ou **Clear cache and redeploy** pour forcer une réinstallation des dépendances. Choisir **Python 3.12** dans Advanced settings au déploiement reste recommandé (évite les soucis avec blis sous 3.13).
 
+**Performance (éviter OOM) :** L'audit et le radar s'appuient sur des colonnes cache dans le Sheet (`_ratio`, `_signature_json`, etc.). spaCy ne s'exécute que sur la fiche en cours (« Vérifier ma prose ») et à la sauvegarde. Le bloc édition/analyse est dans un fragment Streamlit pour limiter les rechargements.
+
 ---
 
 ## 🛡️ Contrôle d'accès (Emails spécifiques)
