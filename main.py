@@ -1,9 +1,10 @@
 import logging
-from collections import Counter, defaultdict
+from collections import Counter
 
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
+import plotly.graph_objects as go
 from datetime import datetime
 import uuid
 import json
@@ -50,8 +51,8 @@ def get_linguistic_insights(
     text_in: str, text_out: str, nlp, seuil_repetition: int = 3
 ) -> dict | None:
     """
-    Analyse linguistique input/output : ratio d'expansion, entités perdues,
-    richesse lexicale, TTR, mots répétés, longueur moyenne des phrases.
+    Analyse linguistique input/output : ratio d'expansion, richesse lexicale,
+    TTR, mots répétés, longueur moyenne des phrases.
     Retourne None si nlp est None ou textes vides.
     """
     if nlp is None or not (text_in and text_out):
@@ -64,16 +65,11 @@ def get_linguistic_insights(
     len_out = len(tokens_out)
     ratio = len_out / max(1, len_in)
 
-    ents_in = {ent.text.lower() for ent in doc_in.ents}
-    ents_out = {ent.text.lower() for ent in doc_out.ents}
-    perdues = ents_in - ents_out
-
     lemmes_out = {t.lemma_.lower() for t in doc_out if not t.is_punct}
     richesse = len(lemmes_out) / max(1, len_out)
 
-    # TTR (Type-Token Ratio) et mots répétés (hors stop words : mots porteurs de sens)
-    types_out = len(lemmes_out)
-    ttr = types_out / max(1, len_out)
+    # TTR (Type-Token Ratio) et mots répétés (hors stop words)
+    ttr = len(lemmes_out) / max(1, len_out)
     comptage = Counter(
         t.lemma_.lower() for t in doc_out if not t.is_punct and not t.is_stop
     )
@@ -86,7 +82,6 @@ def get_linguistic_insights(
 
     return {
         "ratio": ratio,
-        "perdues": perdues,
         "richesse": richesse,
         "mots_in": len_in,
         "mots_out": len_out,
@@ -94,6 +89,45 @@ def get_linguistic_insights(
         "mots_repetes": mots_repetes,
         "long_moy_phrases": long_moy_phrases,
     }
+
+
+def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
+    """
+    Signature stylométrique (ADN stylistique) : ratios POS, ponctuation,
+    longueur moyenne des mots. Retourne None si nlp absent ou texte vide.
+    """
+    if nlp is None or not text:
+        return None
+    doc = nlp(text)
+    tokens = [t for t in doc if not t.is_punct and not t.is_space]
+    nb_tokens = max(1, len(tokens))
+    counts = Counter(t.pos_ for t in doc)
+    nb_punct = len([t for t in doc if t.is_punct])
+    return {
+        "Nominalité": (counts.get("NOUN", 0) + counts.get("ADJ", 0)) / nb_tokens,
+        "Action (Verbes)": counts.get("VERB", 0) / nb_tokens,
+        "Complexité (Adverbes)": counts.get("ADV", 0) / nb_tokens,
+        "Ponctuation": nb_punct / nb_tokens,
+        "Longueur moy. mots": sum(len(t.text) for t in tokens) / nb_tokens,
+    }
+
+
+@st.cache_data(ttl=300)
+def compute_avg_stylometric_signature(data_json: str) -> dict[str, float] | None:
+    """Moyenne des signatures stylométriques sur les outputs validés. Pour le radar de cohérence."""
+    nlp = load_nlp()
+    if nlp is None:
+        return None
+    df_audit = pd.read_json(data_json)
+    sigs = []
+    for _, row in df_audit.iterrows():
+        s = get_stylometric_signature(str(row.get("output", "")), nlp)
+        if s:
+            sigs.append(s)
+    if not sigs:
+        return None
+    keys = list(sigs[0].keys())
+    return {k: sum(s[k] for s in sigs) / len(sigs) for k in keys}
 
 
 @st.cache_data(ttl=300)
@@ -116,8 +150,6 @@ def compute_audit_global(data_json: str) -> list[dict]:
         alertes = []
         if "Expansion" in str(row.get("type", "")) and ins["ratio"] < 2:
             alertes.append("Expansion faible")
-        if ins["perdues"]:
-            alertes.append("Entités perdues")
         if ins["ttr"] < 0.5 and ins["mots_out"] > 20:
             alertes.append("Répétitions")
         rows_audit.append({
@@ -125,7 +157,6 @@ def compute_audit_global(data_json: str) -> list[dict]:
             "type": row.get("type", ""),
             "ratio": round(ins["ratio"], 1),
             "richesse": f"{ins['richesse']:.0%}",
-            "entités perdues": "oui" if ins["perdues"] else "non",
             "moy. mots/phrase": round(ins["long_moy_phrases"], 0),
             "TTR": round(ins["ttr"], 2),
             "alertes": " ; ".join(alertes) if alertes else "—",
@@ -134,32 +165,13 @@ def compute_audit_global(data_json: str) -> list[dict]:
 
 
 # --- FONCTION D'EXPORT BAGUETTOTRON (JSONL) ---
-LABELS_NER_FR = {"LOC": "Lieux", "PER": "Personnes", "ORG": "Organisations", "MISC": "Autres", "GPE": "Lieux"}
-
-
-def _trace_avec_ner(input_text: str, forme: str, ton: str, type_row: str, nlp) -> str:
-    """Construit une trace de pensée enrichie avec les entités NER du brouillon."""
-    if not input_text or nlp is None:
-        return f"{forme} → {ton} ※ {' '.join(input_text.split()[:5])}... ∴ {type_row}"
-    doc = nlp(input_text)
-    entites_par_label: dict[str, set[str]] = defaultdict(set)
-    for ent in doc.ents:
-        label_fr = LABELS_NER_FR.get(ent.label_, ent.label_)
-        entites_par_label[label_fr].add(ent.text)
-    if not entites_par_label:
-        return f"{forme} → {ton} ※ {' '.join(input_text.split()[:5])}... ∴ {type_row}"
-    parties = [f"{label}: [{', '.join(sorted(ents))}]" for label, ents in sorted(entites_par_label.items())]
-    return f"{forme} → {ton} ※ {' '.join(parties)} ∴ {type_row}"
-
-
-def convert_to_baguettotron_jsonl(df: pd.DataFrame, nlp=None):
+def convert_to_baguettotron_jsonl(df: pd.DataFrame):
     jsonl_output = io.StringIO()
     df_valid = df[df['statut'] == "Fait et validé"]
     for _, row in df_valid.iterrows():
         h_token = "<H≈0.3>" if row['type'] == "Normalisation" else "<H≈1.5>"
-        trace = _trace_avec_ner(
-            row.get("input", ""), row["forme"], row["ton"], row["type"], nlp
-        )
+        short_input = " ".join(str(row.get("input", "")).split()[:5]) + "..."
+        trace = f"{row['forme']} → {row['ton']} ※ {short_input} ∴ {row['type']}"
         # 3. Construction de l'instruction (User)
         instruction = f"Réécris ce brouillon. Forme : {row['forme']}. Ton : {row['ton']}. Support : {row['support']}."
         
@@ -195,9 +207,7 @@ with st.sidebar:
         # Export CSV (Standard)
         csv = df[df['statut'] == "Fait et validé"].to_csv(index=False).encode('utf-8')
         st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv")
-        # Export JSONL (trace enrichie NER si spaCy disponible)
-        nlp_export = load_nlp()
-        jsonl_data = convert_to_baguettotron_jsonl(df, nlp_export)
+        jsonl_data = convert_to_baguettotron_jsonl(df)
         st.download_button(
             label="✨ Télécharger JSONL Baguettotron",
             data=jsonl_data,
@@ -275,13 +285,13 @@ with tab2:
                 data_key = df_valid[["id", "input", "output", "type"]].to_json()
                 rows_audit = compute_audit_global(data_key)
                 if rows_audit:
-                    st.dataframe(pd.DataFrame(rows_audit), use_container_width=True)
+                    st.dataframe(pd.DataFrame(rows_audit), width="stretch")
                 else:
                     st.info("Aucune fiche analysable (input/output vides).")
         elif not df_valid.empty and nlp is None:
             st.warning(
                 "Fonctions linguistiques (spaCy) non disponibles sur cet environnement. "
-                "L'audit et l'export JSONL utilisent la version sans NER."
+                "L'audit et l'export JSONL restent disponibles."
             )
 
         # 1. FILTRAGE
@@ -363,17 +373,60 @@ with tab2:
                             st.metric("Ratio d'expansion", f"x{stats['ratio']:.1f}")
                             st.caption(f"Brouillon : {stats['mots_in']} mots | Prose : {stats['mots_out']} mots")
                         with c_st2:
-                            if stats["perdues"]:
-                                st.error(f"⚠️ Oubli potentiel : {', '.join(stats['perdues'])}")
-                            else:
-                                st.success("✅ Entités préservées")
+                            st.metric("TTR (diversité)", f"{stats['ttr']:.2f}")
+                            st.caption("Types / Tokens")
                         with c_st3:
-                            st.metric("Diversité lexicale", f"{stats['richesse']:.0%}")
                             st.metric("Moy. mots/phrase", f"{stats['long_moy_phrases']:.0f}")
 
                         if stats["mots_repetes"]:
                             st.caption(f"Répétitions (≥3×) : {', '.join(stats['mots_repetes'][:10])}{'…' if len(stats['mots_repetes']) > 10 else ''}")
-                        st.caption(f"TTR (types/tokens) : {stats['ttr']:.2f}")
+
+                        # Légendes Info spaCy (paliers gradués)
+                        st.markdown("**Info spaCy — Paliers par indicateur**")
+                        st.markdown(
+                            "| Indicateur | Palier | Interprétation |\n"
+                            "|------------|--------|----------------|\n"
+                            "| **Ratio** | x1.0 – x1.3 | Tu restes proche du brouillon. |\n"
+                            "| | x1.3 – x2.0 | Tu développes. |\n"
+                            "| | x2.0 – x2.5 | Tu as bien développé l'idée. |\n"
+                            "| | > x2.5 | Tu déploies beaucoup. |\n"
+                            "| **TTR** | < 0.50 | Vocabulaire répétitif. |\n"
+                            "| | 0.50 – 0.65 | Vocabulaire correct. |\n"
+                            "| | 0.65 – 0.80 | Vocabulaire soutenu. |\n"
+                            "| | > 0.80 | Vocabulaire très riche. |\n"
+                            "| **Moy. mots/phrase** | < 10 | Rythme vif, phrases courtes. |\n"
+                            "| | 10 – 18 | Rythme équilibré. |\n"
+                            "| | 18 – 25 | Rythme ample. |\n"
+                            "| | > 25 | Phrases très longues. |"
+                        )
+
+                        # Radar de cohérence stylométrique
+                        sig_fiche = get_stylometric_signature(edit_output, nlp)
+                        if not df_valid.empty:
+                            data_key = df_valid[["id", "input", "output", "type"]].to_json()
+                            sig_dataset = compute_avg_stylometric_signature(data_key)
+                        else:
+                            sig_dataset = None
+                        if sig_fiche and sig_dataset:
+                            categories = list(sig_fiche.keys())
+                            theta = categories + [categories[0]]
+                            r_fiche = [sig_fiche[k] for k in categories] + [sig_fiche[categories[0]]]
+                            r_dataset = [sig_dataset[k] for k in categories] + [sig_dataset[categories[0]]]
+                            fig = go.Figure()
+                            fig.add_trace(
+                                go.Scatterpolar(
+                                    r=r_fiche, theta=theta, name="Ta fiche", fill="toself", line=dict(color="rgb(0,120,200)")
+                                )
+                            )
+                            fig.add_trace(
+                                go.Scatterpolar(
+                                    r=r_dataset, theta=theta, name="Dataset (moy.)", fill="toself", line=dict(color="rgb(200,80,0)", dash="dash")
+                                )
+                            )
+                            fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=True, title="Radar de signature stylistique", height=400)
+                            st.plotly_chart(fig, use_container_width=True)
+                        elif sig_fiche:
+                            st.caption("Radar : ajoute des fiches « Fait et validé » pour comparer ta fiche au dataset.")
 
                         if edit_type == "Normalisation & Expansion" and stats["ratio"] < 2:
                             st.warning(
@@ -383,7 +436,7 @@ with tab2:
                         st.info("Remplissez l’Input et l’Output pour voir l’analyse.")
 
             # 5. SAUVEGARDE
-            if st.button("💾 Enregistrer les modifications", type="primary", use_container_width=True):
+            if st.button("💾 Enregistrer les modifications", type="primary", width="stretch"):
                 # On met à jour le DF original
                 df.loc[df['id'] == row_id, ['type', 'forme', 'ton', 'support', 'input', 'output', 'statut', 'notes']] = [
                     edit_type, edit_forme, edit_ton, edit_support, edit_input, edit_output, edit_statut, edit_notes
