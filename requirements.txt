@@ -1,6 +1,7 @@
 # NumPy 2 requis pour thinc/spaCy (compatibilité binaire sur Streamlit Cloud)
 numpy>=2.0.0,<2.1
 pandas>=2.2.2
+requests
 streamlit
 st-gsheets-connection
 # spaCy 3.8 + modèle 3.8 = stack compatible NumPy 2 (évite "dtype size changed")

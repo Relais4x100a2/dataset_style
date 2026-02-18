@@ -9,9 +9,13 @@ from collections import Counter
 from typing import Callable
 
 import pandas as pd
+import requests
 import streamlit as st
 
 logger = logging.getLogger(__name__)
+
+LANGUAGETOOL_API_URL = "https://api.languagetool.org/v2/check"
+LANGUAGETOOL_TIMEOUT = 15
 
 VERBES_FAIBLES = {"être", "avoir", "faire", "aller", "dire"}
 
@@ -34,6 +38,65 @@ _POS_FR: dict[str, str] = {
     "VERB": "Verbe",
     "X": "Autre",
 }
+
+
+def corriger_texte_fr(text: str) -> str:
+    """
+    Corrige l'orthographe et la grammaire du texte en français via l'API
+    LanguageTool (pas de réécriture, uniquement corrections ciblées).
+
+    Args:
+        text: Texte à corriger.
+
+    Returns:
+        Le texte avec les corrections appliquées. Retourne une chaîne vide
+        si text est vide.
+
+    Raises:
+        requests.RequestException: En cas de timeout ou d'erreur réseau.
+        ValueError: Si la réponse de l'API est invalide.
+    """
+    if not text or not text.strip():
+        return ""
+
+    try:
+        resp = requests.post(
+            LANGUAGETOOL_API_URL,
+            data={"text": text, "language": "fr"},
+            timeout=LANGUAGETOOL_TIMEOUT,
+        )
+        resp.raise_for_status()
+    except requests.Timeout:
+        logger.warning("LanguageTool API timeout")
+        raise
+    except requests.RequestException as e:
+        logger.warning("LanguageTool API error: %s", e)
+        raise
+
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as e:
+        logger.warning("LanguageTool API invalid JSON: %s", e)
+        raise ValueError("Réponse API invalide") from e
+
+    matches = data.get("matches", [])
+    if not matches:
+        return text
+
+    # Appliquer les corrections de la fin vers le début pour ne pas décaler les offsets
+    result = text
+    for match in sorted(matches, key=lambda m: m["offset"], reverse=True):
+        offset = match["offset"]
+        length = match["length"]
+        replacements = match.get("replacements", [])
+        if not replacements:
+            continue
+        replacement = replacements[0].get("value")
+        if replacement is None:
+            continue
+        result = result[:offset] + replacement + result[offset + length :]
+
+    return result
 
 
 @st.cache_resource

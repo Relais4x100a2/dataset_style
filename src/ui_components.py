@@ -5,6 +5,7 @@ from datetime import datetime
 import uuid
 
 import pandas as pd
+import requests
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -18,6 +19,7 @@ from src.database import (
 from src.export_utils import convert_to_baguettotron_jsonl
 from src.nlp_engine import (
     load_nlp,
+    corriger_texte_fr,
     get_linguistic_insights,
     get_stylometric_signature,
     get_pos_trigrams,
@@ -224,7 +226,23 @@ def render_tab_edition(df, conn, listes):
     
                 edit_input = st.text_area("Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}")
                 edit_output = st.text_area("Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}")
-    
+
+                if st.button("🪄 Corriger l'orthographe", key=f"correct_ortho_{row_id}", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
+                    if not (edit_output and edit_output.strip()):
+                        st.warning("Le champ Prose (Output) est vide. Saisis un texte à corriger.")
+                    else:
+                        try:
+                            corrected = corriger_texte_fr(edit_output)
+                            st.session_state[f"out_{row_id}"] = corrected
+                            st.success("Orthographe et grammaire corrigées. Le champ Output a été mis à jour.")
+                            st.rerun()
+                        except requests.Timeout:
+                            st.error("Délai dépassé : le service LanguageTool n'a pas répondu. Réessaie dans un instant.")
+                        except requests.RequestException as e:
+                            st.error(f"Erreur réseau ou service indisponible : {e}")
+                        except (ValueError, Exception) as e:
+                            st.error(f"Impossible de corriger : {e}")
+
                 col_e5, col_e6 = st.columns([1, 2])
                 edit_statut = col_e5.selectbox("Statut", listes["statuts"], index=idx_statut, key=f"stat_{row_id}")
                 edit_notes = col_e6.text_input("Notes libres", value=current_row["notes"], key=f"note_{row_id}")
