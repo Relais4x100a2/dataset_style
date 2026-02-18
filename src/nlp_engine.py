@@ -1,8 +1,7 @@
 """
-Moteur linguistique : chargement spaCy, insights, stylométrie, cohérence.
-Isolé pour maîtrise de la RAM et réutilisabilité.
+Moteur linguistique : insights linguistiques, stylométrie, cohérence.
+Sans dépendance Streamlit — testable indépendamment.
 """
-import io
 import json
 import logging
 from collections import Counter
@@ -10,7 +9,6 @@ from typing import Callable
 
 import pandas as pd
 import requests
-import streamlit as st
 
 logger = logging.getLogger(__name__)
 
@@ -99,24 +97,6 @@ def corriger_texte_fr(text: str) -> str:
     return result
 
 
-@st.cache_resource
-def load_nlp():
-    """
-    Charge le modèle spaCy français une seule fois. Retourne None si absent ou
-    en cas d'erreur (ex. incompatibilité binaire numpy/thinc sur Cloud).
-    """
-    try:
-        import spacy
-        return spacy.load("fr_core_news_sm")
-    except OSError as e:
-        logger.warning("Modèle spaCy fr_core_news_sm non trouvé: %s", e)
-        return None
-    except (ValueError, ImportError, Exception) as e:
-        logger.warning("spaCy non disponible sur cet environnement.")
-        logger.debug("Détail: %s", e)
-        return None
-
-
 def get_linguistic_insights(
     text_in: str, text_out: str, nlp, seuil_repetition: int = 3
 ) -> dict | None:
@@ -136,8 +116,6 @@ def get_linguistic_insights(
     ratio = len_out / max(1, len_in)
 
     lemmes_out = {t.lemma_.lower() for t in doc_out if not t.is_punct}
-    richesse = len(lemmes_out) / max(1, len_out)
-
     ttr = len(lemmes_out) / max(1, len_out)
     comptage = Counter(
         t.lemma_.lower() for t in doc_out if not t.is_punct and not t.is_stop
@@ -155,7 +133,6 @@ def get_linguistic_insights(
 
     return {
         "ratio": ratio,
-        "richesse": richesse,
         "mots_in": len_in,
         "mots_out": len_out,
         "ttr": ttr,
@@ -209,61 +186,35 @@ def syntax_contrast_score(text_in: str, text_out: str, nlp) -> float:
     return min(1.0, total / max(1, len(keys)) * 2)
 
 
-def interpretation_palier(indicateur: str, value: float) -> str:
-    """Retourne l'interprétation du palier correspondant à la valeur."""
-    if indicateur == "ratio":
-        if value < 1.3:
-            return "Tu restes proche du brouillon."
-        if value < 2.0:
-            return "Tu développes."
-        if value < 2.5:
-            return "Tu as bien développé l'idée."
-        return "Tu déploies beaucoup."
-    if indicateur == "ttr":
-        if value < 0.50:
-            return "Vocabulaire répétitif."
-        if value < 0.65:
-            return "Vocabulaire correct."
-        if value < 0.80:
-            return "Vocabulaire soutenu."
-        return "Vocabulaire très riche."
-    if indicateur == "moy_phrases":
-        if value < 10:
-            return "Rythme vif, phrases courtes."
-        if value < 18:
-            return "Rythme équilibré."
-        if value < 25:
-            return "Rythme ample."
-        return "Phrases très longues."
-    return ""
+# Table de données des paliers : indicateur → [(seuil_max, niveau, interprétation), ...]
+# Le dernier tuple (seuil_max=inf) est le palier par défaut (valeur >= dernier seuil).
+_PALIERS: dict[str, list[tuple[float, str, str]]] = {
+    "ratio": [
+        (1.3, "Minimal",    "Tu restes proche du brouillon."),
+        (2.0, "Progressif", "Tu développes."),
+        (2.5, "Solide",     "Tu as bien développé l'idée."),
+        (float("inf"), "Amplifié", "Tu déploies beaucoup."),
+    ],
+    "ttr": [
+        (0.50, "Bas",           "Vocabulaire répétitif."),
+        (0.65, "Intermédiaire", "Vocabulaire correct."),
+        (0.80, "Élevé",         "Vocabulaire soutenu."),
+        (float("inf"), "Très élevé", "Vocabulaire très riche."),
+    ],
+    "moy_phrases": [
+        (10,  "Court",      "Rythme vif, phrases courtes."),
+        (18,  "Équilibré",  "Rythme équilibré."),
+        (25,  "Ample",      "Rythme ample."),
+        (float("inf"), "Très ample", "Phrases très longues."),
+    ],
+}
 
 
 def palier_details(indicateur: str, value: float) -> tuple[str, str]:
-    """Retourne (niveau, interpretation) pour un indicateur."""
-    if indicateur == "ratio":
-        if value < 1.3:
-            return "Minimal", interpretation_palier(indicateur, value)
-        if value < 2.0:
-            return "Progressif", interpretation_palier(indicateur, value)
-        if value < 2.5:
-            return "Solide", interpretation_palier(indicateur, value)
-        return "Amplifié", interpretation_palier(indicateur, value)
-    if indicateur == "ttr":
-        if value < 0.50:
-            return "Bas", interpretation_palier(indicateur, value)
-        if value < 0.65:
-            return "Intermédiaire", interpretation_palier(indicateur, value)
-        if value < 0.80:
-            return "Élevé", interpretation_palier(indicateur, value)
-        return "Très élevé", interpretation_palier(indicateur, value)
-    if indicateur == "moy_phrases":
-        if value < 10:
-            return "Court", interpretation_palier(indicateur, value)
-        if value < 18:
-            return "Équilibré", interpretation_palier(indicateur, value)
-        if value < 25:
-            return "Ample", interpretation_palier(indicateur, value)
-        return "Très ample", interpretation_palier(indicateur, value)
+    """Retourne (niveau, interprétation) pour un indicateur et une valeur."""
+    for seuil, niveau, interpretation in _PALIERS.get(indicateur, []):
+        if value < seuil:
+            return niveau, interpretation
     return "—", ""
 
 
@@ -423,39 +374,6 @@ def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
     }
 
 
-@st.cache_data(ttl=600)
-def compute_avg_pos_trigrams(data_json: str) -> Counter | None:
-    """Distribution agrégée des trigrammes POS sur les outputs validés."""
-    nlp = load_nlp()
-    if nlp is None:
-        return None
-    df_audit = pd.read_json(io.StringIO(data_json))
-    total: Counter = Counter()
-    for _, row in df_audit.iterrows():
-        tri = get_pos_trigrams(str(row.get("output", "")), nlp)
-        if tri:
-            total += tri
-    return total if total else None
-
-
-@st.cache_data(ttl=600)
-def compute_avg_stylometric_signature(data_json: str) -> dict[str, float] | None:
-    """Fallback : moyenne des signatures en bouclant spaCy (lourd)."""
-    nlp = load_nlp()
-    if nlp is None:
-        return None
-    df_audit = pd.read_json(io.StringIO(data_json))
-    sigs = []
-    for _, row in df_audit.iterrows():
-        s = get_stylometric_signature(str(row.get("output", "")), nlp)
-        if s:
-            sigs.append(s)
-    if not sigs:
-        return None
-    keys = list(sigs[0].keys())
-    return {k: sum(s[k] for s in sigs) / len(sigs) for k in keys}
-
-
 def compute_row_cache(
     edit_input: str,
     edit_output: str,
@@ -488,7 +406,6 @@ def compute_row_cache(
 
     return {
         "_ratio": str(round(ins["ratio"], 3)),
-        "_richesse": f"{ins['richesse']:.2f}",
         "_ttr": f"{ins['ttr']:.2f}",
         "_long_phrases": str(round(ins["long_moy_phrases"], 1)),
         "_signature_json": json.dumps(sig_fiche),
@@ -497,35 +414,3 @@ def compute_row_cache(
     }
 
 
-@st.cache_data(ttl=600)
-def compute_audit_global(data_json: str) -> list[dict]:
-    """
-    Calcule l'audit global sur les lignes validées. Mis en cache par contenu.
-    TTL 600 s pour limiter la mémoire.
-    """
-    nlp = load_nlp()
-    if nlp is None:
-        return []
-    df_audit = pd.read_json(io.StringIO(data_json))
-    rows_audit = []
-    for _, row in df_audit.iterrows():
-        ins = get_linguistic_insights(
-            row.get("input", ""), row.get("output", ""), nlp
-        )
-        if ins is None:
-            continue
-        alertes = []
-        if "Expansion" in str(row.get("type", "")) and ins["ratio"] < 2:
-            alertes.append("Expansion faible")
-        if ins["ttr"] < 0.5 and ins["mots_out"] > 20:
-            alertes.append("Répétitions")
-        rows_audit.append({
-            "id": row.get("id", ""),
-            "type": row.get("type", ""),
-            "ratio": round(ins["ratio"], 1),
-            "richesse": f"{ins['richesse']:.0%}",
-            "moy. mots/phrase": round(ins["long_moy_phrases"], 0),
-            "TTR": round(ins["ttr"], 2),
-            "alertes": " ; ".join(alertes) if alertes else "—",
-        })
-    return rows_audit

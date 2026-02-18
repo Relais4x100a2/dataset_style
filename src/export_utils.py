@@ -6,6 +6,8 @@ import json
 
 import pandas as pd
 
+from src.database import STATUT_VALIDE
+
 
 def convert_to_baguettotron_jsonl(df: pd.DataFrame) -> str:
     """
@@ -13,7 +15,7 @@ def convert_to_baguettotron_jsonl(df: pd.DataFrame) -> str:
     Baguettotron (ChatML, <think>, <H≈…>).
     """
     jsonl_output = io.StringIO()
-    df_valid = df[df["statut"] == "Fait et validé"]
+    df_valid = df[df["statut"] == STATUT_VALIDE]
     for _, row in df_valid.iterrows():
         h_token = "<H≈0.3>" if row["type"] == "Normalisation" else "<H≈1.5>"
         short_input = " ".join(str(row.get("input", "")).split()[:5]) + "..."

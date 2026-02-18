@@ -10,9 +10,10 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+STATUT_VALIDE = "Fait et validé"
+
 CACHE_COLUMNS = [
     "_ratio",
-    "_richesse",
     "_ttr",
     "_long_phrases",
     "_signature_json",
@@ -105,7 +106,6 @@ def audit_rows_from_cache(df_valid: pd.DataFrame) -> list[dict]:
             "id": row.get("id", ""),
             "type": row.get("type", ""),
             "ratio": round(ratio_val, 1),
-            "richesse": str(row.get("_richesse", "") or "—"),
             "moy. mots/phrase": str(row.get("_long_phrases", "") or "—"),
             "TTR": str(row.get("_ttr", "") or "—"),
             "alertes": "—",
