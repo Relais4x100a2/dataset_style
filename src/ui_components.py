@@ -42,6 +42,20 @@ def render_sidebar(df, conn, listes):
     st.divider()
     st.subheader("🚀 Export Fine-tuning")
     if not df.empty:
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] .stDownloadButton button {
+                min-height: 52px;
+                width: 100%;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         csv = df[df['statut'] == "Fait et validé"].to_csv(index=False).encode('utf-8')
         jsonl_data = convert_to_baguettotron_jsonl(df)
         col_csv, col_jsonl = st.columns(2)
@@ -49,11 +63,12 @@ def render_sidebar(df, conn, listes):
             st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv", key="dl_csv")
         with col_jsonl:
             st.download_button(
-                label="✨ Télécharger JSONL Baguettotron",
+                label="Télécharger JSONL",
                 data=jsonl_data,
                 file_name=f"baguettotron_train_{datetime.now().strftime('%Y%m%d')}.jsonl",
                 mime="application/jsonl",
                 key="dl_jsonl",
+                help="Format Baguettotron (ChatML, <think>, entropie)",
             )
         
     st.info("Le format JSONL inclut les balises <think> et <H≈X.X> de PleIAs. L'export ne contient que les lignes 'Fait et validé'.")
