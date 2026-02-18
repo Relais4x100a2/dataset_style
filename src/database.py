@@ -2,9 +2,13 @@
 Connexion Google Sheets, chargement / mise à jour des données, helpers cache.
 """
 import json
+import logging
+import time
 from collections import Counter
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 CACHE_COLUMNS = [
     "_ratio",
@@ -16,15 +20,49 @@ CACHE_COLUMNS = [
     "_trigrams_json",
 ]
 
+# Erreurs API Google considérées comme temporaires (retry)
+RETRYABLE_STATUS_CODES = (503, 429, 500, 502, 504)
+MAX_RETRIES = 4
+INITIAL_BACKOFF = 2.0
 
-def load_data(conn) -> pd.DataFrame:
-    """Charge les données et assure la présence des colonnes de cache."""
-    data = conn.read(ttl="0")
-    data = data.astype(str).replace(["nan", "None", "<NA>"], "")
-    for col in CACHE_COLUMNS:
-        if col not in data.columns:
-            data[col] = ""
-    return data
+
+def load_data(conn, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
+    """Charge les données et assure la présence des colonnes de cache.
+
+    En cas d'indisponibilité temporaire de l'API Google (503, 429, etc.),
+    réessaie avec backoff exponentiel.
+    """
+    last_exception: BaseException | None = None
+    backoff = INITIAL_BACKOFF
+
+    for attempt in range(max_retries):
+        try:
+            data = conn.read(ttl="0")
+            data = data.astype(str).replace(["nan", "None", "<NA>"], "")
+            for col in CACHE_COLUMNS:
+                if col not in data.columns:
+                    data[col] = ""
+            return data
+        except Exception as ex:  # noqa: BLE001
+            last_exception = ex
+            status = getattr(ex, "response", None)
+            status_code = getattr(status, "status_code", None) if status else None
+            if status_code in RETRYABLE_STATUS_CODES and attempt < max_retries - 1:
+                logger.warning(
+                    "API Google indisponible (code %s), nouvel essai dans %.1fs (tentative %d/%d)",
+                    status_code,
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
+                backoff *= 2
+            else:
+                raise
+
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError("load_data: échec après toutes les tentatives")
 
 
 def update_data(conn, df: pd.DataFrame) -> None:

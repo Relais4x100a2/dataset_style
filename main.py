@@ -9,7 +9,20 @@ st.set_page_config(page_title="Baguettotron Dataset Studio", layout="wide")
 
 # --- CONNEXION GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
-df = load_data(conn)
+try:
+    df = load_data(conn)
+except Exception as e:
+    code = getattr(getattr(e, "response", None), "status_code", None)
+    if code == 503:
+        st.error(
+            "Le service Google Sheets est temporairement indisponible (503). "
+            "Réessayez dans quelques instants."
+        )
+    elif code == 403:
+        st.error("Accès refusé au tableur. Vérifiez les permissions et les identifiants.")
+    else:
+        st.error(f"Impossible de charger les données : {e}")
+    st.stop()
 
 # --- DÉFINITION DES OPTIONS (Listes fermées) ---
 # Mise à jour des types selon ta demande
