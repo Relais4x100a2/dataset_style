@@ -225,6 +225,10 @@ def render_tab_edition(df, conn, listes):
                 edit_support = col_e4.selectbox("Support", listes["supports"], index=idx_supp, key=f"supp_{row_id}")
     
                 edit_input = st.text_area("Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}")
+                # Appliquer une correction en attente avant d'instancier le widget (Streamlit interdit de modifier la clé après)
+                pending_key = f"pending_correction_{row_id}"
+                if pending_key in st.session_state:
+                    st.session_state[f"out_{row_id}"] = st.session_state.pop(pending_key)
                 edit_output = st.text_area("Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}")
 
                 if st.button("🪄 Corriger l'orthographe", key=f"correct_ortho_{row_id}", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
@@ -233,7 +237,7 @@ def render_tab_edition(df, conn, listes):
                     else:
                         try:
                             corrected = corriger_texte_fr(edit_output)
-                            st.session_state[f"out_{row_id}"] = corrected
+                            st.session_state[pending_key] = corrected
                             st.success("Orthographe et grammaire corrigées. Le champ Output a été mis à jour.")
                             st.rerun()
                         except requests.Timeout:
