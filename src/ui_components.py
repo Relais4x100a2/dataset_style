@@ -42,16 +42,19 @@ def render_sidebar(df, conn, listes):
     st.divider()
     st.subheader("🚀 Export Fine-tuning")
     if not df.empty:
-        # Export CSV (Standard)
         csv = df[df['statut'] == "Fait et validé"].to_csv(index=False).encode('utf-8')
-        st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv")
         jsonl_data = convert_to_baguettotron_jsonl(df)
-        st.download_button(
-            label="✨ Télécharger JSONL Baguettotron",
-            data=jsonl_data,
-            file_name=f"baguettotron_train_{datetime.now().strftime('%Y%m%d')}.jsonl",
-            mime="application/jsonl"
-        )
+        col_csv, col_jsonl = st.columns(2)
+        with col_csv:
+            st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv", key="dl_csv")
+        with col_jsonl:
+            st.download_button(
+                label="✨ Télécharger JSONL Baguettotron",
+                data=jsonl_data,
+                file_name=f"baguettotron_train_{datetime.now().strftime('%Y%m%d')}.jsonl",
+                mime="application/jsonl",
+                key="dl_jsonl",
+            )
         
     st.info("Le format JSONL inclut les balises <think> et <H≈X.X> de PleIAs. L'export ne contient que les lignes 'Fait et validé'.")
 
@@ -662,7 +665,7 @@ def render_tab_edition(df, conn, listes):
                                 "l'analyse de ton écriture."
                             )
     
-                # 5. SAUVEGARDE (met à jour le cache pour cette ligne uniquement)
+                # 5. SAUVEGARDE (met à jour le cache pour cette ligne si "Vérifier" a été cliqué)
                 if st.button("💾 Enregistrer les modifications", type="primary", width="stretch"):
                     cols_main = [
                         "type", "forme", "ton", "support",
@@ -672,7 +675,6 @@ def render_tab_edition(df, conn, listes):
                         edit_type, edit_forme, edit_ton, edit_support,
                         edit_input, edit_output, edit_statut, edit_notes,
                     ]
-                    # Cache d'audit : spaCy uniquement sur cette ligne
                     if st.session_state.verifier_clique:
                         nlp_save = load_nlp()
                         cache_vals = compute_row_cache(
@@ -686,7 +688,7 @@ def render_tab_edition(df, conn, listes):
                         )
                         for col, val in cache_vals.items():
                             df.loc[df["id"] == row_id, col] = val
-                        update_data(conn, df)
-                        st.success(f"Fiche {row_id} mise à jour !")
-                        st.rerun()
+                    update_data(conn, df)
+                    st.success(f"Fiche {row_id} mise à jour !")
+                    st.rerun()
             _bloc_edition_et_analyse()
