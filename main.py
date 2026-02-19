@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 from src.database import load_data, update_data
-from src.ui_components import render_sidebar, render_tab_ajout, render_tab_edition
+from src.ui_components import render_sidebar, render_tab_ajout, render_tab_edition, render_tab_dashboard
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="Baguettotron Dataset Studio", layout="wide")
@@ -46,10 +46,13 @@ st.title("✒️ Baguettotron Style Manager")
 with st.sidebar:
     render_sidebar(df, conn, listes)
 
-tab1, tab2 = st.tabs(["➕ Nouvelle Entrée", "📂 Gestion & Édition"])
+tab1, tab2, tab3 = st.tabs(["➕ Nouvelle Entrée", "📂 Gestion & Édition", "📊 Tableau de bord"])
 
 with tab1:
     render_tab_ajout(df, conn, listes)
 
 with tab2:
     render_tab_edition(df, conn, listes)
+
+with tab3:
+    render_tab_dashboard(df, listes)

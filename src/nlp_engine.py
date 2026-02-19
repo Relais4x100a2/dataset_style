@@ -414,3 +414,38 @@ def compute_row_cache(
     }
 
 
+def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:
+    """Calcule l'écart-type de chaque axe stylistique depuis le cache _signature_json.
+
+    Complément orthogonal de avg_signature_from_cache (même données, autre statistique).
+    Un écart élevé signale un dataset hétérogène sur cet axe.
+
+    Args:
+        df_valid: Sous-ensemble du DataFrame filtré sur STATUT_VALIDE.
+
+    Returns:
+        Dict {axe: écart-type} avec les mêmes clés que get_stylometric_signature,
+        ou None si moins de 2 signatures disponibles.
+    """
+    sigs: list[dict[str, float]] = []
+    for _, row in df_valid.iterrows():
+        raw = row.get("_signature_json", "") or ""
+        if not raw:
+            continue
+        try:
+            sigs.append(json.loads(raw))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    if len(sigs) < 2:
+        return None
+    keys = list(sigs[0].keys())
+    result: dict[str, float] = {}
+    for k in keys:
+        values = [s[k] for s in sigs if k in s]
+        if not values:
+            result[k] = 0.0
+            continue
+        mean = sum(values) / len(values)
+        variance = sum((v - mean) ** 2 for v in values) / len(values)
+        result[k] = round(variance ** 0.5, 4)
+    return result

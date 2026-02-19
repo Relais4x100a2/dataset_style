@@ -113,6 +113,109 @@ def audit_rows_from_cache(df_valid: pd.DataFrame) -> list[dict]:
     return rows
 
 
+def dataset_cache_stats(df_valid: pd.DataFrame) -> dict | None:
+    """Calcule les statistiques agrégées depuis le cache (pas de spaCy).
+
+    Lit _ratio, _ttr, _long_phrases et _coherence_score pour chaque fiche
+    dont le cache est rempli. Calcule également un score de santé global 0-100.
+
+    Args:
+        df_valid: Sous-ensemble du DataFrame filtré sur STATUT_VALIDE.
+
+    Returns:
+        Dict avec clés "n", "ratio", "ttr", "phrases", "coherence",
+        "health_score" ou None si aucune fiche n'a de cache.
+    """
+    cols_map = {
+        "ratio":     "_ratio",
+        "ttr":       "_ttr",
+        "phrases":   "_long_phrases",
+        "coherence": "_coherence_score",
+    }
+    parsed: dict[str, list[float]] = {k: [] for k in cols_map}
+    for _, row in df_valid.iterrows():
+        vals: dict[str, float] = {}
+        for key, col in cols_map.items():
+            raw = row.get(col, "") or ""
+            if not raw:
+                break
+            try:
+                vals[key] = float(raw)
+            except (ValueError, TypeError):
+                break
+        else:
+            for key, val in vals.items():
+                parsed[key].append(val)
+
+    n = len(parsed["ratio"])
+    if n == 0:
+        return None
+
+    def _stats(values: list[float]) -> dict:
+        mean = sum(values) / len(values)
+        variance = sum((v - mean) ** 2 for v in values) / max(1, len(values))
+        std = variance ** 0.5
+        return {"mean": round(mean, 3), "std": round(std, 3), "values": values}
+
+    problematic = flag_problematic_rows(df_valid)
+    pct_ok = (n - len(problematic)) / n * 100
+
+    mean_coh = sum(parsed["coherence"]) / len(parsed["coherence"])
+    mean_ttr = sum(parsed["ttr"]) / len(parsed["ttr"])
+    ttr_score = min(100.0, mean_ttr / 0.72 * 100)
+    health = int(round(0.4 * mean_coh + 0.3 * ttr_score + 0.3 * pct_ok))
+
+    return {
+        "n": n,
+        "ratio":     _stats(parsed["ratio"]),
+        "ttr":       _stats(parsed["ttr"]),
+        "phrases":   _stats(parsed["phrases"]),
+        "coherence": _stats(parsed["coherence"]),
+        "health_score": max(0, min(100, health)),
+    }
+
+
+def flag_problematic_rows(df_valid: pd.DataFrame) -> list[dict]:
+    """Identifie les fiches avec des problèmes de qualité à partir du cache.
+
+    Critères :
+        - Cohérence < 45 → "Cohérence critique"
+        - Type Expansion + ratio < 1.5 → "Expansion faible"
+        - TTR < 0.50 → "Vocabulaire répétitif"
+
+    Args:
+        df_valid: Sous-ensemble du DataFrame filtré sur STATUT_VALIDE.
+
+    Returns:
+        Liste de dicts {"id", "type", "forme", "ton", "alertes": list[str]}.
+        Seules les fiches ayant au moins une alerte et un cache complet sont incluses.
+    """
+    result = []
+    for _, row in df_valid.iterrows():
+        try:
+            ratio = float(row.get("_ratio", "") or "")
+            ttr   = float(row.get("_ttr", "") or "")
+            score = float(row.get("_coherence_score", "") or "")
+        except (ValueError, TypeError):
+            continue
+        alertes: list[str] = []
+        if score < 45:
+            alertes.append("Cohérence critique")
+        if str(row.get("type", "")) == "Expansion" and ratio < 1.5:
+            alertes.append("Expansion faible")
+        if ttr < 0.50:
+            alertes.append("Vocabulaire répétitif")
+        if alertes:
+            result.append({
+                "id":     row.get("id", ""),
+                "type":   row.get("type", ""),
+                "forme":  row.get("forme", ""),
+                "ton":    row.get("ton", ""),
+                "alertes": alertes,
+            })
+    return result
+
+
 def avg_trigrams_from_cache(df_valid: pd.DataFrame) -> Counter | None:
     """Agrège les trigrammes POS à partir de _trigrams_json (pas de spaCy)."""
     total: Counter = Counter()
