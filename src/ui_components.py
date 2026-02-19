@@ -16,6 +16,8 @@ from src.database import (
     audit_rows_from_cache,
     avg_signature_from_cache,
     avg_trigrams_from_cache,
+    dataset_cache_stats,
+    flag_problematic_rows,
 )
 from src.export_utils import convert_to_baguettotron_jsonl
 from src.nlp_engine import (
@@ -32,6 +34,7 @@ from src.nlp_engine import (
     prioritized_actions,
     translate_trigram,
     compute_row_cache,
+    signature_variance,
 )
 
 
@@ -397,20 +400,9 @@ def render_tab_edition(df, conn, listes):
                         "Enregistre des fiches (bouton « Sauvegarder ») pour remplir "
                         "l'audit à partir des colonnes cache. Aucune analyse lourde au chargement."
                     )
-    
-        # --- Vérifier ma prose : charge spaCy uniquement au clic ---
+
         st.session_state.setdefault("verifier_clique", False)
-        col_verif, _ = st.columns([1, 3])
-        with col_verif:
-            if st.button("🔍 Vérifier ma prose", type="secondary"):
-                st.session_state["verifier_clique"] = True
-                st.rerun()
-        st.caption(
-            "Clique pour lancer l'analyse linguistique sur la fiche affichée. "
-            "« Sauvegarder » enregistre en base et met à jour le cache."
-        )
-        nlp = load_nlp() if st.session_state["verifier_clique"] else None
-    
+
         # 1. FILTRAGE
         st.subheader("🔍 Filtrer les fiches")
         filtre_statut = st.multiselect(
@@ -451,6 +443,7 @@ def render_tab_edition(df, conn, listes):
     
             @st.fragment
             def _bloc_edition_et_analyse():
+                nlp = load_nlp() if st.session_state["verifier_clique"] else None
                 col_e1, col_e2, col_e3, col_e4 = st.columns(4)
                 try:
                     idx_type = listes["types"].index(current_row["type"])
@@ -476,6 +469,10 @@ def render_tab_edition(df, conn, listes):
                 if st.button("🪄 Corriger l'orthographe", key=f"correct_ortho_{row_id}", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
                     if _run_correction_ortho(edit_output, pending_key):
                         st.rerun()
+
+                if st.button("🔍 Vérifier ma prose", key=f"verifier_btn_{row_id}", type="secondary", help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose."):
+                    st.session_state["verifier_clique"] = True
+                    st.rerun()
 
                 col_e5, col_e6 = st.columns([1, 2])
                 edit_statut = col_e5.selectbox("Statut", listes["statuts"], index=idx_statut, key=f"stat_{row_id}")
@@ -512,3 +509,400 @@ def render_tab_edition(df, conn, listes):
                     st.success(f"Fiche {row_id} mise à jour !")
                     st.rerun()
             _bloc_edition_et_analyse()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ONGLET 3 — TABLEAU DE BORD
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_overview(df: pd.DataFrame, listes: dict) -> None:
+    """Section 1 — Composition du dataset (métadonnées, aucun cache requis)."""
+    df_valid = df[df["statut"] == STATUT_VALIDE]
+    total = len(df)
+    n_valide = len(df_valid)
+    n_cours = len(df[df["statut"] == "En cours"])
+    n_relire = len(df[df["statut"] == "A relire"])
+    n_todo = len(df[df["statut"] == "A faire"])
+
+    st.subheader("Composition du dataset")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Total fiches", total)
+    m2.metric("Validées", n_valide)
+    m3.metric("En cours", n_cours)
+    m4.metric("A relire", n_relire)
+    m5.metric("A faire", n_todo)
+
+    if total > 0:
+        st.progress(n_valide / total, text=f"{n_valide}/{total} fiches validées ({n_valide/total:.0%})")
+
+    if df.empty:
+        return
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        counts_statut = df["statut"].value_counts().reset_index()
+        counts_statut.columns = ["Statut", "Nombre"]
+        fig_statut = go.Figure(go.Bar(
+            x=counts_statut["Nombre"],
+            y=counts_statut["Statut"],
+            orientation="h",
+            text=counts_statut["Nombre"],
+            textposition="auto",
+        ))
+        fig_statut.update_layout(
+            title="Répartition par statut",
+            height=220,
+            margin=dict(t=40, b=20, l=10, r=10),
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_statut, use_container_width=True)
+
+    with col_right:
+        counts_type = df["type"].value_counts().reset_index()
+        counts_type.columns = ["Type", "Nombre"]
+        fig_type = go.Figure(go.Bar(
+            x=counts_type["Nombre"],
+            y=counts_type["Type"],
+            orientation="h",
+            text=counts_type["Nombre"],
+            textposition="auto",
+        ))
+        fig_type.update_layout(
+            title="Répartition par type",
+            height=220,
+            margin=dict(t=40, b=20, l=10, r=10),
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_type, use_container_width=True)
+
+    with st.expander("Détail formes / tons / supports", expanded=False):
+        for dim, label in [("forme", "Formes"), ("ton", "Tons"), ("support", "Supports")]:
+            counts = df[dim].value_counts().reset_index()
+            counts.columns = [label, "Nombre"]
+            fig = go.Figure(go.Bar(
+                x=counts["Nombre"],
+                y=counts[label],
+                orientation="h",
+                text=counts["Nombre"],
+                textposition="auto",
+            ))
+            fig.update_layout(
+                title=label,
+                height=max(160, len(counts) * 30 + 60),
+                margin=dict(t=40, b=10, l=10, r=10),
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
+    """Section 2 — Qualité stylistique (lit uniquement le cache, pas de spaCy)."""
+    st.subheader("Qualité stylistique")
+    n = stats["n"]
+
+    health = stats["health_score"]
+    _, health_tone = coherence_level(health)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(
+        "Score santé dataset", f"{health} / 100",
+        help="0.4×cohérence + 0.3×TTR normalisé + 0.3×% fiches sans alerte",
+    )
+    m2.metric(
+        "Cohérence moyenne",
+        f"{stats['coherence']['mean']:.0f} / 100",
+        help=f"Écart-type : {stats['coherence']['std']:.1f}",
+    )
+    m3.metric(
+        "TTR moyen",
+        f"{stats['ttr']['mean']:.0%}",
+        help=f"Écart-type : {stats['ttr']['std']:.2f}",
+    )
+    m4.metric(
+        "Ratio moyen",
+        f"x{stats['ratio']['mean']:.1f}",
+        help=f"Écart-type : {stats['ratio']['std']:.2f}",
+    )
+
+    # Histogrammes triples : ratio / TTR / longueur phrases
+    c1, c2, c3 = st.columns(3)
+    for col, key, label, xrange in [
+        (c1, "ratio",   "Ratio d'amplification", None),
+        (c2, "ttr",     "TTR (diversité vocabulaire)", [0, 1]),
+        (c3, "phrases", "Moy. mots / phrase", None),
+    ]:
+        with col:
+            fig = go.Figure(go.Histogram(x=stats[key]["values"], nbinsx=12))
+            fig.update_layout(
+                title=label,
+                height=220,
+                margin=dict(t=40, b=20, l=10, r=10),
+                xaxis=dict(range=xrange) if xrange else {},
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # Histogramme cohérence avec zones colorées
+    scores = stats["coherence"]["values"]
+    fig_coh = go.Figure()
+    fig_coh.add_vrect(x0=0,  x1=45,  fillcolor="red",    opacity=0.08, line_width=0)
+    fig_coh.add_vrect(x0=45, x1=65,  fillcolor="orange",  opacity=0.08, line_width=0)
+    fig_coh.add_vrect(x0=65, x1=100, fillcolor="green",  opacity=0.08, line_width=0)
+    fig_coh.add_trace(go.Histogram(x=scores, nbinsx=15, name="Cohérence"))
+    fig_coh.add_vline(
+        x=stats["coherence"]["mean"],
+        line_dash="dash", line_color="white",
+        annotation_text=f"Moy. {stats['coherence']['mean']:.0f}",
+        annotation_position="top right",
+    )
+    fig_coh.update_layout(
+        title=f"Distribution des scores de cohérence ({n} fiches)",
+        height=280,
+        margin=dict(t=40, b=20, l=10, r=10),
+        xaxis=dict(range=[0, 100], title="Score"),
+        yaxis=dict(title="Nb fiches"),
+        showlegend=False,
+    )
+    st.plotly_chart(fig_coh, use_container_width=True)
+
+
+def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
+    """Section 3 — Stylométrie globale (radar moyen + variance + trigrammes + trend)."""
+    st.subheader("Stylométrie globale")
+
+    sig_avg = avg_signature_from_cache(df_valid)
+    sig_std = signature_variance(df_valid)
+
+    if sig_avg:
+        categories = list(sig_avg.keys())
+        r_avg = [normalize_signature(k, sig_avg[k]) for k in categories]
+
+        col_radar, col_tri = st.columns([1, 1])
+
+        with col_radar:
+            fig_radar = go.Figure()
+            theta = categories + [categories[0]]
+            r_plot = r_avg + [r_avg[0]]
+
+            # Bandes d'erreur si variance disponible
+            if sig_std:
+                r_upper = [
+                    min(1.0, normalize_signature(k, sig_avg[k] + sig_std[k]))
+                    for k in categories
+                ]
+                r_lower = [
+                    max(0.0, normalize_signature(k, sig_avg[k] - sig_std[k]))
+                    for k in categories
+                ]
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=r_upper + [r_upper[0]],
+                    theta=theta,
+                    fill=None,
+                    line=dict(color="rgba(0,120,200,0.2)", width=0),
+                    showlegend=False,
+                    name="Zone ±σ",
+                ))
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=r_lower + [r_lower[0]],
+                    theta=theta,
+                    fill="tonext",
+                    fillcolor="rgba(0,120,200,0.12)",
+                    line=dict(color="rgba(0,120,200,0.2)", width=0),
+                    showlegend=False,
+                    name="Zone ±σ",
+                ))
+
+            fig_radar.add_trace(go.Scatterpolar(
+                r=r_plot,
+                theta=theta,
+                name="Signature moyenne",
+                fill="toself",
+                line=dict(color="rgb(0,120,200)"),
+            ))
+            fig_radar.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                showlegend=False,
+                title="Signature stylistique moyenne (zone = ±σ)",
+                height=380,
+                margin=dict(t=60, b=20, l=20, r=20),
+            )
+            st.plotly_chart(fig_radar, use_container_width=True)
+
+            if sig_std:
+                with st.expander("Dispersion par axe (écart-type)", expanded=False):
+                    rows_var = [
+                        {"Axe": k, "Moy.": round(sig_avg[k], 3), "σ": round(sig_std[k], 4)}
+                        for k in categories
+                    ]
+                    st.dataframe(pd.DataFrame(rows_var), hide_index=True, width="stretch")
+
+        with col_tri:
+            tri_total = avg_trigrams_from_cache(df_valid)
+            if tri_total:
+                top15 = tri_total.most_common(15)
+                labels = [translate_trigram(g) for g, _ in top15]
+                values = [c for _, c in top15]
+                fig_tri = go.Figure(go.Bar(
+                    x=values[::-1],
+                    y=labels[::-1],
+                    orientation="h",
+                    text=values[::-1],
+                    textposition="auto",
+                ))
+                fig_tri.update_layout(
+                    title="Top 15 constructions grammaticales (POS)",
+                    height=380,
+                    margin=dict(t=60, b=20, l=10, r=10),
+                )
+                st.plotly_chart(fig_tri, use_container_width=True)
+            else:
+                st.info("Aucun trigramme POS disponible. Enregistre des fiches en cliquant sur « Vérifier ma prose ».")
+    else:
+        st.info("Signature stylométrique non disponible. Clique sur « Vérifier ma prose » dans l'onglet Gestion & Édition pour remplir le cache.")
+
+    # Évolution temporelle de la cohérence
+    scores_trend: list[float] = []
+    ids_trend: list[str] = []
+    for _, row in df_valid.iterrows():
+        sc = row.get("_coherence_score", "") or ""
+        if not sc:
+            continue
+        try:
+            scores_trend.append(float(sc))
+            ids_trend.append(str(row.get("id", "")))
+        except (ValueError, TypeError):
+            continue
+
+    if len(scores_trend) >= 3:
+        st.markdown("#### Évolution de la cohérence (ordre de saisie)")
+        st.caption("Chaque point représente une fiche validée dans l'ordre des lignes. Si la courbe descend, le style dérive.")
+        fig_trend = go.Figure()
+        fig_trend.add_hrect(y0=0,  y1=45,  fillcolor="red",   opacity=0.07, line_width=0)
+        fig_trend.add_hrect(y0=45, y1=65,  fillcolor="orange", opacity=0.07, line_width=0)
+        fig_trend.add_hrect(y0=65, y1=100, fillcolor="green", opacity=0.07, line_width=0)
+        fig_trend.add_trace(go.Scatter(
+            y=scores_trend,
+            x=list(range(1, len(scores_trend) + 1)),
+            mode="lines+markers",
+            line=dict(color="rgb(0,120,200)"),
+            hovertext=ids_trend,
+            hovertemplate="Fiche %{hovertext}<br>Score : %{y}<extra></extra>",
+        ))
+        fig_trend.update_layout(
+            height=240,
+            margin=dict(t=20, b=20, l=40, r=20),
+            yaxis=dict(range=[0, 100], title="Score cohérence"),
+            xaxis=dict(title="Fiche (ordre dataset)"),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+
+
+def _render_alerts_panel(problematic: list[dict]) -> None:
+    """Section 4 — Alertes qualité issues du cache."""
+    st.subheader("Alertes qualité")
+    if not problematic:
+        st.success("Aucune fiche problématique détectée. Bon travail !")
+        return
+
+    # Résumé par type d'alerte
+    from collections import Counter as _Counter
+    alerte_counts: _Counter = _Counter()
+    for row in problematic:
+        for a in row["alertes"]:
+            alerte_counts[a] += 1
+
+    col_bar, col_info = st.columns([1, 2])
+    with col_bar:
+        labels = list(alerte_counts.keys())
+        values = [alerte_counts[k] for k in labels]
+        fig_al = go.Figure(go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            text=values,
+            textposition="auto",
+        ))
+        fig_al.update_layout(
+            title="Alertes par type",
+            height=max(160, len(labels) * 50 + 60),
+            margin=dict(t=40, b=10, l=10, r=10),
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_al, use_container_width=True)
+
+    with col_info:
+        st.caption(
+            f"**{len(problematic)} fiche(s) concernée(s)** sur les fiches validées avec cache. "
+            "Ouvre l'onglet Gestion & Édition pour corriger."
+        )
+        for alerte, count in alerte_counts.items():
+            level_label, tone = coherence_level(0 if alerte == "Cohérence critique" else 50)
+            st.markdown(f"- **{alerte}** : {count} fiche(s)")
+
+    # Tableau détaillé
+    rows_display = []
+    for r in problematic:
+        rows_display.append({
+            "ID": r["id"],
+            "Type": r["type"],
+            "Forme": r["forme"],
+            "Ton": r["ton"],
+            "Alertes": " · ".join(r["alertes"]),
+        })
+    st.dataframe(
+        pd.DataFrame(rows_display),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "ID": st.column_config.TextColumn(width="small"),
+            "Alertes": st.column_config.TextColumn(width="large"),
+        },
+    )
+
+
+def render_tab_dashboard(df: pd.DataFrame, listes: dict) -> None:
+    """Onglet Tableau de bord : composition, qualité, stylométrie, alertes.
+
+    Entièrement basé sur le cache — aucun appel spaCy ni LanguageTool.
+    """
+    df_valid = df[df["statut"] == STATUT_VALIDE]
+
+    n_total = len(df)
+    n_valid = len(df_valid)
+
+    if n_total == 0:
+        st.info("Le dataset est vide. Commence à ajouter des fiches dans l'onglet « Nouvelle Entrée ».")
+        return
+
+    # Section 1 — Composition (pas besoin du cache)
+    _render_overview(df, listes)
+
+    st.divider()
+
+    if n_valid == 0:
+        st.info("Aucune fiche validée. Passe des fiches au statut « Fait et validé » pour débloquer les indicateurs qualité et stylistiques.")
+        return
+
+    # Calcul unique des stats cache — passé aux sections qui en ont besoin
+    stats = dataset_cache_stats(df_valid)
+
+    if stats is None:
+        st.warning(
+            "Le cache n'est pas encore rempli. Ouvre l'onglet Gestion & Édition, "
+            "clique « Vérifier ma prose » puis « Enregistrer les modifications » pour chaque fiche validée."
+        )
+        return
+
+    # Section 2 — Qualité
+    _render_quality_panel(df_valid, stats)
+
+    st.divider()
+
+    # Section 3 — Stylométrie
+    _render_stylometry_panel(df_valid)
+
+    st.divider()
+
+    # Section 4 — Alertes (flag_problematic_rows réutilise le cache, déjà chargé dans dataset_cache_stats)
+    problematic = flag_problematic_rows(df_valid)
+    _render_alerts_panel(problematic)
