@@ -159,14 +159,26 @@ def _run_correction_ortho(output_text: str, pending_key: str) -> bool:
 
 def _get_openrouter_api_key() -> str:
     """Récupère la clé API OpenRouter depuis les secrets Streamlit ([connections.openrouter] api_key)."""
+    # Sur Community Cloud, les sections TOML sont exposées en accès par attributs.
+    try:
+        conn = getattr(st.secrets, "connections", None)
+        if conn is not None:
+            openrouter = getattr(conn, "openrouter", None)
+            if openrouter is not None:
+                key = getattr(openrouter, "api_key", None)
+                if key and isinstance(key, str):
+                    return key.strip()
+    except (AttributeError, TypeError, KeyError):
+        pass
+    # Fallback : accès dict (ex. en local avec secrets.toml).
     try:
         conn = st.secrets.get("connections", {}) or {}
         openrouter = conn.get("openrouter") or {}
         if isinstance(openrouter, dict):
             return (openrouter.get("api_key") or "").strip()
-        return ""
     except (AttributeError, TypeError, KeyError):
-        return ""
+        pass
+    return ""
 
 
 def _render_llm_generate_buttons(
