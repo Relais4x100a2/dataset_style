@@ -374,6 +374,51 @@ def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
     }
 
 
+def _get_finetuning_insights(
+    text_in: str, text_out: str, nlp
+) -> dict[str, str] | None:
+    """
+    Calcule les indicateurs additionnels pour le fine-tuning (densité lexicale,
+    verbes faibles, contraste syntaxique, nb phrases, ponctuation expressive, stop ratio).
+    Retourne un dict colonne -> valeur string, ou None si nlp/texte manquant.
+    """
+    if nlp is None or not (text_in and text_out):
+        return None
+    doc_out = nlp(text_out)
+    tokens = [t for t in doc_out if not t.is_punct and not t.is_space]
+    nb_tokens = max(1, len(tokens))
+    content_pos = {"NOUN", "VERB", "ADJ", "ADV", "PROPN"}
+    content_count = sum(1 for t in doc_out if not t.is_punct and t.pos_ in content_pos)
+    lexical_density = content_count / nb_tokens
+
+    verb_counts = Counter(
+        t.lemma_.lower() for t in doc_out if t.pos_ in ("VERB", "AUX")
+    )
+    total_verbs = sum(verb_counts.values())
+    weak_count = sum(verb_counts.get(v, 0) for v in VERBES_FAIBLES)
+    weak_verb_ratio = weak_count / max(1, total_verbs)
+
+    contrast = syntax_contrast_score(text_in, text_out, nlp)
+    nb_sentences = len(list(doc_out.sents))
+
+    punct_tiret = text_out.count("—")
+    punct_ellipsis = text_out.count("...")
+    punct_colon = text_out.count(":")
+    punct_exp = f"{punct_tiret},{punct_ellipsis},{punct_colon}"
+
+    stop_out = sum(1 for t in doc_out if not t.is_punct and t.is_stop)
+    stop_ratio_out = stop_out / nb_tokens
+
+    return {
+        "_lexical_density": f"{lexical_density:.2f}",
+        "_weak_verb_ratio": f"{weak_verb_ratio:.2f}",
+        "_syntax_contrast": f"{contrast:.2f}",
+        "_nb_sentences": str(nb_sentences),
+        "_punct_exp": punct_exp,
+        "_stop_ratio_out": f"{stop_ratio_out:.2f}",
+    }
+
+
 def compute_row_cache(
     edit_input: str,
     edit_output: str,
@@ -404,7 +449,7 @@ def compute_row_cache(
     else:
         score = 100
 
-    return {
+    result = {
         "_ratio": str(round(ins["ratio"], 3)),
         "_ttr": f"{ins['ttr']:.2f}",
         "_long_phrases": str(round(ins["long_moy_phrases"], 1)),
@@ -412,6 +457,103 @@ def compute_row_cache(
         "_coherence_score": str(score),
         "_trigrams_json": json.dumps(dict(tri)) if tri else "{}",
     }
+    extra = _get_finetuning_insights(edit_input, edit_output, nlp)
+    if extra:
+        result.update(extra)
+    for col in cache_columns:
+        if col not in result:
+            result[col] = ""
+    return result
+
+
+def recompute_cache_for_rows(
+    df_valid: pd.DataFrame,
+    nlp,
+    cache_columns: list[str],
+) -> pd.DataFrame:
+    """
+    Recalcule tout le cache stylométrique pour les lignes de df_valid (fiches validées).
+    Utilise un passage en deux temps pour la cohérence (moyenne des autres fiches).
+    Retourne une copie de df_valid avec les colonnes cache_columns mises à jour.
+    """
+    if nlp is None or df_valid.empty:
+        out = df_valid.copy()
+        for c in cache_columns:
+            if c not in out.columns:
+                out[c] = ""
+        return out
+
+    n = len(df_valid)
+    row_data: list[dict] = []
+
+    for _, row in df_valid.iterrows():
+        inp = (str(row.get("input") or "").strip())
+        out_text = (str(row.get("output") or "")).strip()
+        row_id = row.get("id", "")
+        if not (inp and out_text):
+            row_data.append({"row_id": row_id, "cache": {col: "" for col in cache_columns}})
+            continue
+        ins = get_linguistic_insights(inp, out_text, nlp)
+        sig = get_stylometric_signature(out_text, nlp)
+        tri = get_pos_trigrams(out_text, nlp)
+        extra = _get_finetuning_insights(inp, out_text, nlp)
+        if not ins or not sig:
+            row_data.append({"row_id": row_id, "cache": {col: "" for col in cache_columns}})
+            continue
+        row_data.append({
+            "row_id": row_id,
+            "ins": ins,
+            "sig": sig,
+            "tri": tri,
+            "extra": extra or {},
+        })
+
+    all_sigs = [r["sig"] for r in row_data if "sig" in r and r.get("sig")]
+    if not all_sigs:
+        result = df_valid.copy()
+        for c in cache_columns:
+            if c not in result.columns:
+                result[c] = ""
+        return result
+
+    sum_sigs: dict[str, float] = {}
+    for k in all_sigs[0]:
+        sum_sigs[k] = sum(s[k] for s in all_sigs)
+
+    result = df_valid.copy()
+    for c in cache_columns:
+        if c not in result.columns:
+            result[c] = ""
+
+    for r in row_data:
+        row_id = r["row_id"]
+        if "cache" in r:
+            for col, val in r["cache"].items():
+                result.loc[result["id"].astype(str) == str(row_id), col] = val
+            continue
+        sig_fiche = r["sig"]
+        others_mean = {
+            k: (sum_sigs[k] - sig_fiche[k]) / max(1, n - 1)
+            for k in sig_fiche.keys()
+        }
+        score, _ = compute_coherence_score(
+            sig_fiche, others_mean, r["ins"].get("mots_repetes", [])
+        )
+        cache = {
+            "_ratio": str(round(r["ins"]["ratio"], 3)),
+            "_ttr": f"{r['ins']['ttr']:.2f}",
+            "_long_phrases": str(round(r["ins"]["long_moy_phrases"], 1)),
+            "_signature_json": json.dumps(sig_fiche),
+            "_coherence_score": str(score),
+            "_trigrams_json": json.dumps(dict(r["tri"])) if r["tri"] else "{}",
+        }
+        cache.update(r.get("extra", {}))
+        for col in cache_columns:
+            cache.setdefault(col, "")
+        for col, val in cache.items():
+            result.loc[result["id"].astype(str) == str(row_id), col] = val
+
+    return result
 
 
 def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:

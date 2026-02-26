@@ -1,6 +1,6 @@
-# ✒️ Baguettotron Dataset Studio
+# ✒️ Dataset Style Studio
 
-Interface de curation de données pour constituer des jeux de données de **fine-tuning** stylistique (format Instruct) du modèle **Baguettotron** (PleIAs). Transformation de notes brutes en prose littéraire, avec catégorisation forme / ton / support et exports prêts pour l'entraînement.
+Interface de curation de données pour le **fine-tuning** stylistique (brouillon → prose). Catégorisation forme / ton / support, indicateurs stylométriques et exports multi-modèles (LFM2-24B-A2B, PleIAs/Baguettotron, Mistral Small Creative).
 
 ---
 
@@ -29,6 +29,8 @@ Interface de curation de données pour constituer des jeux de données de **fine
 | Connexion        | `st-gsheets-connection` (authentification par compte de service) |
 | NLP / analyse    | [spaCy](https://spacy.io/) `fr_core_news_sm` (métriques, cohérence, cache) |
 | Correction FR    | [LanguageTool](https://languagetool.org/) (API publique HTTP, pas de Java) |
+| Dictionnaire     | [Wiktionnaire](https://fr.wiktionary.org/) via [API Wikimedia](https://www.mediawiki.org/wiki/API:Main_page) (définitions, synonymes, antonymes, vocabulaire apparenté, anagrammes) |
+| Génération LLM   | [OpenRouter](https://openrouter.ai/) (modèle `liquid/lfm-2-24b-a2b`) pour brouillon ↔ prose selon type, forme, ton, support |
 | Visualisation    | [Plotly](https://plotly.com/python/) (radar, histogrammes, tendances) |
 
 Les appels à l'API Google Sheets sont retentés en cas d'erreur temporaire (503, 429, etc.) avec backoff exponentiel.
@@ -46,8 +48,10 @@ dataset_style/
 └── src/
     ├── __init__.py
     ├── database.py      # Connexion Sheets, load_data (retry), update_data, helpers cache
-    ├── export_utils.py  # Conversion dataset → JSONL Baguettotron (ChatML, <think>, <H≈…>)
+    ├── export_utils.py  # Export JSONL multi-modèles (LFM2, Baguettotron, Mistral) + option stylométrie
     ├── nlp_engine.py    # Insights linguistiques, stylométrie, cohérence, LanguageTool — sans Streamlit
+    ├── wiktionary.py    # Wiktionnaire (API Wikimedia) : définitions, synonymes, antonymes, vocabulaire apparenté, anagrammes
+    ├── llm_generate.py  # Génération brouillon ↔ prose par LLM (OpenRouter, liquid/lfm-2-24b-a2b)
     └── ui_components.py # Sidebar, onglets Nouvelle Entrée / Gestion & Édition / Tableau de bord
 ```
 
@@ -99,6 +103,15 @@ client_x509_cert_url = "..."
 spreadsheet = "URL_COMPLETE_DE_VOTRE_GOOGLE_SHEET"
 ```
 
+Pour activer la **génération par LLM** (brouillon ↔ prose via OpenRouter), ajouter dans le même fichier (ou dans les Secrets du Cloud) :
+
+```toml
+[connections.openrouter]
+api_key = "votre-cle-openrouter"
+```
+
+Le modèle utilisé est `liquid/lfm-2-24b-a2b`. Sans clé, les boutons de génération restent désactivés et un message indique comment configurer.
+
 ### Sur Streamlit Community Cloud
 
 *App Settings* → *Secrets* : coller le contenu du `secrets.toml` ci‑dessus.
@@ -121,7 +134,7 @@ Chaque ligne du Sheet correspond à une fiche de curation :
 | `statut`  | A faire, En cours, A relire, **Fait et validé** |
 | `notes`   | Notes libres |
 
-Colonnes de **cache** (calculées automatiquement à la sauvegarde) :
+Colonnes de **cache** (calculées automatiquement à la sauvegarde, utilisables comme **insights pour le fine-tuning**) :
 
 | Colonne             | Contenu |
 |---------------------|---------|
@@ -131,6 +144,14 @@ Colonnes de **cache** (calculées automatiquement à la sauvegarde) :
 | `_signature_json`   | Signature stylométrique (7 axes) en JSON |
 | `_coherence_score`  | Score de cohérence avec la moyenne du dataset (0–100) |
 | `_trigrams_json`    | Distribution des trigrammes POS en JSON |
+| `_lexical_density`  | Densité lexicale (N+V+Adj+Adv) / tokens |
+| `_weak_verb_ratio`  | Proportion de verbes faibles (être, avoir, faire, aller, dire) |
+| `_syntax_contrast`  | Contraste stylistique input ↔ output (0–1) |
+| `_nb_sentences`     | Nombre de phrases (output) |
+| `_punct_exp`        | Ponctuation expressive : "n,m,p" (tirets —, ..., :) |
+| `_stop_ratio_out`   | Proportion de mots-outils dans l'output |
+
+Voir [docs/stylometrie_finetuning.md](docs/stylometrie_finetuning.md) pour le rôle de chaque indicateur lors du fine-tuning.
 
 ---
 
@@ -141,7 +162,9 @@ Colonnes de **cache** (calculées automatiquement à la sauvegarde) :
 Formulaire de saisie (type, forme, ton, support, brouillon, prose, statut). Identique à Gestion & Édition pour l'analyse :
 
 - **Corriger l'orthographe** : appel à l'API LanguageTool avant enregistrement.
+- **Génération par LLM** : deux boutons — « Générer le brouillon depuis la prose » et « Générer la prose depuis le brouillon » (OpenRouter, type / forme / ton / support pris en compte).
 - **Vérifier ma prose** : analyse linguistique (spaCy) avec métriques, radar, conseils.
+- **Wiktionnaire** : champ « Mot à vérifier » + recherche (API Wikimedia) pour afficher définitions, synonymes, antonymes, vocabulaire apparenté et anagrammes.
 - **Enregistrer l'entrée** : crée une nouvelle ligne dans le Sheet avec calcul du cache.
 
 ### Onglet « Gestion & Édition »
@@ -149,12 +172,18 @@ Formulaire de saisie (type, forme, ton, support, brouillon, prose, statut). Iden
 Navigation fiche par fiche avec filtrage par statut.
 
 - **Corriger l'orthographe** : bouton sous le champ *Prose (Output)*. Uniquement corrections orthographe/grammaire (LanguageTool, pas de réécriture). Gestion du timeout et des erreurs réseau.
+- **Génération par LLM** : mêmes boutons qu’en Nouvelle Entrée pour générer le brouillon à partir de la prose ou l’inverse (paramètres de la fiche utilisés).
 - **Vérifier ma prose** : calcul des indicateurs linguistiques (amplification, TTR, longueur phrases, répétitions, Baguette-Touch, radar stylistique, conseils).
+- **Wiktionnaire** : même outil que dans Nouvelle Entrée pour consulter définitions, synonymes, antonymes, vocabulaire apparenté et anagrammes pendant l’édition.
 - **Enregistrer les modifications** : écriture dans le Sheet + mise à jour du cache si une vérification a été faite.
 
 ### Onglet « Tableau de bord »
 
-Vue d'ensemble du dataset, entièrement basée sur le **cache** (pas de spaCy, rendu instantané).
+Vue d'ensemble du dataset, entièrement basée sur le **cache** (sauf pour la gestion du cache).
+
+**Cache stylométrique (générer / écraser / enregistrer)**
+- **Générer le cache (fiches sans cache)** : remplit le cache uniquement pour les fiches « Fait et validé » qui n'en ont pas encore (sans toucher aux autres).
+- **Écraser tout le cache et enregistrer** : recalcule tout le cache des fiches validées et met à jour le Google Sheet (avec case à cocher de confirmation).
 
 **Section 1 — Composition**
 - Métriques rapides (total / validées / en cours / à faire), barre de progression.
@@ -178,7 +207,7 @@ Vue d'ensemble du dataset, entièrement basée sur le **cache** (pas de spaCy, r
 
 ### Sidebar
 
-Statistiques par statut, boutons **Télécharger CSV** et **Télécharger JSONL** (même taille, CSS harmonisé).
+Statistiques par statut. **Export Fine-tuning** : choix du **format d'export JSONL** (LFM2-24B-A2B, PleIAs/Baguettotron, Mistral Small Creative), option **Inclure indicateurs stylométriques**, puis boutons **Télécharger CSV** et **Télécharger JSONL** (même taille, CSS harmonisé).
 
 ---
 
@@ -187,7 +216,12 @@ Statistiques par statut, boutons **Télécharger CSV** et **Télécharger JSONL*
 Les deux exports ne concernent que les lignes dont le **statut** est **« Fait et validé »**.
 
 - **CSV** : export tabulaire brut (analyse, tableaux, etc.).
-- **JSONL Baguettotron** : format ChatML pour fine-tuning, avec balises de raisonnement (forme/ton) et marqueurs d'entropie `<H≈0.3>` (Normalisation) ou `<H≈1.5>` (Expansion).
+- **JSONL** : format dépend du **modèle cible** choisi dans la sidebar :
+  - **LFM2-24B-A2B** : structure `messages` (system optionnel, user, assistant), une ligne JSON par fiche. Option stylométrie → message system.
+  - **PleIAs/Baguettotron** : ChatML avec balise `<think>` (trace forme/ton) et marqueurs d'entropie `<H≈0.3>` (Normalisation) ou `<H≈1.5>` (Expansion). Option stylométrie → ligne « Stylo » dans la trace.
+  - **Mistral Small Creative** : structure `messages` (user, assistant). Option stylométrie → préfixe dans le message user.
+
+Si **Inclure indicateurs stylométriques** est coché, les colonnes de cache (TTR, longueur de phrase, densité lexicale, etc.) sont injectées dans l'export selon le format (voir [docs/stylometrie_finetuning.md](docs/stylometrie_finetuning.md)).
 
 ---
 
@@ -202,7 +236,7 @@ Pour limiter l'accès à l'app sur Streamlit Cloud : dépôt GitHub en **privé*
 - **503 / Google Sheets indisponible** : l'app réessaie automatiquement (retry + backoff exponentiel, 4 tentatives). Si l'erreur persiste, réessayer plus tard.
 - **spaCy non disponible après déploiement** : faire **Reboot** ou **Clear cache and redeploy** dans les paramètres de l'app. Utiliser **Python 3.12** (Advanced settings) pour éviter les incompatibilités blis/NumPy sous 3.13.
 - **OOM (mémoire)** : spaCy ne tourne que sur la fiche en cours (Vérifier / Enregistrer) ; le Tableau de bord n'appelle jamais spaCy. Le bloc édition est dans un fragment Streamlit pour limiter les rechargements.
-- **Dashboard vide** : les indicateurs stylistiques nécessitent que le cache soit rempli. Ouvrir l'onglet Gestion & Édition, cliquer « Vérifier ma prose » puis « Enregistrer » sur chaque fiche validée.
+- **Dashboard vide** : les indicateurs stylistiques nécessitent que le cache soit rempli. Soit utiliser l'onglet Gestion & Édition (« Vérifier ma prose » puis « Enregistrer »), soit dans le Tableau de bord ouvrir « Cache stylométrique » et cliquer sur « Générer le cache (fiches sans cache) » ou « Écraser tout le cache et enregistrer ».
 
 ---
 
@@ -214,7 +248,7 @@ Les modules sont conçus pour être orthogonaux :
 |--------|---------------|-------------|
 | `database.py` | Accès données, cache, helpers DataFrame | `pandas`, `json` |
 | `nlp_engine.py` | Calculs analytiques (insights, stylométrie, cohérence, LanguageTool) | `pandas`, `requests` — **sans Streamlit** |
-| `export_utils.py` | Conversion JSONL ChatML | `pandas`, `json`, `database.py` |
+| `export_utils.py` | Export JSONL multi-modèles (LFM2, Baguettotron, Mistral) | `pandas`, `json`, `database.py` |
 | `ui_components.py` | Rendu Streamlit, état session, graphiques | tous les modules ci-dessus, `streamlit`, `plotly` |
 
 `nlp_engine.py` ne contient aucun import Streamlit — il est testable indépendamment de l'app.

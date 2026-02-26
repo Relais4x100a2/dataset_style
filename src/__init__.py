@@ -1,1 +1,1 @@
-# Package dataset_style — Baguettotron Dataset Studio
+# Package dataset_style — Dataset Style Studio

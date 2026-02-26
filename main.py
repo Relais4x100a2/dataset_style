@@ -5,7 +5,7 @@ from src.database import load_data, update_data
 from src.ui_components import render_sidebar, render_tab_ajout, render_tab_edition, render_tab_dashboard
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Baguettotron Dataset Studio", layout="wide")
+st.set_page_config(page_title="Dataset Style Studio", layout="wide")
 
 # --- CONNEXION GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -41,7 +41,7 @@ listes = {
     "statuts": LISTE_STATUTS,
 }
 
-st.title("✒️ Baguettotron Style Manager")
+st.title("✒️ Dataset Style Studio")
 
 with st.sidebar:
     render_sidebar(df, conn, listes)
@@ -55,4 +55,4 @@ with tab2:
     render_tab_edition(df, conn, listes)
 
 with tab3:
-    render_tab_dashboard(df, listes)
+    render_tab_dashboard(df, conn, listes)

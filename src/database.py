@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from collections import Counter
+from typing import Any
 
 import pandas as pd
 
@@ -19,6 +20,13 @@ CACHE_COLUMNS = [
     "_signature_json",
     "_coherence_score",
     "_trigrams_json",
+    # Insights additionnels pour fine-tuning (voir docs/stylometrie_finetuning.md)
+    "_lexical_density",
+    "_weak_verb_ratio",
+    "_syntax_contrast",
+    "_nb_sentences",
+    "_punct_exp",
+    "_stop_ratio_out",
 ]
 
 # Erreurs API Google considérées comme temporaires (retry)
@@ -27,7 +35,7 @@ MAX_RETRIES = 4
 INITIAL_BACKOFF = 2.0
 
 
-def load_data(conn, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
+def load_data(conn: Any, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
     """Charge les données et assure la présence des colonnes de cache.
 
     En cas d'indisponibilité temporaire de l'API Google (503, 429, etc.),
@@ -66,8 +74,12 @@ def load_data(conn, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
     raise RuntimeError("load_data: échec après toutes les tentatives")
 
 
-def update_data(conn, df: pd.DataFrame) -> None:
-    """Met à jour le Google Sheet avec le DataFrame."""
+def update_data(conn: Any, df: pd.DataFrame) -> None:
+    """Met à jour le Google Sheet avec le DataFrame.
+
+    Peut lever une exception en cas d'échec de l'API Google (connexion, quotas, etc.).
+    L'appelant doit gérer l'erreur (try/except) et informer l'utilisateur si besoin.
+    """
     conn.update(data=df)
 
 

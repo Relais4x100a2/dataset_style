@@ -3,6 +3,7 @@ Composants UI Streamlit : sidebar, formulaire ajout, onglet édition (fragment +
 """
 from datetime import datetime
 import uuid
+from typing import Any
 
 import pandas as pd
 import requests
@@ -19,7 +20,9 @@ from src.database import (
     dataset_cache_stats,
     flag_problematic_rows,
 )
-from src.export_utils import convert_to_baguettotron_jsonl
+from src.export_utils import convert_to_jsonl, ExportFormat
+from src.wiktionary import fetch_wiktionary, WiktionaryResult
+from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.nlp_engine import (
     corriger_texte_fr,
     get_linguistic_insights,
@@ -34,6 +37,7 @@ from src.nlp_engine import (
     prioritized_actions,
     translate_trigram,
     compute_row_cache,
+    recompute_cache_for_rows,
     signature_variance,
 )
 
@@ -55,7 +59,9 @@ def load_nlp():
         return None
 
 
-def render_sidebar(df, conn, listes):
+def render_sidebar(
+    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
+) -> None:
     """Sidebar : stats, export CSV, export JSONL."""
     st.title("📊 Dataset Status")
     if not df.empty and "statut" in df.columns:
@@ -79,7 +85,30 @@ def render_sidebar(df, conn, listes):
             unsafe_allow_html=True,
         )
         csv = df[df["statut"] == STATUT_VALIDE].to_csv(index=False).encode("utf-8")
-        jsonl_data = convert_to_baguettotron_jsonl(df)
+        export_options = [
+            "LFM2-24B-A2B",
+            "PleIAs/Baguettotron",
+            "Mistral Small Creative",
+        ]
+        format_display = st.selectbox(
+            "Format d'export JSONL",
+            export_options,
+            key="export_format",
+            help="Choisis le modèle cible pour le fine-tuning.",
+        )
+        format_map: dict[str, ExportFormat] = {
+            "LFM2-24B-A2B": "lfm2",
+            "PleIAs/Baguettotron": "baguettotron",
+            "Mistral Small Creative": "mistral",
+        }
+        export_format = format_map[format_display]
+        include_stylometry = st.checkbox(
+            "Inclure indicateurs stylométriques dans l'export",
+            key="export_include_stylometry",
+            help="Ajoute TTR, longueur de phrase, densité lexicale, etc. (system/user ou trace selon le format).",
+        )
+        jsonl_data = convert_to_jsonl(df, export_format, include_stylometry)
+        filename_suffix = {"lfm2": "lfm2", "baguettotron": "baguettotron", "mistral": "mistral"}[export_format]
         col_csv, col_jsonl = st.columns(2)
         with col_csv:
             st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv", key="dl_csv")
@@ -87,13 +116,17 @@ def render_sidebar(df, conn, listes):
             st.download_button(
                 label="Télécharger JSONL",
                 data=jsonl_data,
-                file_name=f"baguettotron_train_{datetime.now().strftime('%Y%m%d')}.jsonl",
+                file_name=f"style_train_{filename_suffix}_{datetime.now().strftime('%Y%m%d')}.jsonl",
                 mime="application/jsonl",
                 key="dl_jsonl",
-                help="Format Baguettotron (ChatML, <think>, entropie)",
+                help=f"Format {format_display} pour fine-tuning.",
             )
-        
-    st.info("Le format JSONL inclut les balises <think> et <H≈X.X> de PleIAs. L'export ne contient que les lignes 'Fait et validé'.")
+
+    st.info(
+        "Le JSONL dépend du format choisi (LFM2, Baguettotron, Mistral). "
+        "L'export ne contient que les lignes « Fait et validé ». "
+        "Option : inclure les indicateurs stylométriques du cache."
+    )
 
 
 def _run_correction_ortho(output_text: str, pending_key: str) -> bool:
@@ -122,6 +155,136 @@ def _run_correction_ortho(output_text: str, pending_key: str) -> bool:
     except (ValueError, Exception) as e:
         st.error(f"Impossible de corriger : {e}")
         return False
+
+
+def _get_openrouter_api_key() -> str:
+    """Récupère la clé API OpenRouter depuis les secrets Streamlit ([connections.openrouter] api_key)."""
+    try:
+        conn = st.secrets.get("connections", {}) or {}
+        openrouter = conn.get("openrouter") or {}
+        if isinstance(openrouter, dict):
+            return (openrouter.get("api_key") or "").strip()
+        return ""
+    except (AttributeError, TypeError, KeyError):
+        return ""
+
+
+def _render_llm_generate_buttons(
+    input_key: str,
+    output_key: str,
+    type_key: str,
+    forme_key: str,
+    ton_key: str,
+    support_key: str,
+) -> None:
+    """
+    Affiche deux boutons : Générer le brouillon depuis la prose / Générer la prose depuis le brouillon.
+    Utilise le LLM OpenRouter avec type, forme, ton et support (session_state).
+    """
+    api_key = _get_openrouter_api_key()
+    if not api_key:
+        st.caption(
+            "Génération par LLM : configure la clé OpenRouter dans les secrets "
+            "([connections.openrouter] api_key) pour activer les boutons."
+        )
+    current_input = (st.session_state.get(input_key) or "").strip()
+    current_output = (st.session_state.get(output_key) or "").strip()
+    type_val = st.session_state.get(type_key, "")
+    forme_val = st.session_state.get(forme_key, "")
+    ton_val = st.session_state.get(ton_key, "")
+    support_val = st.session_state.get(support_key, "")
+
+    col_llm1, col_llm2 = st.columns(2)
+    with col_llm1:
+        gen_brouillon = st.button(
+            "📝 Générer le brouillon depuis la prose",
+            key=f"llm_input_from_out_{input_key}",
+            disabled=not api_key or not current_output,
+            help="Génère un brouillon synthétique à partir de la prose (type, forme, ton, support pris en compte).",
+        )
+    with col_llm2:
+        gen_prose = st.button(
+            "✨ Générer la prose depuis le brouillon",
+            key=f"llm_output_from_in_{output_key}",
+            disabled=not api_key or not current_input,
+            help="Génère la prose développée à partir du brouillon (type, forme, ton, support respectés).",
+        )
+
+    if gen_brouillon and api_key and current_output:
+        with st.spinner("Génération du brouillon…"):
+            result = generate_input_from_output(
+                api_key, current_output, type_val, forme_val, ton_val, support_val
+            )
+        if result is not None:
+            st.session_state[input_key] = result
+            st.success("Brouillon généré. Tu peux le modifier avant d'enregistrer.")
+            st.rerun()
+        else:
+            st.error("La génération a échoué (réseau ou API). Réessaie ou vérifie la clé OpenRouter.")
+
+    if gen_prose and api_key and current_input:
+        with st.spinner("Génération de la prose…"):
+            result = generate_output_from_input(
+                api_key, current_input, type_val, forme_val, ton_val, support_val
+            )
+        if result is not None:
+            st.session_state[output_key] = result
+            st.success("Prose générée. Tu peux la modifier avant d'enregistrer.")
+            st.rerun()
+        else:
+            st.error("La génération a échoué (réseau ou API). Réessaie ou vérifie la clé OpenRouter.")
+
+
+def _render_wiktionary_block(key_prefix: str) -> None:
+    """
+    Bloc « Mot à vérifier » + bouton + expander avec définitions, synonymes, antonymes,
+    vocabulaire apparenté et anagrammes (Wiktionnaire via API Wikimedia).
+    """
+    col_mot, col_btn = st.columns([2, 1])
+    with col_mot:
+        mot = st.text_input(
+            "Mot à vérifier",
+            key=f"{key_prefix}_wiktionary_mot",
+            placeholder="Saisir un mot puis cliquer sur Chercher",
+            label_visibility="collapsed",
+        )
+    with col_btn:
+        chercher = st.button("📖 Chercher dans le Wiktionnaire", key=f"{key_prefix}_wiktionary_btn")
+    result_key = f"{key_prefix}_wiktionary_result"
+    if chercher and mot and mot.strip():
+        with st.spinner("Recherche dans le Wiktionnaire…"):
+            st.session_state[result_key] = fetch_wiktionary(mot.strip())
+        st.rerun()
+    if result_key not in st.session_state:
+        return
+    res: WiktionaryResult = st.session_state[result_key]
+    expanded = bool(res.definitions or res.synonymes or res.antonymes or res.vocabulaire_apparente or res.anagrammes or res.erreur)
+    with st.expander("📖 Définition et synonymes (Wiktionnaire)", expanded=expanded):
+        if res.erreur:
+            st.warning(res.erreur)
+        else:
+            if res.page_url:
+                st.caption(f"[Ouvrir la page Wiktionnaire]({res.page_url})")
+            if res.definitions:
+                st.markdown("**Définitions**")
+                for i, d in enumerate(res.definitions[:15], 1):
+                    st.write(f"{i}. {d}")
+                if len(res.definitions) > 15:
+                    st.caption(f"… et {len(res.definitions) - 15} autre(s) définition(s).")
+            if res.synonymes:
+                st.markdown("**Synonymes**")
+                st.write(", ".join(res.synonymes))
+            if res.antonymes:
+                st.markdown("**Antonymes**")
+                st.write(", ".join(res.antonymes))
+            if res.vocabulaire_apparente:
+                st.markdown("**Vocabulaire apparenté (par le sens)**")
+                st.write(", ".join(res.vocabulaire_apparente))
+            if res.anagrammes:
+                st.markdown("**Anagrammes**")
+                st.write(", ".join(res.anagrammes))
+            if not (res.definitions or res.synonymes or res.antonymes or res.vocabulaire_apparente or res.anagrammes):
+                st.info("Aucune définition ou liste trouvée pour la section française.")
 
 
 def _render_analyse_prose(
@@ -288,7 +451,9 @@ _AJOUT_DEFAULTS = [
 _AJOUT_KEYS = [k for k, _ in _AJOUT_DEFAULTS]
 
 
-def render_tab_ajout(df, conn, listes):
+def render_tab_ajout(
+    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
+) -> None:
     """Formulaire d'ajout d'une nouvelle entrée (mêmes outils que Gestion & Édition : correction ortho, vérification prose)."""
     for key, default_fn in _AJOUT_DEFAULTS:
         st.session_state.setdefault(key, default_fn(listes))
@@ -318,6 +483,10 @@ def render_tab_ajout(df, conn, listes):
     val_input = st.text_area("Brouillon Synthétique (Input)", value=st.session_state["ajout_in"], height=150, key="ajout_in", placeholder="Note brute avec fautes...")
     val_output = st.text_area("Prose Développée (Output)", value=st.session_state["ajout_out"], height=350, key="ajout_out", placeholder="Texte final dans votre style...")
 
+    _render_llm_generate_buttons(
+        "ajout_in", "ajout_out", "ajout_type", "ajout_forme", "ajout_ton", "ajout_support",
+    )
+
     if st.button("🪄 Corriger l'orthographe", key="correct_ortho_ajout", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
         if _run_correction_ortho(val_output, "pending_correction_ajout"):
             st.rerun()
@@ -325,6 +494,8 @@ def render_tab_ajout(df, conn, listes):
     if st.button("🔍 Vérifier ma prose", key="verifier_ajout_btn", help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose."):
         st.session_state["verifier_ajout_clique"] = True
         st.rerun()
+
+    _render_wiktionary_block("ajout")
 
     df_valid = df[df["statut"] == STATUT_VALIDE]
     nlp_ajout = load_nlp() if st.session_state["verifier_ajout_clique"] else None
@@ -365,7 +536,14 @@ def render_tab_ajout(df, conn, listes):
                 **{c: "" for c in CACHE_COLUMNS},
             }])
             updated_df = pd.concat([df, new_row], ignore_index=True)
-            update_data(conn, updated_df)
+            try:
+                update_data(conn, updated_df)
+            except Exception:
+                st.error(
+                    "Impossible d'enregistrer dans le Google Sheet. "
+                    "Vérifiez la connexion et réessayez."
+                )
+                return
             for k in _AJOUT_KEYS:
                 st.session_state.pop(k, None)
             st.session_state["verifier_ajout_clique"] = False
@@ -373,7 +551,9 @@ def render_tab_ajout(df, conn, listes):
             st.rerun()
 
 
-def render_tab_edition(df, conn, listes):
+def render_tab_edition(
+    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
+) -> None:
     """Onglet Gestion & Édition : navigation, fragment édition + analyse."""
     if df.empty:
         st.warning("Le dataset est vide.")
@@ -466,6 +646,11 @@ def render_tab_edition(df, conn, listes):
                     st.session_state[f"out_{row_id}"] = st.session_state.pop(pending_key)
                 edit_output = st.text_area("Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}")
 
+                _render_llm_generate_buttons(
+                    f"in_{row_id}", f"out_{row_id}",
+                    f"type_{row_id}", f"forme_{row_id}", f"ton_{row_id}", f"supp_{row_id}",
+                )
+
                 if st.button("🪄 Corriger l'orthographe", key=f"correct_ortho_{row_id}", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
                     if _run_correction_ortho(edit_output, pending_key):
                         st.rerun()
@@ -473,6 +658,8 @@ def render_tab_edition(df, conn, listes):
                 if st.button("🔍 Vérifier ma prose", key=f"verifier_btn_{row_id}", type="secondary", help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose."):
                     st.session_state["verifier_clique"] = True
                     st.rerun()
+
+                _render_wiktionary_block(f"edit_{row_id}")
 
                 col_e5, col_e6 = st.columns([1, 2])
                 edit_statut = col_e5.selectbox("Statut", listes["statuts"], index=idx_statut, key=f"stat_{row_id}")
@@ -505,7 +692,14 @@ def render_tab_edition(df, conn, listes):
                         )
                         for col, val in cache_vals.items():
                             df.loc[df["id"] == row_id, col] = val
-                    update_data(conn, df)
+                    try:
+                        update_data(conn, df)
+                    except Exception:
+                        st.error(
+                            "Impossible de mettre à jour le Google Sheet. "
+                            "Vérifiez la connexion et réessayez."
+                        )
+                        return
                     st.success(f"Fiche {row_id} mise à jour !")
                     st.rerun()
             _bloc_edition_et_analyse()
@@ -860,11 +1054,10 @@ def _render_alerts_panel(problematic: list[dict]) -> None:
     )
 
 
-def render_tab_dashboard(df: pd.DataFrame, listes: dict) -> None:
-    """Onglet Tableau de bord : composition, qualité, stylométrie, alertes.
-
-    Entièrement basé sur le cache — aucun appel spaCy ni LanguageTool.
-    """
+def render_tab_dashboard(
+    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
+) -> None:
+    """Onglet Tableau de bord : composition, qualité, stylométrie, alertes, gestion du cache."""
     df_valid = df[df["statut"] == STATUT_VALIDE]
 
     n_total = len(df)
@@ -883,13 +1076,98 @@ def render_tab_dashboard(df: pd.DataFrame, listes: dict) -> None:
         st.info("Aucune fiche validée. Passe des fiches au statut « Fait et validé » pour débloquer les indicateurs qualité et stylistiques.")
         return
 
+    # --- Section Cache stylométrique : générer / écraser / enregistrer ---
+    with st.expander("📐 Cache stylométrique — Générer ou écraser", expanded=True):
+        st.caption(
+            "Recalcule les indicateurs (ratio, TTR, signature, cohérence, densité lexicale, etc.) "
+            "pour les fiches « Fait et validé » et met à jour le Google Sheet. "
+            "Utile après import de données ou pour harmoniser tout le cache."
+        )
+        nlp = load_nlp()
+        coherence_col = df_valid.get("_coherence_score")
+        if coherence_col is not None:
+            has_cache = (coherence_col.fillna("").astype(str).str.strip() != "").sum()
+        else:
+            has_cache = 0
+        n_sans_cache = n_valid - int(has_cache)
+
+        col_gen, col_ecrase = st.columns(2)
+        with col_gen:
+            gen_empty = st.button(
+                "Générer le cache (fiches sans cache)",
+                key="dashboard_gen_cache_empty",
+                disabled=nlp is None or n_sans_cache == 0,
+                help="Remplit le cache uniquement pour les fiches validées qui n'en ont pas encore.",
+            )
+        with col_ecrase:
+            confirm_ecrase = st.checkbox(
+                "Confirmer l'écrasement de tout le cache",
+                key="dashboard_confirm_ecrase",
+                help="Coche pour débloquer le bouton « Écraser tout ».",
+            )
+            ecrase_all = st.button(
+                "Écraser tout le cache et enregistrer",
+                key="dashboard_ecrase_cache",
+                disabled=nlp is None or not confirm_ecrase,
+                type="primary",
+                help="Recalcule et écrase le cache de toutes les fiches validées, puis enregistre dans le Sheet.",
+            )
+
+        if gen_empty and nlp is not None and n_sans_cache > 0:
+            with st.spinner("Génération du cache pour les fiches sans cache…"):
+                if coherence_col is not None:
+                    df_sans = df_valid[coherence_col.fillna("").astype(str).str.strip() == ""]
+                else:
+                    df_sans = df_valid
+                for _, row in df_sans.iterrows():
+                    rid = row["id"]
+                    inp = (str(row.get("input") or "")).strip()
+                    out = (str(row.get("output") or "")).strip()
+                    if not (inp and out):
+                        continue
+                    others = df_valid[df_valid["id"].astype(str) != str(rid)]
+                    cache_vals = compute_row_cache(
+                        inp, out, nlp, others, rid, CACHE_COLUMNS, avg_signature_from_cache
+                    )
+                    for col, val in cache_vals.items():
+                        df.loc[df["id"].astype(str) == str(rid), col] = val
+                try:
+                    update_data(conn, df)
+                except Exception:
+                    st.error(
+                        "Impossible d'enregistrer le cache dans le Google Sheet. "
+                        "Vérifiez la connexion et réessayez."
+                    )
+                    return
+            st.success(f"Cache généré pour {len(df_sans)} fiche(s) sans cache. Données enregistrées.")
+            st.rerun()
+
+        if ecrase_all and nlp is not None and confirm_ecrase:
+            with st.spinner("Recalcul de tout le cache…"):
+                updated_valid = recompute_cache_for_rows(df_valid, nlp, CACHE_COLUMNS)
+                for _, row in updated_valid.iterrows():
+                    rid = row["id"]
+                    for col in CACHE_COLUMNS:
+                        if col in row:
+                            df.loc[df["id"].astype(str) == str(rid), col] = row[col]
+                try:
+                    update_data(conn, df)
+                except Exception:
+                    st.error(
+                        "Impossible d'enregistrer le cache dans le Google Sheet. "
+                        "Vérifiez la connexion et réessayez."
+                    )
+                    return
+            st.success("Cache entièrement recalculé et enregistré dans le Google Sheet.")
+            st.rerun()
+
     # Calcul unique des stats cache — passé aux sections qui en ont besoin
     stats = dataset_cache_stats(df_valid)
 
     if stats is None:
         st.warning(
-            "Le cache n'est pas encore rempli. Ouvre l'onglet Gestion & Édition, "
-            "clique « Vérifier ma prose » puis « Enregistrer les modifications » pour chaque fiche validée."
+            "Le cache n'est pas encore rempli. Utilise la section « Cache stylométrique » ci‑dessus "
+            "pour générer ou écraser le cache des fiches validées."
         )
         return
 
