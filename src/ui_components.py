@@ -415,7 +415,7 @@ def _render_analyse_prose(
         fig.add_trace(go.Scatterpolar(r=r_fiche, theta=theta, name="Ta fiche", fill="toself", line=dict(color="rgb(0,120,200)")))
         fig.add_trace(go.Scatterpolar(r=r_dataset, theta=theta, name="Moyenne dataset", fill="toself", line=dict(color="rgb(200,80,0)", dash="dash")))
         fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=True, title="Radar de signature stylistique", height=420)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         with st.expander("Détails chiffrés du radar", expanded=False):
             df_comp = pd.DataFrame({"Axe": categories, "Ta fiche": [round(v, 3) for v in v_fiche], "Moy. dataset": [round(v, 3) for v in v_dataset], "Écart (%)": [round((v_fiche[i] - v_dataset[i]) / max(1e-6, v_dataset[i]) * 100, 1) for i in range(len(categories))]})
             st.dataframe(df_comp, width="stretch", hide_index=True)
@@ -463,7 +463,7 @@ def _render_analyse_prose(
             st.markdown("#### Évolution de la cohérence")
             fig_trend = go.Figure(go.Scatter(y=scores_trend, mode="lines+markers", line=dict(color="rgb(0,120,200)")))
             fig_trend.update_layout(height=180, margin=dict(t=20, b=20, l=40, r=20), yaxis=dict(range=[0, 100], title="Score"), xaxis=dict(title="Fiche (récente →)"), showlegend=False)
-            st.plotly_chart(fig_trend, use_container_width=True)
+            st.plotly_chart(fig_trend, width="stretch")
     elif sig_fiche:
         st.caption("Ajoute des fiches « Fait et validé » pour débloquer le radar et la comparaison avec le dataset.")
     if type_value == "Expansion" and stats["ratio"] < 2:
@@ -790,7 +790,7 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
             margin=dict(t=40, b=20, l=10, r=10),
             yaxis=dict(autorange="reversed"),
         )
-        st.plotly_chart(fig_statut, use_container_width=True)
+        st.plotly_chart(fig_statut, width="stretch")
 
     with col_right:
         counts_type = df["type"].value_counts().reset_index()
@@ -808,7 +808,7 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
             margin=dict(t=40, b=20, l=10, r=10),
             yaxis=dict(autorange="reversed"),
         )
-        st.plotly_chart(fig_type, use_container_width=True)
+        st.plotly_chart(fig_type, width="stretch")
 
     with st.expander("Détail formes / tons / supports", expanded=False):
         for dim, label in [("forme", "Formes"), ("ton", "Tons"), ("support", "Supports")]:
@@ -827,7 +827,7 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
                 margin=dict(t=40, b=10, l=10, r=10),
                 yaxis=dict(autorange="reversed"),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
@@ -873,7 +873,7 @@ def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
                 margin=dict(t=40, b=20, l=10, r=10),
                 xaxis=dict(range=xrange) if xrange else {},
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # Histogramme cohérence avec zones colorées
     scores = stats["coherence"]["values"]
@@ -896,7 +896,7 @@ def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
         yaxis=dict(title="Nb fiches"),
         showlegend=False,
     )
-    st.plotly_chart(fig_coh, use_container_width=True)
+    st.plotly_chart(fig_coh, width="stretch")
 
 
 def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
@@ -959,7 +959,7 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
                 height=380,
                 margin=dict(t=60, b=20, l=20, r=20),
             )
-            st.plotly_chart(fig_radar, use_container_width=True)
+            st.plotly_chart(fig_radar, width="stretch")
 
             if sig_std:
                 with st.expander("Dispersion par axe (écart-type)", expanded=False):
@@ -987,7 +987,7 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
                     height=380,
                     margin=dict(t=60, b=20, l=10, r=10),
                 )
-                st.plotly_chart(fig_tri, use_container_width=True)
+                st.plotly_chart(fig_tri, width="stretch")
             else:
                 st.info("Aucun trigramme POS disponible. Enregistre des fiches en cliquant sur « Vérifier ma prose ».")
     else:
@@ -1028,7 +1028,7 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
             xaxis=dict(title="Fiche (ordre dataset)"),
             showlegend=False,
         )
-        st.plotly_chart(fig_trend, use_container_width=True)
+        st.plotly_chart(fig_trend, width="stretch")
 
 
 def _render_alerts_panel(problematic: list[dict]) -> None:
@@ -1062,7 +1062,7 @@ def _render_alerts_panel(problematic: list[dict]) -> None:
             margin=dict(t=40, b=10, l=10, r=10),
             yaxis=dict(autorange="reversed"),
         )
-        st.plotly_chart(fig_al, use_container_width=True)
+        st.plotly_chart(fig_al, width="stretch")
 
     with col_info:
         st.caption(

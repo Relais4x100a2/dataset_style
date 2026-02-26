@@ -1,0 +1,39 @@
+---
+description: Conventions Python — Streamlit, API Google, NLP
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Streamlit, Google API & NLP — Conventions
+
+## Streamlit
+
+- **État** : utiliser `st.session_state` pour index de navigation, préférences, données persistantes entre reruns. Initialiser avec `if 'key' not in st.session_state: st.session_state.key = default`.
+- **Clés widgets** : pour les formulaires d’édition par fiche, inclure un identifiant unique dans `key=` (ex. `key=f"type_{row_id}"`) pour éviter les conflits au changement de fiche.
+- **Connexions** : privilégier `st.connection("nom", type=...)` et lire via `conn.read(ttl=...)`. Pour données souvent rafraîchies : `ttl="0"` ou faible.
+- **Layout** : `st.columns()`, `st.tabs()` pour structurer ; garder sidebar pour stats / export.
+- **Charts / boutons** : utiliser `width="stretch"` (au lieu de `use_container_width=True`) ou `width="content"` (au lieu de `use_container_width=False`) ; `use_container_width` est déprécié depuis 2025.
+- **Logging** : utiliser le module `logging` pour le diagnostic ; réserver `st.write` / `st.success` à l’UI.
+
+## API Google (Sheets, etc.)
+
+- **Secrets** : ne jamais hardcoder credentials. Utiliser `st.secrets` (Streamlit Cloud) ou variables d’environnement (`.env` + `python-dotenv` en dev).
+- **Données** : après `conn.read()`, normaliser types (ex. `.astype(str).replace(['nan','None','<NA>'], '')`) pour éviter erreurs sur colonnes vides.
+- **Erreurs** : gérer explicitement `try/except` sur `conn.read()` / `conn.update()` et afficher un message utilisateur (ex. `st.error`) en cas d’échec.
+
+## NLP & Données texte
+
+- **Typage** : type hints sur toutes les fonctions (DataFrame, str, etc.).
+- **Export** : pour JSONL / ChatML, utiliser `json.dumps(..., ensure_ascii=False)` pour conserver les caractères accentués.
+- **Constantes** : listes fermées (types, formes, tons) définies en constantes en tête de module (ex. `LISTE_TYPES`, `LISTE_FORMES`) pour cohérence formulaire / export.
+
+## DRY, orthogonalité et architecture `src/`
+
+- **DRY** : éviter toute duplication. Réutiliser les fonctions et constantes des modules `src` plutôt que de recopier la logique (chargement, NLP, export).
+- **Orthogonalité** : une responsabilité par couche. Ne pas mélanger UI, accès données et logique métier dans le même module.
+- **Factorisation selon `src/`** :
+  - **`src/database.py`** : connexion Google Sheets, chargement / mise à jour, colonnes de cache, retry/backoff. Aucun `streamlit`.
+  - **`src/nlp_engine.py`** : moteur linguistique pur (insights, stylométrie, cohérence, corrections). Sans dépendance Streamlit — testable indépendamment.
+  - **`src/export_utils.py`** : conversion et export (JSONL, ChatML, etc.) ; importer les constantes depuis `database` si besoin.
+  - **`src/ui_components.py`** : uniquement composants et pages Streamlit ; importer depuis `database`, `nlp_engine`, `export_utils` pour la logique, pas de duplication métier.
+- **Point d’entrée** : `main.py` (ou équivalent) orchestre l’UI en important depuis `src.ui_components` (et éventuellement `src.database` pour la connexion), sans contenir de logique métier.
