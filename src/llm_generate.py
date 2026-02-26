@@ -12,22 +12,28 @@ import requests
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_OPENROUTER = "liquid/lfm-2-24b-a2b"
+MODEL_OPENROUTER = "mistralai/mistral-small-creative"
 
 
 def _call_openrouter(
     api_key: str,
     system_prompt: str,
     user_prompt: str,
+    model: str | None = None,
 ) -> str | None:
     """
     Appelle l'API OpenRouter (chat completions).
+
+    Args:
+        model: ID du modèle OpenRouter (ex. mistralai/mistral-small-creative).
+               Si vide ou None, utilise MODEL_OPENROUTER.
 
     Returns:
         Le contenu texte de la réponse, ou None en cas d'erreur.
     """
     if not (api_key and api_key.strip()):
         return None
+    model_id = (model or "").strip() or MODEL_OPENROUTER
     headers = {
         "Authorization": f"Bearer {api_key.strip()}",
         "Content-Type": "application/json",
@@ -35,7 +41,7 @@ def _call_openrouter(
         "X-OpenRouter-Title": "Dataset Style Studio",
     }
     payload: dict[str, Any] = {
-        "model": MODEL_OPENROUTER,
+        "model": model_id,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -80,6 +86,7 @@ def generate_input_from_output(
     forme: str,
     ton: str,
     support: str,
+    model: str | None = None,
 ) -> str | None:
     """
     Génère un brouillon (input) à partir de la prose (output) et des paramètres de style.
@@ -100,7 +107,7 @@ Prose à résumer en brouillon :
 ---
 
 Rédige uniquement le brouillon synthétique (notes, idées), sans introduction ni conclusion."""
-    return _call_openrouter(api_key, SYSTEM_INPUT_FROM_OUTPUT, user_prompt)
+    return _call_openrouter(api_key, SYSTEM_INPUT_FROM_OUTPUT, user_prompt, model=model)
 
 
 def generate_output_from_input(
@@ -110,6 +117,7 @@ def generate_output_from_input(
     forme: str,
     ton: str,
     support: str,
+    model: str | None = None,
 ) -> str | None:
     """
     Génère la prose (output) à partir du brouillon (input) et des paramètres de style.
@@ -130,4 +138,4 @@ Brouillon (notes, idées) à développer en prose :
 ---
 
 Rédige uniquement la prose littéraire développée, sans introduction ni métadonnées."""
-    return _call_openrouter(api_key, SYSTEM_OUTPUT_FROM_INPUT, user_prompt)
+    return _call_openrouter(api_key, SYSTEM_OUTPUT_FROM_INPUT, user_prompt, model=model)

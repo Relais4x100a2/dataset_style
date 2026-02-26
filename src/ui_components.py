@@ -22,7 +22,11 @@ from src.database import (
 )
 from src.export_utils import convert_to_jsonl, ExportFormat
 from src.wiktionary import fetch_wiktionary, WiktionaryResult
-from src.llm_generate import generate_input_from_output, generate_output_from_input
+from src.llm_generate import (
+    MODEL_OPENROUTER,
+    generate_input_from_output,
+    generate_output_from_input,
+)
 from src.nlp_engine import (
     corriger_texte_fr,
     get_linguistic_insights,
@@ -62,11 +66,23 @@ def load_nlp():
 def render_sidebar(
     df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
 ) -> None:
-    """Sidebar : stats, export CSV, export JSONL."""
+    """Sidebar : stats, modèle LLM, export CSV, export JSONL."""
     st.title("📊 Dataset Status")
     if not df.empty and "statut" in df.columns:
         st.write(df['statut'].value_counts())
-        
+
+    if "openrouter_model" not in st.session_state:
+        st.session_state["openrouter_model"] = ""
+    st.divider()
+    st.subheader("🤖 Modèle de génération")
+    st.text_input(
+        "Modèle OpenRouter",
+        key="openrouter_model",
+        placeholder=MODEL_OPENROUTER,
+        help="Vide = défaut (Mistral Small Creative). Colle un ID (ex. openai/gpt-4o-mini) pour un autre modèle.",
+        label_visibility="visible",
+    )
+
     st.divider()
     st.subheader("🚀 Export Fine-tuning")
     if not df.empty:
@@ -194,6 +210,7 @@ def _render_llm_generate_buttons(
     Utilise le LLM OpenRouter avec type, forme, ton et support (session_state).
     """
     api_key = _get_openrouter_api_key()
+    model_override = (st.session_state.get("openrouter_model") or "").strip() or None
     if not api_key:
         st.caption(
             "Génération par LLM : configure la clé OpenRouter dans les secrets "
@@ -225,7 +242,8 @@ def _render_llm_generate_buttons(
     if gen_brouillon and api_key and current_output:
         with st.spinner("Génération du brouillon…"):
             result = generate_input_from_output(
-                api_key, current_output, type_val, forme_val, ton_val, support_val
+                api_key, current_output, type_val, forme_val, ton_val, support_val,
+                model=model_override,
             )
         if result is not None:
             st.session_state["_llm_pending_" + input_key] = result
@@ -237,7 +255,8 @@ def _render_llm_generate_buttons(
     if gen_prose and api_key and current_input:
         with st.spinner("Génération de la prose…"):
             result = generate_output_from_input(
-                api_key, current_input, type_val, forme_val, ton_val, support_val
+                api_key, current_input, type_val, forme_val, ton_val, support_val,
+                model=model_override,
             )
         if result is not None:
             st.session_state["_llm_pending_" + output_key] = result
