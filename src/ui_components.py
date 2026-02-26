@@ -343,9 +343,10 @@ def _render_analyse_prose(
         st.metric("Variété du vocabulaire", f"{stats['ttr']:.0%}", help="Pourcentage de mots différents (lemmes) dans ta prose.")
     with c_st3:
         st.metric("Longueur des phrases", f"{stats['long_moy_phrases']:.0f} mots", help="10-18 = rythme équilibré, <10 = vif, >25 = ample.")
-    if stats["mots_repetes"]:
-        mots_list = ", ".join(f"**{m}**" for m in stats["mots_repetes"][:8])
-        suffix = "..." if len(stats["mots_repetes"]) > 8 else ""
+    mots_repetes_affichage = [m for m in stats["mots_repetes"] if m and str(m).strip()]
+    if mots_repetes_affichage:
+        mots_list = ", ".join(f"**{m}**" for m in mots_repetes_affichage[:8])
+        suffix = "..." if len(mots_repetes_affichage) > 8 else ""
         st.warning(f"Mots qui reviennent souvent (3 fois ou plus) : {mots_list}{suffix} — pense à varier.", icon="🔁")
     ratio_lvl, ratio_txt = palier_details("ratio", stats["ratio"])
     ttr_lvl, ttr_txt = palier_details("ttr", stats["ttr"])

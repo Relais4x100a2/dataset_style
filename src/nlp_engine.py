@@ -120,7 +120,10 @@ def get_linguistic_insights(
     comptage = Counter(
         t.lemma_.lower() for t in doc_out if not t.is_punct and not t.is_stop
     )
-    mots_repetes = [lem for lem, n in comptage.items() if n >= seuil_repetition]
+    mots_repetes = [
+        lem for lem, n in comptage.items()
+        if n >= seuil_repetition and lem and str(lem).strip()
+    ]
 
     sents = list(doc_out.sents)
     long_phrases = [len([t for t in s if not t.is_punct]) for s in sents]
