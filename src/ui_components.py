@@ -228,7 +228,7 @@ def _render_llm_generate_buttons(
                 api_key, current_output, type_val, forme_val, ton_val, support_val
             )
         if result is not None:
-            st.session_state[input_key] = result
+            st.session_state["_llm_pending_" + input_key] = result
             st.success("Brouillon généré. Tu peux le modifier avant d'enregistrer.")
             st.rerun()
         else:
@@ -240,7 +240,7 @@ def _render_llm_generate_buttons(
                 api_key, current_input, type_val, forme_val, ton_val, support_val
             )
         if result is not None:
-            st.session_state[output_key] = result
+            st.session_state["_llm_pending_" + output_key] = result
             st.success("Prose générée. Tu peux la modifier avant d'enregistrer.")
             st.rerun()
         else:
@@ -492,6 +492,10 @@ def render_tab_ajout(
     st.subheader("Contenu Littéraire")
     if "pending_correction_ajout" in st.session_state:
         st.session_state["ajout_out"] = st.session_state.pop("pending_correction_ajout")
+    if "_llm_pending_ajout_in" in st.session_state:
+        st.session_state["ajout_in"] = st.session_state.pop("_llm_pending_ajout_in")
+    if "_llm_pending_ajout_out" in st.session_state:
+        st.session_state["ajout_out"] = st.session_state.pop("_llm_pending_ajout_out")
     val_input = st.text_area("Brouillon Synthétique (Input)", value=st.session_state["ajout_in"], height=150, key="ajout_in", placeholder="Note brute avec fautes...")
     val_output = st.text_area("Prose Développée (Output)", value=st.session_state["ajout_out"], height=350, key="ajout_out", placeholder="Texte final dans votre style...")
 
@@ -651,11 +655,15 @@ def render_tab_edition(
                 edit_ton = col_e3.selectbox("Ton", listes["tons"], index=idx_ton, key=f"ton_{row_id}")
                 edit_support = col_e4.selectbox("Support", listes["supports"], index=idx_supp, key=f"supp_{row_id}")
     
-                edit_input = st.text_area("Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}")
-                # Appliquer une correction en attente avant d'instancier le widget (Streamlit interdit de modifier la clé après)
+                # Appliquer résultats LLM / correction en attente avant d'instancier les widgets (Streamlit interdit de modifier la clé après)
                 pending_key = f"pending_correction_{row_id}"
+                if f"_llm_pending_in_{row_id}" in st.session_state:
+                    st.session_state[f"in_{row_id}"] = st.session_state.pop(f"_llm_pending_in_{row_id}")
+                if f"_llm_pending_out_{row_id}" in st.session_state:
+                    st.session_state[f"out_{row_id}"] = st.session_state.pop(f"_llm_pending_out_{row_id}")
                 if pending_key in st.session_state:
                     st.session_state[f"out_{row_id}"] = st.session_state.pop(pending_key)
+                edit_input = st.text_area("Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}")
                 edit_output = st.text_area("Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}")
 
                 _render_llm_generate_buttons(
