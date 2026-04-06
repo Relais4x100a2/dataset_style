@@ -1,58 +1,63 @@
 """
 Composants UI Streamlit : sidebar, formulaire ajout, onglet édition (fragment + graphiques).
 """
-from datetime import datetime
+
+import os
 import uuid
-from typing import Any
+from datetime import datetime
 
 import pandas as pd
+import plotly.graph_objects as go
 import requests
 import streamlit as st
-import plotly.graph_objects as go
+from sqlalchemy.engine import Engine
 
 from src.database import (
     CACHE_COLUMNS,
     STATUT_VALIDE,
-    update_data,
     audit_rows_from_cache,
     avg_signature_from_cache,
     avg_trigrams_from_cache,
     dataset_cache_stats,
     flag_problematic_rows,
+    update_data,
 )
-from src.export_utils import convert_to_jsonl, ExportFormat
-from src.wiktionary import fetch_wiktionary, WiktionaryResult
+from src.export_utils import ExportFormat, convert_to_jsonl
 from src.llm_generate import (
     MODEL_OPENROUTER,
     generate_input_from_output,
     generate_output_from_input,
+    is_local_llm_enabled,
 )
 from src.nlp_engine import (
-    corriger_texte_fr,
-    get_linguistic_insights,
-    get_stylometric_signature,
-    get_pos_trigrams,
-    get_baguette_touch,
-    syntax_contrast_score,
-    palier_details,
-    normalize_signature,
     coherence_level,
     compute_coherence_score,
-    prioritized_actions,
-    translate_trigram,
     compute_row_cache,
+    corriger_texte_fr,
+    get_baguette_touch,
+    get_linguistic_insights,
+    get_pos_trigrams,
+    get_stylometric_signature,
+    normalize_signature,
+    palier_details,
+    prioritized_actions,
     recompute_cache_for_rows,
     signature_variance,
+    syntax_contrast_score,
+    translate_trigram,
 )
+from src.wiktionary import WiktionaryResult, fetch_wiktionary
 
 
 @st.cache_resource
 def load_nlp():
     """Charge le modèle spaCy français une seule fois (cache Streamlit)."""
     import logging
+
     _log = logging.getLogger(__name__)
     try:
         import spacy
+
         return spacy.load("fr_core_news_sm")
     except OSError as e:
         _log.warning("Modèle spaCy fr_core_news_sm non trouvé: %s", e)
@@ -63,23 +68,24 @@ def load_nlp():
         return None
 
 
-def render_sidebar(
-    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
-) -> None:
+def render_sidebar(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
     """Sidebar : stats, modèle LLM, export CSV, export JSONL."""
     st.title("📊 Dataset Status")
     if not df.empty and "statut" in df.columns:
-        st.write(df['statut'].value_counts())
+        st.write(df["statut"].value_counts())
 
-    if "openrouter_model" not in st.session_state:
-        st.session_state["openrouter_model"] = ""
+    if "llm_model" not in st.session_state:
+        st.session_state["llm_model"] = ""
     st.divider()
     st.subheader("🤖 Modèle de génération")
     st.text_input(
-        "Modèle OpenRouter",
-        key="openrouter_model",
+        "ID modèle LLM",
+        key="llm_model",
         placeholder=MODEL_OPENROUTER,
-        help="Vide = défaut (Mistral Small Creative). Colle un ID (ex. openai/gpt-4o-mini) pour un autre modèle.",
+        help=(
+            "Ollama : nom local du modèle (ex. mistral). OpenRouter : ID complet "
+            "(ex. mistralai/mistral-small-creative). Vide = variable LLM_MODEL ou défaut OpenRouter."
+        ),
         label_visibility="visible",
     )
 
@@ -124,7 +130,9 @@ def render_sidebar(
             help="Ajoute TTR, longueur de phrase, densité lexicale, etc. (system/user ou trace selon le format).",
         )
         jsonl_data = convert_to_jsonl(df, export_format, include_stylometry)
-        filename_suffix = {"lfm2": "lfm2", "baguettotron": "baguettotron", "mistral": "mistral"}[export_format]
+        filename_suffix = {"lfm2": "lfm2", "baguettotron": "baguettotron", "mistral": "mistral"}[
+            export_format
+        ]
         col_csv, col_jsonl = st.columns(2)
         with col_csv:
             st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv", key="dl_csv")
@@ -163,7 +171,9 @@ def _run_correction_ortho(output_text: str, pending_key: str) -> bool:
         st.success("Orthographe et grammaire corrigées. Le champ Output a été mis à jour.")
         return True
     except requests.Timeout:
-        st.error("Délai dépassé : le service LanguageTool n'a pas répondu. Réessaie dans un instant.")
+        st.error(
+            "Délai dépassé : le service LanguageTool n'a pas répondu. Réessaie dans un instant."
+        )
         return False
     except requests.RequestException as e:
         st.error(f"Erreur réseau ou service indisponible : {e}")
@@ -173,9 +183,10 @@ def _run_correction_ortho(output_text: str, pending_key: str) -> bool:
         return False
 
 
-def _get_openrouter_api_key() -> str:
-    """Récupère la clé API OpenRouter depuis les secrets Streamlit ([connections.openrouter] api_key)."""
-    # Sur Community Cloud, les sections TOML sont exposées en accès par attributs.
+def _get_llm_api_key() -> str:
+    """Clé Bearer pour OpenRouter (secrets) ou ``LLM_API_KEY`` si serveur local (optionnel)."""
+    if is_local_llm_enabled():
+        return (os.environ.get("LLM_API_KEY") or "").strip()
     try:
         conn = getattr(st.secrets, "connections", None)
         if conn is not None:
@@ -186,7 +197,6 @@ def _get_openrouter_api_key() -> str:
                     return key.strip()
     except (AttributeError, TypeError, KeyError):
         pass
-    # Fallback : accès dict (ex. en local avec secrets.toml).
     try:
         conn = st.secrets.get("connections", {}) or {}
         openrouter = conn.get("openrouter") or {}
@@ -195,6 +205,13 @@ def _get_openrouter_api_key() -> str:
     except (AttributeError, TypeError, KeyError):
         pass
     return ""
+
+
+def _llm_ready() -> bool:
+    """True si génération possible (URL locale Ollama, ou clé OpenRouter)."""
+    if is_local_llm_enabled():
+        return True
+    return bool(_get_llm_api_key())
 
 
 def _render_llm_generate_buttons(
@@ -207,14 +224,15 @@ def _render_llm_generate_buttons(
 ) -> None:
     """
     Affiche deux boutons : Générer le brouillon depuis la prose / Générer la prose depuis le brouillon.
-    Utilise le LLM OpenRouter avec type, forme, ton et support (session_state).
+    OpenRouter ou serveur local (``LLM_BASE_URL`` / ``OLLAMA_BASE_URL``).
     """
-    api_key = _get_openrouter_api_key()
-    model_override = (st.session_state.get("openrouter_model") or "").strip() or None
-    if not api_key:
+    api_key = _get_llm_api_key()
+    model_override = (st.session_state.get("llm_model") or "").strip() or None
+    ready = _llm_ready()
+    if not ready:
         st.caption(
-            "Génération par LLM : configure la clé OpenRouter dans les secrets "
-            "([connections.openrouter] api_key) pour activer les boutons."
+            "Génération par LLM : définis **LLM_BASE_URL** (Ollama) sur le serveur, ou configure "
+            "la clé OpenRouter dans les secrets (`[connections.openrouter] api_key`)."
         )
     current_input = (st.session_state.get(input_key) or "").strip()
     current_output = (st.session_state.get(output_key) or "").strip()
@@ -228,21 +246,26 @@ def _render_llm_generate_buttons(
         gen_brouillon = st.button(
             "📝 Générer le brouillon depuis la prose",
             key=f"llm_input_from_out_{input_key}",
-            disabled=not api_key or not current_output,
+            disabled=not ready or not current_output,
             help="Génère un brouillon synthétique à partir de la prose (type, forme, ton, support pris en compte).",
         )
     with col_llm2:
         gen_prose = st.button(
             "✨ Générer la prose depuis le brouillon",
             key=f"llm_output_from_in_{output_key}",
-            disabled=not api_key or not current_input,
+            disabled=not ready or not current_input,
             help="Génère la prose développée à partir du brouillon (type, forme, ton, support respectés).",
         )
 
-    if gen_brouillon and api_key and current_output:
+    if gen_brouillon and ready and current_output:
         with st.spinner("Génération du brouillon…"):
             result = generate_input_from_output(
-                api_key, current_output, type_val, forme_val, ton_val, support_val,
+                api_key,
+                current_output,
+                type_val,
+                forme_val,
+                ton_val,
+                support_val,
                 model=model_override,
             )
         if result is not None:
@@ -250,12 +273,20 @@ def _render_llm_generate_buttons(
             st.success("Brouillon généré. Tu peux le modifier avant d'enregistrer.")
             st.rerun()
         else:
-            st.error("La génération a échoué (réseau ou API). Réessaie ou vérifie la clé OpenRouter.")
+            st.error(
+                "La génération a échoué (réseau, timeout ou modèle). Vérifie l'URL LLM, le nom du modèle "
+                "ou la clé OpenRouter."
+            )
 
-    if gen_prose and api_key and current_input:
+    if gen_prose and ready and current_input:
         with st.spinner("Génération de la prose…"):
             result = generate_output_from_input(
-                api_key, current_input, type_val, forme_val, ton_val, support_val,
+                api_key,
+                current_input,
+                type_val,
+                forme_val,
+                ton_val,
+                support_val,
                 model=model_override,
             )
         if result is not None:
@@ -263,7 +294,10 @@ def _render_llm_generate_buttons(
             st.success("Prose générée. Tu peux la modifier avant d'enregistrer.")
             st.rerun()
         else:
-            st.error("La génération a échoué (réseau ou API). Réessaie ou vérifie la clé OpenRouter.")
+            st.error(
+                "La génération a échoué (réseau, timeout ou modèle). Vérifie l'URL LLM, le nom du modèle "
+                "ou la clé OpenRouter."
+            )
 
 
 def _render_wiktionary_block(key_prefix: str) -> None:
@@ -289,7 +323,14 @@ def _render_wiktionary_block(key_prefix: str) -> None:
     if result_key not in st.session_state:
         return
     res: WiktionaryResult = st.session_state[result_key]
-    expanded = bool(res.definitions or res.synonymes or res.antonymes or res.vocabulaire_apparente or res.anagrammes or res.erreur)
+    expanded = bool(
+        res.definitions
+        or res.synonymes
+        or res.antonymes
+        or res.vocabulaire_apparente
+        or res.anagrammes
+        or res.erreur
+    )
     with st.expander("📖 Définition et synonymes (Wiktionnaire)", expanded=expanded):
         if res.erreur:
             st.warning(res.erreur)
@@ -314,7 +355,13 @@ def _render_wiktionary_block(key_prefix: str) -> None:
             if res.anagrammes:
                 st.markdown("**Anagrammes**")
                 st.write(", ".join(res.anagrammes))
-            if not (res.definitions or res.synonymes or res.antonymes or res.vocabulaire_apparente or res.anagrammes):
+            if not (
+                res.definitions
+                or res.synonymes
+                or res.antonymes
+                or res.vocabulaire_apparente
+                or res.anagrammes
+            ):
                 st.info("Aucune définition ou liste trouvée pour la section française.")
 
 
@@ -335,17 +382,11 @@ def _render_analyse_prose(
                 "l'édition fonctionnent normalement."
             )
         else:
-            st.info(
-                "Clique sur « Vérifier ma prose » ci-dessus "
-                "pour lancer l'analyse."
-            )
+            st.info("Clique sur « Vérifier ma prose » ci-dessus pour lancer l'analyse.")
         return
     stats = get_linguistic_insights(input_text, output_text, nlp)
     if not stats:
-        st.info(
-            "Remplis le Brouillon et la Prose pour voir "
-            "l'analyse de ton écriture."
-        )
+        st.info("Remplis le Brouillon et la Prose pour voir l'analyse de ton écriture.")
         return
     st.caption(
         "Ces indicateurs t'aident à écrire une prose "
@@ -356,38 +397,67 @@ def _render_analyse_prose(
     st.markdown("#### Ton écriture en un coup d'œil")
     c_st1, c_st2, c_st3 = st.columns(3)
     with c_st1:
-        st.metric("Amplification", f"x{stats['ratio']:.1f}", help="Combien de fois ta prose est plus longue que le brouillon. x1 = identique, x2 = deux fois plus long.")
+        st.metric(
+            "Amplification",
+            f"x{stats['ratio']:.1f}",
+            help="Combien de fois ta prose est plus longue que le brouillon. x1 = identique, x2 = deux fois plus long.",
+        )
         st.caption(f"Brouillon : {stats['mots_in']} mots — Prose : {stats['mots_out']} mots")
     with c_st2:
-        st.metric("Variété du vocabulaire", f"{stats['ttr']:.0%}", help="Pourcentage de mots différents (lemmes) dans ta prose.")
+        st.metric(
+            "Variété du vocabulaire",
+            f"{stats['ttr']:.0%}",
+            help="Pourcentage de mots différents (lemmes) dans ta prose.",
+        )
     with c_st3:
-        st.metric("Longueur des phrases", f"{stats['long_moy_phrases']:.0f} mots", help="10-18 = rythme équilibré, <10 = vif, >25 = ample.")
+        st.metric(
+            "Longueur des phrases",
+            f"{stats['long_moy_phrases']:.0f} mots",
+            help="10-18 = rythme équilibré, <10 = vif, >25 = ample.",
+        )
     mots_repetes_affichage = [m for m in stats["mots_repetes"] if m and str(m).strip()]
     if mots_repetes_affichage:
         mots_list = ", ".join(f"**{m}**" for m in mots_repetes_affichage[:8])
         suffix = "..." if len(mots_repetes_affichage) > 8 else ""
-        st.warning(f"Mots qui reviennent souvent (3 fois ou plus) : {mots_list}{suffix} — pense à varier.", icon="🔁")
+        st.warning(
+            f"Mots qui reviennent souvent (3 fois ou plus) : {mots_list}{suffix} — pense à varier.",
+            icon="🔁",
+        )
     ratio_lvl, ratio_txt = palier_details("ratio", stats["ratio"])
     ttr_lvl, ttr_txt = palier_details("ttr", stats["ttr"])
     rythme_lvl, rythme_txt = palier_details("moy_phrases", stats["long_moy_phrases"])
     st.markdown("##### Ce que ça veut dire")
     f1, f2, f3 = st.columns(3)
     with f1:
-        st.info(f"**Amplification x{stats['ratio']:.1f}**\n\nNiveau : **{ratio_lvl}**\n\n{ratio_txt}")
+        st.info(
+            f"**Amplification x{stats['ratio']:.1f}**\n\nNiveau : **{ratio_lvl}**\n\n{ratio_txt}"
+        )
     with f2:
         st.info(f"**Variété {stats['ttr']:.0%}**\n\nNiveau : **{ttr_lvl}**\n\n{ttr_txt}")
     with f3:
-        st.info(f"**{stats['long_moy_phrases']:.0f} mots/phrase**\n\nNiveau : **{rythme_lvl}**\n\n{rythme_txt}")
+        st.info(
+            f"**{stats['long_moy_phrases']:.0f} mots/phrase**\n\nNiveau : **{rythme_lvl}**\n\n{rythme_txt}"
+        )
     st.markdown("##### Grain littéraire (Baguette-Touch)")
     b1, b2, b3 = st.columns(3)
     with b1:
-        st.metric("Mots vides (brouillon)", f"{stats.get('stop_ratio_in', 0):.0%}", help="Le brouillon doit rester brut (ratio bas).")
-        st.metric("Mots vides (prose)", f"{stats.get('stop_ratio_out', 0):.0%}", help="Prose stylisée : ~40–50 % est normal.")
+        st.metric(
+            "Mots vides (brouillon)",
+            f"{stats.get('stop_ratio_in', 0):.0%}",
+            help="Le brouillon doit rester brut (ratio bas).",
+        )
+        st.metric(
+            "Mots vides (prose)",
+            f"{stats.get('stop_ratio_out', 0):.0%}",
+            help="Prose stylisée : ~40–50 % est normal.",
+        )
     with b2:
         bag = get_baguette_touch(output_text, nlp)
         if bag:
             pe = bag["punct_exp"]
-            st.caption(f"Ponctuation expressive : — {pe['tiret_cadratin']}× · ... {pe['points_suspension']}× · : {pe['deux_points']}×")
+            st.caption(
+                f"Ponctuation expressive : — {pe['tiret_cadratin']}× · ... {pe['points_suspension']}× · : {pe['deux_points']}×"
+            )
     with b3:
         if bag and bag["weak_verbs"]:
             wv = ", ".join(f"{v} ({n}×)" for v, n in bag["weak_verbs"])
@@ -395,9 +465,16 @@ def _render_analyse_prose(
         elif bag:
             st.success("Peu de verbes faibles détectés.")
     contrast = syntax_contrast_score(input_text, output_text, nlp)
-    st.metric("Contraste syntaxique (Input vs Output)", f"{contrast:.0%}", help="Élevé = ta prose transforme bien le brouillon.")
+    st.metric(
+        "Contraste syntaxique (Input vs Output)",
+        f"{contrast:.0%}",
+        help="Élevé = ta prose transforme bien le brouillon.",
+    )
     if contrast < 0.2:
-        st.warning("L'output ressemble trop à l'input. Varie les structures pour que le modèle apprenne.", icon="📐")
+        st.warning(
+            "L'output ressemble trop à l'input. Varie les structures pour que le modèle apprenne.",
+            icon="📐",
+        )
     sig_fiche = get_stylometric_signature(output_text, nlp)
     sig_dataset = avg_signature_from_cache(df_valid) if not df_valid.empty else None
     if sig_fiche and sig_dataset:
@@ -412,12 +489,43 @@ def _render_analyse_prose(
         r_fiche = r_fiche_norm + [r_fiche_norm[0]]
         r_dataset = r_dataset_norm + [r_dataset_norm[0]]
         fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(r=r_fiche, theta=theta, name="Ta fiche", fill="toself", line=dict(color="rgb(0,120,200)")))
-        fig.add_trace(go.Scatterpolar(r=r_dataset, theta=theta, name="Moyenne dataset", fill="toself", line=dict(color="rgb(200,80,0)", dash="dash")))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=True, title="Radar de signature stylistique", height=420)
+        fig.add_trace(
+            go.Scatterpolar(
+                r=r_fiche,
+                theta=theta,
+                name="Ta fiche",
+                fill="toself",
+                line=dict(color="rgb(0,120,200)"),
+            )
+        )
+        fig.add_trace(
+            go.Scatterpolar(
+                r=r_dataset,
+                theta=theta,
+                name="Moyenne dataset",
+                fill="toself",
+                line=dict(color="rgb(200,80,0)", dash="dash"),
+            )
+        )
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            showlegend=True,
+            title="Radar de signature stylistique",
+            height=420,
+        )
         st.plotly_chart(fig, width="stretch")
         with st.expander("Détails chiffrés du radar", expanded=False):
-            df_comp = pd.DataFrame({"Axe": categories, "Ta fiche": [round(v, 3) for v in v_fiche], "Moy. dataset": [round(v, 3) for v in v_dataset], "Écart (%)": [round((v_fiche[i] - v_dataset[i]) / max(1e-6, v_dataset[i]) * 100, 1) for i in range(len(categories))]})
+            df_comp = pd.DataFrame(
+                {
+                    "Axe": categories,
+                    "Ta fiche": [round(v, 3) for v in v_fiche],
+                    "Moy. dataset": [round(v, 3) for v in v_dataset],
+                    "Écart (%)": [
+                        round((v_fiche[i] - v_dataset[i]) / max(1e-6, v_dataset[i]) * 100, 1)
+                        for i in range(len(categories))
+                    ],
+                }
+            )
             st.dataframe(df_comp, width="stretch", hide_index=True)
         st.markdown("#### Tes constructions de phrases favorites")
         st.caption("Quels enchaînements grammaticaux reviennent le plus dans ta prose ?")
@@ -429,22 +537,45 @@ def _render_analyse_prose(
             rows_tri = []
             for gram, count in top5:
                 pct_fiche = count / max(1, total_tri_fiche) * 100
-                pct_ds = (tri_dataset.get(gram, 0) / max(1, sum(tri_dataset.values())) * 100) if tri_dataset else None
+                pct_ds = (
+                    (tri_dataset.get(gram, 0) / max(1, sum(tri_dataset.values())) * 100)
+                    if tri_dataset
+                    else None
+                )
                 delta_pct = round(pct_fiche - (pct_ds or 0), 1)
                 delta_str = f"+{delta_pct}" if delta_pct >= 0 else str(delta_pct)
-                rows_tri.append({"Construction": translate_trigram(gram), "Occurrences": count, "Ta fiche (%)": f"{pct_fiche:.1f}", "Dataset (%)": f"{pct_ds:.1f}" if pct_ds is not None else "—", "Écart": delta_str})
+                rows_tri.append(
+                    {
+                        "Construction": translate_trigram(gram),
+                        "Occurrences": count,
+                        "Ta fiche (%)": f"{pct_fiche:.1f}",
+                        "Dataset (%)": f"{pct_ds:.1f}" if pct_ds is not None else "—",
+                        "Écart": delta_str,
+                    }
+                )
             st.dataframe(pd.DataFrame(rows_tri), width="stretch", hide_index=True)
         else:
             st.caption("Texte trop court pour analyser les constructions de phrases.")
         score, deltas = compute_coherence_score(sig_fiche, sig_dataset, stats["mots_repetes"])
         level_label, tone = coherence_level(score)
         st.markdown("#### Cohérence avec le dataset")
-        st.caption("Ce score mesure à quel point ta fiche ressemble au style moyen de ton dataset. 100 = parfaitement aligné.")
+        st.caption(
+            "Ce score mesure à quel point ta fiche ressemble au style moyen de ton dataset. 100 = parfaitement aligné."
+        )
         c_score1, c_score2 = st.columns([1, 2])
         with c_score1:
-            st.metric("Score", f"{score} / 100", help="100 = ta fiche est parfaitement alignée avec le style moyen du dataset.")
+            st.metric(
+                "Score",
+                f"{score} / 100",
+                help="100 = ta fiche est parfaitement alignée avec le style moyen du dataset.",
+            )
         with c_score2:
-            _MSG = {"success": f"**{level_label}** — ton style est bien aligné avec le dataset. Continue comme ça !", "info": f"**{level_label}** — quelques petits écarts, rien de bloquant. Consulte les conseils.", "warning": f"**{level_label}** — ta fiche s'éloigne du style général. Lis les conseils ci-dessous.", "error": f"**{level_label}** — gros écart de style. Relis le texte et ajuste selon les conseils."}
+            _MSG = {
+                "success": f"**{level_label}** — ton style est bien aligné avec le dataset. Continue comme ça !",
+                "info": f"**{level_label}** — quelques petits écarts, rien de bloquant. Consulte les conseils.",
+                "warning": f"**{level_label}** — ta fiche s'éloigne du style général. Lis les conseils ci-dessous.",
+                "error": f"**{level_label}** — gros écart de style. Relis le texte et ajuste selon les conseils.",
+            }
             getattr(st, tone)(_MSG.get(tone, ""))
         actions = prioritized_actions(stats, deltas)
         if actions:
@@ -461,31 +592,42 @@ def _render_analyse_prose(
                     pass
         if len(scores_trend) >= 2:
             st.markdown("#### Évolution de la cohérence")
-            fig_trend = go.Figure(go.Scatter(y=scores_trend, mode="lines+markers", line=dict(color="rgb(0,120,200)")))
-            fig_trend.update_layout(height=180, margin=dict(t=20, b=20, l=40, r=20), yaxis=dict(range=[0, 100], title="Score"), xaxis=dict(title="Fiche (récente →)"), showlegend=False)
+            fig_trend = go.Figure(
+                go.Scatter(y=scores_trend, mode="lines+markers", line=dict(color="rgb(0,120,200)"))
+            )
+            fig_trend.update_layout(
+                height=180,
+                margin=dict(t=20, b=20, l=40, r=20),
+                yaxis=dict(range=[0, 100], title="Score"),
+                xaxis=dict(title="Fiche (récente →)"),
+                showlegend=False,
+            )
             st.plotly_chart(fig_trend, width="stretch")
     elif sig_fiche:
-        st.caption("Ajoute des fiches « Fait et validé » pour débloquer le radar et la comparaison avec le dataset.")
+        st.caption(
+            "Ajoute des fiches « Fait et validé » pour débloquer le radar et la comparaison avec le dataset."
+        )
     if type_value == "Expansion" and stats["ratio"] < 2:
-        st.warning("Pour une fiche de type « Expansion », essaie de développer davantage le brouillon (au moins x2).", icon="💡")
+        st.warning(
+            "Pour une fiche de type « Expansion », essaie de développer davantage le brouillon (au moins x2).",
+            icon="💡",
+        )
 
 
 _AJOUT_DEFAULTS = [
-    ("ajout_in",      lambda listes: ""),
-    ("ajout_out",     lambda listes: ""),
-    ("ajout_notes",   lambda listes: ""),
-    ("ajout_type",    lambda listes: listes["types"][0]),
-    ("ajout_forme",   lambda listes: listes["formes"][0]),
-    ("ajout_ton",     lambda listes: listes["tons"][0]),
+    ("ajout_in", lambda listes: ""),
+    ("ajout_out", lambda listes: ""),
+    ("ajout_notes", lambda listes: ""),
+    ("ajout_type", lambda listes: listes["types"][0]),
+    ("ajout_forme", lambda listes: listes["formes"][0]),
+    ("ajout_ton", lambda listes: listes["tons"][0]),
     ("ajout_support", lambda listes: listes["supports"][0]),
-    ("ajout_statut",  lambda listes: listes["statuts"][0]),
+    ("ajout_statut", lambda listes: listes["statuts"][0]),
 ]
 _AJOUT_KEYS = [k for k, _ in _AJOUT_DEFAULTS]
 
 
-def render_tab_ajout(
-    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
-) -> None:
+def render_tab_ajout(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
     """Formulaire d'ajout d'une nouvelle entrée (mêmes outils que Gestion & Édition : correction ortho, vérification prose)."""
     for key, default_fn in _AJOUT_DEFAULTS:
         st.session_state.setdefault(key, default_fn(listes))
@@ -500,13 +642,34 @@ def render_tab_ajout(
     st.subheader("Paramètres de Style")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.selectbox("Type", listes["types"], index=_idx(listes["types"], st.session_state["ajout_type"]), key="ajout_type", help="Normalisation = Transcription simple | Expansion = Développement ou suite")
+        st.selectbox(
+            "Type",
+            listes["types"],
+            index=_idx(listes["types"], st.session_state["ajout_type"]),
+            key="ajout_type",
+            help="Normalisation = Transcription simple | Expansion = Développement ou suite",
+        )
     with c2:
-        st.selectbox("Forme", listes["formes"], index=_idx(listes["formes"], st.session_state["ajout_forme"]), key="ajout_forme")
+        st.selectbox(
+            "Forme",
+            listes["formes"],
+            index=_idx(listes["formes"], st.session_state["ajout_forme"]),
+            key="ajout_forme",
+        )
     with c3:
-        st.selectbox("Ton", listes["tons"], index=_idx(listes["tons"], st.session_state["ajout_ton"]), key="ajout_ton")
+        st.selectbox(
+            "Ton",
+            listes["tons"],
+            index=_idx(listes["tons"], st.session_state["ajout_ton"]),
+            key="ajout_ton",
+        )
     with c4:
-        st.selectbox("Support", listes["supports"], index=_idx(listes["supports"], st.session_state["ajout_support"]), key="ajout_support")
+        st.selectbox(
+            "Support",
+            listes["supports"],
+            index=_idx(listes["supports"], st.session_state["ajout_support"]),
+            key="ajout_support",
+        )
 
     st.divider()
     st.subheader("Contenu Littéraire")
@@ -516,18 +679,43 @@ def render_tab_ajout(
         st.session_state["ajout_in"] = st.session_state.pop("_llm_pending_ajout_in")
     if "_llm_pending_ajout_out" in st.session_state:
         st.session_state["ajout_out"] = st.session_state.pop("_llm_pending_ajout_out")
-    val_input = st.text_area("Brouillon Synthétique (Input)", value=st.session_state["ajout_in"], height=150, key="ajout_in", placeholder="Note brute avec fautes...")
-    val_output = st.text_area("Prose Développée (Output)", value=st.session_state["ajout_out"], height=350, key="ajout_out", placeholder="Texte final dans votre style...")
-
-    _render_llm_generate_buttons(
-        "ajout_in", "ajout_out", "ajout_type", "ajout_forme", "ajout_ton", "ajout_support",
+    val_input = st.text_area(
+        "Brouillon Synthétique (Input)",
+        value=st.session_state["ajout_in"],
+        height=150,
+        key="ajout_in",
+        placeholder="Note brute avec fautes...",
+    )
+    val_output = st.text_area(
+        "Prose Développée (Output)",
+        value=st.session_state["ajout_out"],
+        height=350,
+        key="ajout_out",
+        placeholder="Texte final dans votre style...",
     )
 
-    if st.button("🪄 Corriger l'orthographe", key="correct_ortho_ajout", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
+    _render_llm_generate_buttons(
+        "ajout_in",
+        "ajout_out",
+        "ajout_type",
+        "ajout_forme",
+        "ajout_ton",
+        "ajout_support",
+    )
+
+    if st.button(
+        "🪄 Corriger l'orthographe",
+        key="correct_ortho_ajout",
+        help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style.",
+    ):
         if _run_correction_ortho(val_output, "pending_correction_ajout"):
             st.rerun()
 
-    if st.button("🔍 Vérifier ma prose", key="verifier_ajout_btn", help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose."):
+    if st.button(
+        "🔍 Vérifier ma prose",
+        key="verifier_ajout_btn",
+        help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose.",
+    ):
         st.session_state["verifier_ajout_clique"] = True
         st.rerun()
 
@@ -548,9 +736,16 @@ def render_tab_ajout(
     st.divider()
     c5, c6 = st.columns(2)
     with c5:
-        st.selectbox("Statut initial", listes["statuts"], index=_idx(listes["statuts"], st.session_state["ajout_statut"]), key="ajout_statut")
+        st.selectbox(
+            "Statut initial",
+            listes["statuts"],
+            index=_idx(listes["statuts"], st.session_state["ajout_statut"]),
+            key="ajout_statut",
+        )
     with c6:
-        st.text_input("Notes libres / Contexte", value=st.session_state["ajout_notes"], key="ajout_notes")
+        st.text_input(
+            "Notes libres / Contexte", value=st.session_state["ajout_notes"], key="ajout_notes"
+        )
 
     if st.button("💾 Enregistrer l'entrée", type="primary", key="submit_ajout"):
         val_input = st.session_state.get("ajout_in", "")
@@ -558,22 +753,26 @@ def render_tab_ajout(
         if not (val_input and val_output):
             st.error("L'input et l'output sont obligatoires.")
         else:
-            new_row = pd.DataFrame([{
-                "id": str(uuid.uuid4())[:8],
-                "date": datetime.now().strftime("%d/%m/%Y"),
-                "type": st.session_state.get("ajout_type", listes["types"][0]),
-                "forme": st.session_state.get("ajout_forme", listes["formes"][0]),
-                "ton": st.session_state.get("ajout_ton", listes["tons"][0]),
-                "support": st.session_state.get("ajout_support", listes["supports"][0]),
-                "input": val_input,
-                "output": val_output,
-                "statut": st.session_state.get("ajout_statut", listes["statuts"][0]),
-                "notes": st.session_state.get("ajout_notes", ""),
-                **{c: "" for c in CACHE_COLUMNS},
-            }])
+            new_row = pd.DataFrame(
+                [
+                    {
+                        "id": str(uuid.uuid4())[:8],
+                        "date": datetime.now().strftime("%d/%m/%Y"),
+                        "type": st.session_state.get("ajout_type", listes["types"][0]),
+                        "forme": st.session_state.get("ajout_forme", listes["formes"][0]),
+                        "ton": st.session_state.get("ajout_ton", listes["tons"][0]),
+                        "support": st.session_state.get("ajout_support", listes["supports"][0]),
+                        "input": val_input,
+                        "output": val_output,
+                        "statut": st.session_state.get("ajout_statut", listes["statuts"][0]),
+                        "notes": st.session_state.get("ajout_notes", ""),
+                        **{c: "" for c in CACHE_COLUMNS},
+                    }
+                ]
+            )
             updated_df = pd.concat([df, new_row], ignore_index=True)
             try:
-                update_data(conn, updated_df)
+                update_data(engine, updated_df)
             except Exception:
                 st.error(
                     "Impossible d'enregistrer dans le Google Sheet. "
@@ -587,15 +786,13 @@ def render_tab_ajout(
             st.rerun()
 
 
-def render_tab_edition(
-    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
-) -> None:
+def render_tab_edition(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
     """Onglet Gestion & Édition : navigation, fragment édition + analyse."""
     if df.empty:
         st.warning("Le dataset est vide.")
     else:
         df_valid = df[df["statut"] == STATUT_VALIDE]
-    
+
         # --- Barre de progression (fiches validées / total) ---
         total_fiches = len(df)
         validées = len(df_valid)
@@ -604,7 +801,7 @@ def render_tab_edition(
                 validées / total_fiches,
                 text=f"📊 {validées} fiche(s) validée(s) / {total_fiches} total",
             )
-    
+
         # --- Audit global : uniquement depuis le cache (pas de boucle spaCy) ---
         rows_audit = audit_rows_from_cache(df_valid) if not df_valid.empty else []
         if not df_valid.empty:
@@ -622,41 +819,42 @@ def render_tab_edition(
         # 1. FILTRAGE
         st.subheader("🔍 Filtrer les fiches")
         filtre_statut = st.multiselect(
-            "Statuts à afficher :", 
-            listes["statuts"], 
-            default=listes["statuts"]
+            "Statuts à afficher :", listes["statuts"], default=listes["statuts"]
         )
-            
-        df_view = df[df['statut'].isin(filtre_statut)].reset_index(drop=True)
-    
+
+        df_view = df[df["statut"].isin(filtre_statut)].reset_index(drop=True)
+
         if df_view.empty:
             st.info("Aucune fiche trouvée.")
         else:
             # 2. NAVIGATION
-            if 'index_fiche' not in st.session_state:
+            if "index_fiche" not in st.session_state:
                 st.session_state.index_fiche = 0
-                
+
             # Ajustement de l'index si on filtre
             st.session_state.index_fiche = min(st.session_state.index_fiche, len(df_view) - 1)
-    
+
             c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
             with c_nav1:
                 if st.button("⬅️ Précédent") and st.session_state.index_fiche > 0:
                     st.session_state.index_fiche -= 1
-                    st.rerun() # On force le rafraîchissement immédiat
+                    st.rerun()  # On force le rafraîchissement immédiat
             with c_nav2:
-                st.markdown(f"<center><h3>Fiche {st.session_state.index_fiche + 1} / {len(df_view)}</h3></center>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<center><h3>Fiche {st.session_state.index_fiche + 1} / {len(df_view)}</h3></center>",
+                    unsafe_allow_html=True,
+                )
             with c_nav3:
                 if st.button("Suivant ➡️") and st.session_state.index_fiche < len(df_view) - 1:
                     st.session_state.index_fiche += 1
                     st.rerun()
-    
+
             # 3. RÉCUPÉRATION DE LA DONNÉE
             current_row = df_view.iloc[st.session_state.index_fiche]
             row_id = current_row["id"]
-    
+
             st.divider()
-    
+
             @st.fragment
             def _bloc_edition_et_analyse():
                 nlp = load_nlp() if st.session_state["verifier_clique"] else None
@@ -670,41 +868,74 @@ def render_tab_edition(
                 except (ValueError, KeyError):
                     idx_type = idx_forme = idx_ton = idx_supp = idx_statut = 0
 
-                edit_type = col_e1.selectbox("Type", listes["types"], index=idx_type, key=f"type_{row_id}")
-                edit_forme = col_e2.selectbox("Forme", listes["formes"], index=idx_forme, key=f"forme_{row_id}")
-                edit_ton = col_e3.selectbox("Ton", listes["tons"], index=idx_ton, key=f"ton_{row_id}")
-                edit_support = col_e4.selectbox("Support", listes["supports"], index=idx_supp, key=f"supp_{row_id}")
-    
+                edit_type = col_e1.selectbox(
+                    "Type", listes["types"], index=idx_type, key=f"type_{row_id}"
+                )
+                edit_forme = col_e2.selectbox(
+                    "Forme", listes["formes"], index=idx_forme, key=f"forme_{row_id}"
+                )
+                edit_ton = col_e3.selectbox(
+                    "Ton", listes["tons"], index=idx_ton, key=f"ton_{row_id}"
+                )
+                edit_support = col_e4.selectbox(
+                    "Support", listes["supports"], index=idx_supp, key=f"supp_{row_id}"
+                )
+
                 # Appliquer résultats LLM / correction en attente avant d'instancier les widgets (Streamlit interdit de modifier la clé après)
                 pending_key = f"pending_correction_{row_id}"
                 if f"_llm_pending_in_{row_id}" in st.session_state:
-                    st.session_state[f"in_{row_id}"] = st.session_state.pop(f"_llm_pending_in_{row_id}")
+                    st.session_state[f"in_{row_id}"] = st.session_state.pop(
+                        f"_llm_pending_in_{row_id}"
+                    )
                 if f"_llm_pending_out_{row_id}" in st.session_state:
-                    st.session_state[f"out_{row_id}"] = st.session_state.pop(f"_llm_pending_out_{row_id}")
+                    st.session_state[f"out_{row_id}"] = st.session_state.pop(
+                        f"_llm_pending_out_{row_id}"
+                    )
                 if pending_key in st.session_state:
                     st.session_state[f"out_{row_id}"] = st.session_state.pop(pending_key)
-                edit_input = st.text_area("Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}")
-                edit_output = st.text_area("Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}")
-
-                _render_llm_generate_buttons(
-                    f"in_{row_id}", f"out_{row_id}",
-                    f"type_{row_id}", f"forme_{row_id}", f"ton_{row_id}", f"supp_{row_id}",
+                edit_input = st.text_area(
+                    "Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}"
+                )
+                edit_output = st.text_area(
+                    "Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}"
                 )
 
-                if st.button("🪄 Corriger l'orthographe", key=f"correct_ortho_{row_id}", help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style."):
+                _render_llm_generate_buttons(
+                    f"in_{row_id}",
+                    f"out_{row_id}",
+                    f"type_{row_id}",
+                    f"forme_{row_id}",
+                    f"ton_{row_id}",
+                    f"supp_{row_id}",
+                )
+
+                if st.button(
+                    "🪄 Corriger l'orthographe",
+                    key=f"correct_ortho_{row_id}",
+                    help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style.",
+                ):
                     if _run_correction_ortho(edit_output, pending_key):
                         st.rerun()
 
-                if st.button("🔍 Vérifier ma prose", key=f"verifier_btn_{row_id}", type="secondary", help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose."):
+                if st.button(
+                    "🔍 Vérifier ma prose",
+                    key=f"verifier_btn_{row_id}",
+                    type="secondary",
+                    help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose.",
+                ):
                     st.session_state["verifier_clique"] = True
                     st.rerun()
 
                 _render_wiktionary_block(f"edit_{row_id}")
 
                 col_e5, col_e6 = st.columns([1, 2])
-                edit_statut = col_e5.selectbox("Statut", listes["statuts"], index=idx_statut, key=f"stat_{row_id}")
-                edit_notes = col_e6.text_input("Notes libres", value=current_row["notes"], key=f"note_{row_id}")
-    
+                edit_statut = col_e5.selectbox(
+                    "Statut", listes["statuts"], index=idx_statut, key=f"stat_{row_id}"
+                )
+                edit_notes = col_e6.text_input(
+                    "Notes libres", value=current_row["notes"], key=f"note_{row_id}"
+                )
+
                 # --- PANNEAU DIAGNOSTICS LINGUISTIQUES ---
                 st.divider()
                 with st.expander("🔍 Analyse de ta prose", expanded=True):
@@ -712,12 +943,24 @@ def render_tab_edition(
                 # 5. SAUVEGARDE (met à jour le cache pour cette ligne si "Vérifier" a été cliqué)
                 if st.button("💾 Enregistrer les modifications", type="primary", width="stretch"):
                     cols_main = [
-                        "type", "forme", "ton", "support",
-                        "input", "output", "statut", "notes",
+                        "type",
+                        "forme",
+                        "ton",
+                        "support",
+                        "input",
+                        "output",
+                        "statut",
+                        "notes",
                     ]
                     df.loc[df["id"] == row_id, cols_main] = [
-                        edit_type, edit_forme, edit_ton, edit_support,
-                        edit_input, edit_output, edit_statut, edit_notes,
+                        edit_type,
+                        edit_forme,
+                        edit_ton,
+                        edit_support,
+                        edit_input,
+                        edit_output,
+                        edit_statut,
+                        edit_notes,
                     ]
                     if st.session_state["verifier_clique"]:
                         nlp_save = load_nlp()
@@ -733,7 +976,7 @@ def render_tab_edition(
                         for col, val in cache_vals.items():
                             df.loc[df["id"] == row_id, col] = val
                     try:
-                        update_data(conn, df)
+                        update_data(engine, df)
                     except Exception:
                         st.error(
                             "Impossible de mettre à jour le Google Sheet. "
@@ -742,12 +985,14 @@ def render_tab_edition(
                         return
                     st.success(f"Fiche {row_id} mise à jour !")
                     st.rerun()
+
             _bloc_edition_et_analyse()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ONGLET 3 — TABLEAU DE BORD
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _render_overview(df: pd.DataFrame, listes: dict) -> None:
     """Section 1 — Composition du dataset (métadonnées, aucun cache requis)."""
@@ -767,7 +1012,9 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
     m5.metric("A faire", n_todo)
 
     if total > 0:
-        st.progress(n_valide / total, text=f"{n_valide}/{total} fiches validées ({n_valide/total:.0%})")
+        st.progress(
+            n_valide / total, text=f"{n_valide}/{total} fiches validées ({n_valide / total:.0%})"
+        )
 
     if df.empty:
         return
@@ -777,13 +1024,15 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
     with col_left:
         counts_statut = df["statut"].value_counts().reset_index()
         counts_statut.columns = ["Statut", "Nombre"]
-        fig_statut = go.Figure(go.Bar(
-            x=counts_statut["Nombre"],
-            y=counts_statut["Statut"],
-            orientation="h",
-            text=counts_statut["Nombre"],
-            textposition="auto",
-        ))
+        fig_statut = go.Figure(
+            go.Bar(
+                x=counts_statut["Nombre"],
+                y=counts_statut["Statut"],
+                orientation="h",
+                text=counts_statut["Nombre"],
+                textposition="auto",
+            )
+        )
         fig_statut.update_layout(
             title="Répartition par statut",
             height=220,
@@ -795,13 +1044,15 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
     with col_right:
         counts_type = df["type"].value_counts().reset_index()
         counts_type.columns = ["Type", "Nombre"]
-        fig_type = go.Figure(go.Bar(
-            x=counts_type["Nombre"],
-            y=counts_type["Type"],
-            orientation="h",
-            text=counts_type["Nombre"],
-            textposition="auto",
-        ))
+        fig_type = go.Figure(
+            go.Bar(
+                x=counts_type["Nombre"],
+                y=counts_type["Type"],
+                orientation="h",
+                text=counts_type["Nombre"],
+                textposition="auto",
+            )
+        )
         fig_type.update_layout(
             title="Répartition par type",
             height=220,
@@ -814,13 +1065,15 @@ def _render_overview(df: pd.DataFrame, listes: dict) -> None:
         for dim, label in [("forme", "Formes"), ("ton", "Tons"), ("support", "Supports")]:
             counts = df[dim].value_counts().reset_index()
             counts.columns = [label, "Nombre"]
-            fig = go.Figure(go.Bar(
-                x=counts["Nombre"],
-                y=counts[label],
-                orientation="h",
-                text=counts["Nombre"],
-                textposition="auto",
-            ))
+            fig = go.Figure(
+                go.Bar(
+                    x=counts["Nombre"],
+                    y=counts[label],
+                    orientation="h",
+                    text=counts["Nombre"],
+                    textposition="auto",
+                )
+            )
             fig.update_layout(
                 title=label,
                 height=max(160, len(counts) * 30 + 60),
@@ -839,7 +1092,8 @@ def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
     _, health_tone = coherence_level(health)
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(
-        "Score santé dataset", f"{health} / 100",
+        "Score santé dataset",
+        f"{health} / 100",
         help="0.4×cohérence + 0.3×TTR normalisé + 0.3×% fiches sans alerte",
     )
     m2.metric(
@@ -861,8 +1115,8 @@ def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
     # Histogrammes triples : ratio / TTR / longueur phrases
     c1, c2, c3 = st.columns(3)
     for col, key, label, xrange in [
-        (c1, "ratio",   "Ratio d'amplification", None),
-        (c2, "ttr",     "TTR (diversité vocabulaire)", [0, 1]),
+        (c1, "ratio", "Ratio d'amplification", None),
+        (c2, "ttr", "TTR (diversité vocabulaire)", [0, 1]),
         (c3, "phrases", "Moy. mots / phrase", None),
     ]:
         with col:
@@ -878,13 +1132,14 @@ def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
     # Histogramme cohérence avec zones colorées
     scores = stats["coherence"]["values"]
     fig_coh = go.Figure()
-    fig_coh.add_vrect(x0=0,  x1=45,  fillcolor="red",    opacity=0.08, line_width=0)
-    fig_coh.add_vrect(x0=45, x1=65,  fillcolor="orange",  opacity=0.08, line_width=0)
-    fig_coh.add_vrect(x0=65, x1=100, fillcolor="green",  opacity=0.08, line_width=0)
+    fig_coh.add_vrect(x0=0, x1=45, fillcolor="red", opacity=0.08, line_width=0)
+    fig_coh.add_vrect(x0=45, x1=65, fillcolor="orange", opacity=0.08, line_width=0)
+    fig_coh.add_vrect(x0=65, x1=100, fillcolor="green", opacity=0.08, line_width=0)
     fig_coh.add_trace(go.Histogram(x=scores, nbinsx=15, name="Cohérence"))
     fig_coh.add_vline(
         x=stats["coherence"]["mean"],
-        line_dash="dash", line_color="white",
+        line_dash="dash",
+        line_color="white",
         annotation_text=f"Moy. {stats['coherence']['mean']:.0f}",
         annotation_position="top right",
     )
@@ -920,38 +1175,42 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
             # Bandes d'erreur si variance disponible
             if sig_std:
                 r_upper = [
-                    min(1.0, normalize_signature(k, sig_avg[k] + sig_std[k]))
-                    for k in categories
+                    min(1.0, normalize_signature(k, sig_avg[k] + sig_std[k])) for k in categories
                 ]
                 r_lower = [
-                    max(0.0, normalize_signature(k, sig_avg[k] - sig_std[k]))
-                    for k in categories
+                    max(0.0, normalize_signature(k, sig_avg[k] - sig_std[k])) for k in categories
                 ]
-                fig_radar.add_trace(go.Scatterpolar(
-                    r=r_upper + [r_upper[0]],
-                    theta=theta,
-                    fill=None,
-                    line=dict(color="rgba(0,120,200,0.2)", width=0),
-                    showlegend=False,
-                    name="Zone ±σ",
-                ))
-                fig_radar.add_trace(go.Scatterpolar(
-                    r=r_lower + [r_lower[0]],
-                    theta=theta,
-                    fill="tonext",
-                    fillcolor="rgba(0,120,200,0.12)",
-                    line=dict(color="rgba(0,120,200,0.2)", width=0),
-                    showlegend=False,
-                    name="Zone ±σ",
-                ))
+                fig_radar.add_trace(
+                    go.Scatterpolar(
+                        r=r_upper + [r_upper[0]],
+                        theta=theta,
+                        fill=None,
+                        line=dict(color="rgba(0,120,200,0.2)", width=0),
+                        showlegend=False,
+                        name="Zone ±σ",
+                    )
+                )
+                fig_radar.add_trace(
+                    go.Scatterpolar(
+                        r=r_lower + [r_lower[0]],
+                        theta=theta,
+                        fill="tonext",
+                        fillcolor="rgba(0,120,200,0.12)",
+                        line=dict(color="rgba(0,120,200,0.2)", width=0),
+                        showlegend=False,
+                        name="Zone ±σ",
+                    )
+                )
 
-            fig_radar.add_trace(go.Scatterpolar(
-                r=r_plot,
-                theta=theta,
-                name="Signature moyenne",
-                fill="toself",
-                line=dict(color="rgb(0,120,200)"),
-            ))
+            fig_radar.add_trace(
+                go.Scatterpolar(
+                    r=r_plot,
+                    theta=theta,
+                    name="Signature moyenne",
+                    fill="toself",
+                    line=dict(color="rgb(0,120,200)"),
+                )
+            )
             fig_radar.update_layout(
                 polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
                 showlegend=False,
@@ -975,13 +1234,15 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
                 top15 = tri_total.most_common(15)
                 labels = [translate_trigram(g) for g, _ in top15]
                 values = [c for _, c in top15]
-                fig_tri = go.Figure(go.Bar(
-                    x=values[::-1],
-                    y=labels[::-1],
-                    orientation="h",
-                    text=values[::-1],
-                    textposition="auto",
-                ))
+                fig_tri = go.Figure(
+                    go.Bar(
+                        x=values[::-1],
+                        y=labels[::-1],
+                        orientation="h",
+                        text=values[::-1],
+                        textposition="auto",
+                    )
+                )
                 fig_tri.update_layout(
                     title="Top 15 constructions grammaticales (POS)",
                     height=380,
@@ -989,9 +1250,13 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
                 )
                 st.plotly_chart(fig_tri, width="stretch")
             else:
-                st.info("Aucun trigramme POS disponible. Enregistre des fiches en cliquant sur « Vérifier ma prose ».")
+                st.info(
+                    "Aucun trigramme POS disponible. Enregistre des fiches en cliquant sur « Vérifier ma prose »."
+                )
     else:
-        st.info("Signature stylométrique non disponible. Clique sur « Vérifier ma prose » dans l'onglet Gestion & Édition pour remplir le cache.")
+        st.info(
+            "Signature stylométrique non disponible. Clique sur « Vérifier ma prose » dans l'onglet Gestion & Édition pour remplir le cache."
+        )
 
     # Évolution temporelle de la cohérence
     scores_trend: list[float] = []
@@ -1008,19 +1273,23 @@ def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
 
     if len(scores_trend) >= 3:
         st.markdown("#### Évolution de la cohérence (ordre de saisie)")
-        st.caption("Chaque point représente une fiche validée dans l'ordre des lignes. Si la courbe descend, le style dérive.")
+        st.caption(
+            "Chaque point représente une fiche validée dans l'ordre des lignes. Si la courbe descend, le style dérive."
+        )
         fig_trend = go.Figure()
-        fig_trend.add_hrect(y0=0,  y1=45,  fillcolor="red",   opacity=0.07, line_width=0)
-        fig_trend.add_hrect(y0=45, y1=65,  fillcolor="orange", opacity=0.07, line_width=0)
+        fig_trend.add_hrect(y0=0, y1=45, fillcolor="red", opacity=0.07, line_width=0)
+        fig_trend.add_hrect(y0=45, y1=65, fillcolor="orange", opacity=0.07, line_width=0)
         fig_trend.add_hrect(y0=65, y1=100, fillcolor="green", opacity=0.07, line_width=0)
-        fig_trend.add_trace(go.Scatter(
-            y=scores_trend,
-            x=list(range(1, len(scores_trend) + 1)),
-            mode="lines+markers",
-            line=dict(color="rgb(0,120,200)"),
-            hovertext=ids_trend,
-            hovertemplate="Fiche %{hovertext}<br>Score : %{y}<extra></extra>",
-        ))
+        fig_trend.add_trace(
+            go.Scatter(
+                y=scores_trend,
+                x=list(range(1, len(scores_trend) + 1)),
+                mode="lines+markers",
+                line=dict(color="rgb(0,120,200)"),
+                hovertext=ids_trend,
+                hovertemplate="Fiche %{hovertext}<br>Score : %{y}<extra></extra>",
+            )
+        )
         fig_trend.update_layout(
             height=240,
             margin=dict(t=20, b=20, l=40, r=20),
@@ -1040,6 +1309,7 @@ def _render_alerts_panel(problematic: list[dict]) -> None:
 
     # Résumé par type d'alerte
     from collections import Counter as _Counter
+
     alerte_counts: _Counter = _Counter()
     for row in problematic:
         for a in row["alertes"]:
@@ -1049,13 +1319,15 @@ def _render_alerts_panel(problematic: list[dict]) -> None:
     with col_bar:
         labels = list(alerte_counts.keys())
         values = [alerte_counts[k] for k in labels]
-        fig_al = go.Figure(go.Bar(
-            x=values,
-            y=labels,
-            orientation="h",
-            text=values,
-            textposition="auto",
-        ))
+        fig_al = go.Figure(
+            go.Bar(
+                x=values,
+                y=labels,
+                orientation="h",
+                text=values,
+                textposition="auto",
+            )
+        )
         fig_al.update_layout(
             title="Alertes par type",
             height=max(160, len(labels) * 50 + 60),
@@ -1076,13 +1348,15 @@ def _render_alerts_panel(problematic: list[dict]) -> None:
     # Tableau détaillé
     rows_display = []
     for r in problematic:
-        rows_display.append({
-            "ID": r["id"],
-            "Type": r["type"],
-            "Forme": r["forme"],
-            "Ton": r["ton"],
-            "Alertes": " · ".join(r["alertes"]),
-        })
+        rows_display.append(
+            {
+                "ID": r["id"],
+                "Type": r["type"],
+                "Forme": r["forme"],
+                "Ton": r["ton"],
+                "Alertes": " · ".join(r["alertes"]),
+            }
+        )
     st.dataframe(
         pd.DataFrame(rows_display),
         hide_index=True,
@@ -1094,9 +1368,7 @@ def _render_alerts_panel(problematic: list[dict]) -> None:
     )
 
 
-def render_tab_dashboard(
-    df: pd.DataFrame, conn: Any, listes: dict[str, list[str]]
-) -> None:
+def render_tab_dashboard(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
     """Onglet Tableau de bord : composition, qualité, stylométrie, alertes, gestion du cache."""
     df_valid = df[df["statut"] == STATUT_VALIDE]
 
@@ -1104,7 +1376,9 @@ def render_tab_dashboard(
     n_valid = len(df_valid)
 
     if n_total == 0:
-        st.info("Le dataset est vide. Commence à ajouter des fiches dans l'onglet « Nouvelle Entrée ».")
+        st.info(
+            "Le dataset est vide. Commence à ajouter des fiches dans l'onglet « Nouvelle Entrée »."
+        )
         return
 
     # Section 1 — Composition (pas besoin du cache)
@@ -1113,7 +1387,9 @@ def render_tab_dashboard(
     st.divider()
 
     if n_valid == 0:
-        st.info("Aucune fiche validée. Passe des fiches au statut « Fait et validé » pour débloquer les indicateurs qualité et stylistiques.")
+        st.info(
+            "Aucune fiche validée. Passe des fiches au statut « Fait et validé » pour débloquer les indicateurs qualité et stylistiques."
+        )
         return
 
     # --- Section Cache stylométrique : générer / écraser / enregistrer ---
@@ -1172,14 +1448,16 @@ def render_tab_dashboard(
                     for col, val in cache_vals.items():
                         df.loc[df["id"].astype(str) == str(rid), col] = val
                 try:
-                    update_data(conn, df)
+                    update_data(engine, df)
                 except Exception:
                     st.error(
                         "Impossible d'enregistrer le cache dans le Google Sheet. "
                         "Vérifiez la connexion et réessayez."
                     )
                     return
-            st.success(f"Cache généré pour {len(df_sans)} fiche(s) sans cache. Données enregistrées.")
+            st.success(
+                f"Cache généré pour {len(df_sans)} fiche(s) sans cache. Données enregistrées."
+            )
             st.rerun()
 
         if ecrase_all and nlp is not None and confirm_ecrase:
@@ -1191,7 +1469,7 @@ def render_tab_dashboard(
                         if col in row:
                             df.loc[df["id"].astype(str) == str(rid), col] = row[col]
                 try:
-                    update_data(conn, df)
+                    update_data(engine, df)
                 except Exception:
                     st.error(
                         "Impossible d'enregistrer le cache dans le Google Sheet. "

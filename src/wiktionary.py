@@ -4,9 +4,11 @@ Module d'accès au Wiktionnaire français via l'API Wikimedia.
 Récupère pour un mot : définitions, synonymes, antonymes,
 vocabulaire apparenté (dérivés, apparentés) et anagrammes.
 """
+
 import logging
 import re
 from dataclasses import dataclass, field
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -101,11 +103,13 @@ def _extract_french_block(wikitext: str) -> str:
 
 def _strip_wiki_inline(text: str) -> str:
     """Enlève les liens [[...]] et garde le libellé (ou le lien s'il n'y a pas de pipe)."""
+
     def repl(m: re.Match[str]) -> str:
         content = m.group(1)
         if "|" in content:
             return content.split("|", 1)[1].strip()
         return content
+
     text = re.sub(r"\[\[([^\]|]+\|[^\]]+)\]\]", repl, text)
     text = re.sub(r"\[\[([^\]]+)\]\]", repl, text)
     # Enlever les templates {{...}} (grossier : tout entre {{ et }})
@@ -124,12 +128,10 @@ def _extract_list_items(block: str) -> list[str]:
     return items
 
 
-def _extract_section_content(
-    wikitext: str, section_pattern: str, level: int = 4
-) -> str:
+def _extract_section_content(wikitext: str, section_pattern: str, level: int = 4) -> str:
     """
-    Trouve une section (ex. {{S|synonymes}}) et retourne son contenu jusqu'à la prochaine section de même niveau.
-    level 3 = ===, level 4 = ====
+    Trouve une section (ex. {{S|synonymes}}) et retourne son contenu jusqu'à la prochaine
+    section de même niveau. level 3 = ===, level 4 = ====
     """
     pattern = re.escape(section_pattern)
     if level == 3:
@@ -185,11 +187,7 @@ def fetch_wiktionary(mot: str) -> WiktionaryResult:
         vocabulaire apparenté (dérivés + apparentés) et anagrammes.
     """
     mot_norm = mot.strip()
-    titre = (
-        mot_norm[0].upper() + mot_norm[1:].lower()
-        if len(mot_norm) > 1
-        else mot_norm.upper()
-    )
+    titre = mot_norm[0].upper() + mot_norm[1:].lower() if len(mot_norm) > 1 else mot_norm.upper()
     result = WiktionaryResult(
         mot=mot_norm,
         page_url=f"{WIKTIONARY_PAGE_URL}/{titre}" if mot_norm else "",

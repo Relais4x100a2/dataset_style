@@ -1,17 +1,36 @@
 """
-Connexion Google Sheets, chargement / mise à jour des données, helpers cache.
+Persistance PostgreSQL (table ``entries``), chargement / mise à jour, helpers cache.
+
+Utilisé pour le déploiement CapRover / VPS ; ``DATABASE_URL`` est lu dans ``main.py``.
 """
+
 import json
 import logging
 import time
 from collections import Counter
-from typing import Any
 
 import pandas as pd
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 logger = logging.getLogger(__name__)
 
 STATUT_VALIDE = "Fait et validé"
+
+ENTRY_TABLE = "entries"
+
+BASE_COLUMNS = [
+    "id",
+    "type",
+    "forme",
+    "ton",
+    "support",
+    "input",
+    "output",
+    "statut",
+    "notes",
+]
 
 CACHE_COLUMNS = [
     "_ratio",
@@ -29,37 +48,85 @@ CACHE_COLUMNS = [
     "_stop_ratio_out",
 ]
 
-# Erreurs API Google considérées comme temporaires (retry)
-RETRYABLE_STATUS_CODES = (503, 429, 500, 502, 504)
+ALL_COLUMNS: list[str] = BASE_COLUMNS + CACHE_COLUMNS
+
 MAX_RETRIES = 4
 INITIAL_BACKOFF = 2.0
 
 
-def load_data(conn: Any, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
-    """Charge les données et assure la présence des colonnes de cache.
+def create_db_engine(database_url: str) -> Engine:
+    """Crée un moteur SQLAlchemy avec ping de pool (robustesse réseau / PgBouncer)."""
+    return create_engine(database_url.strip(), pool_pre_ping=True)
 
-    En cas d'indisponibilité temporaire de l'API Google (503, 429, etc.),
-    réessaie avec backoff exponentiel.
+
+def ensure_entries_table(engine: Engine) -> None:
+    """Crée la table ``entries`` si elle n'existe pas (schéma aligné sur ALL_COLUMNS)."""
+    insp = inspect(engine)
+    if insp.has_table(ENTRY_TABLE):
+        return
+    empty = pd.DataFrame(columns=ALL_COLUMNS)
+    empty.to_sql(ENTRY_TABLE, engine, if_exists="replace", index=False)
+    logger.info("Table %s créée (vide).", ENTRY_TABLE)
+
+
+def _normalize_loaded_frame(data: pd.DataFrame) -> pd.DataFrame:
+    """Uniformise les types et garantit les colonnes cache."""
+    data = data.astype(str).replace(["nan", "None", "<NA>"], "")
+    for col in CACHE_COLUMNS:
+        if col not in data.columns:
+            data[col] = ""
+    return data
+
+
+def _normalize_for_write(df: pd.DataFrame) -> pd.DataFrame:
+    """Ne garde que ALL_COLUMNS, remplit les manquantes pour l'écriture SQL."""
+    out = df.copy()
+    for col in ALL_COLUMNS:
+        if col not in out.columns:
+            out[col] = ""
+    return out[ALL_COLUMNS].astype(str).replace(["nan", "None", "<NA>"], "")
+
+
+def _is_retryable_db_error(exc: BaseException) -> bool:
+    """True si l'erreur ressemble à une panne temporaire (réseau, serveur)."""
+    if isinstance(exc, OperationalError):
+        return True
+    if isinstance(exc, DBAPIError):
+        return True
+    msg = str(exc).lower()
+    return any(
+        s in msg
+        for s in (
+            "connection refused",
+            "could not connect",
+            "timeout",
+            "server closed",
+            "terminating connection",
+        )
+    )
+
+
+def load_data(engine: Engine, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
+    """Charge les lignes depuis PostgreSQL et assure la présence des colonnes de cache.
+
+    Réessaie avec backoff en cas d'erreur transitoire (connexion, serveur).
     """
+    ensure_entries_table(engine)
     last_exception: BaseException | None = None
     backoff = INITIAL_BACKOFF
 
     for attempt in range(max_retries):
         try:
-            data = conn.read(ttl="0")
-            data = data.astype(str).replace(["nan", "None", "<NA>"], "")
-            for col in CACHE_COLUMNS:
-                if col not in data.columns:
-                    data[col] = ""
-            return data
+            data = pd.read_sql(text(f'SELECT * FROM "{ENTRY_TABLE}"'), engine)
+            if data.empty:
+                return _normalize_loaded_frame(pd.DataFrame(columns=ALL_COLUMNS))
+            return _normalize_loaded_frame(data)
         except Exception as ex:  # noqa: BLE001
             last_exception = ex
-            status = getattr(ex, "response", None)
-            status_code = getattr(status, "status_code", None) if status else None
-            if status_code in RETRYABLE_STATUS_CODES and attempt < max_retries - 1:
+            if _is_retryable_db_error(ex) and attempt < max_retries - 1:
                 logger.warning(
-                    "API Google indisponible (code %s), nouvel essai dans %.1fs (tentative %d/%d)",
-                    status_code,
+                    "PostgreSQL indisponible (%s), nouvel essai dans %.1fs (tentative %d/%d)",
+                    ex,
                     backoff,
                     attempt + 1,
                     max_retries,
@@ -74,13 +141,18 @@ def load_data(conn: Any, max_retries: int = MAX_RETRIES) -> pd.DataFrame:
     raise RuntimeError("load_data: échec après toutes les tentatives")
 
 
-def update_data(conn: Any, df: pd.DataFrame) -> None:
-    """Met à jour le Google Sheet avec le DataFrame.
+def update_data(engine: Engine, df: pd.DataFrame) -> None:
+    """Remplace le contenu de ``entries`` par le DataFrame (même sémantique qu'un sheet complet).
 
-    Peut lever une exception en cas d'échec de l'API Google (connexion, quotas, etc.).
-    L'appelant doit gérer l'erreur (try/except) et informer l'utilisateur si besoin.
+    Raises:
+        Exception: Erreur SQL ou contrainte ; l'appelant peut afficher un message utilisateur.
     """
-    conn.update(data=df)
+    ensure_entries_table(engine)
+    payload = _normalize_for_write(df)
+    with engine.begin() as conn:
+        conn.execute(text(f'DELETE FROM "{ENTRY_TABLE}"'))
+        if not payload.empty:
+            payload.to_sql(ENTRY_TABLE, conn, if_exists="append", index=False, method="multi")
 
 
 def avg_signature_from_cache(df_valid: pd.DataFrame) -> dict[str, float] | None:
@@ -114,14 +186,16 @@ def audit_rows_from_cache(df_valid: pd.DataFrame) -> list[dict]:
             ratio_val = float(r_ratio)
         except (ValueError, TypeError):
             continue
-        rows.append({
-            "id": row.get("id", ""),
-            "type": row.get("type", ""),
-            "ratio": round(ratio_val, 1),
-            "moy. mots/phrase": str(row.get("_long_phrases", "") or "—"),
-            "TTR": str(row.get("_ttr", "") or "—"),
-            "alertes": "—",
-        })
+        rows.append(
+            {
+                "id": row.get("id", ""),
+                "type": row.get("type", ""),
+                "ratio": round(ratio_val, 1),
+                "moy. mots/phrase": str(row.get("_long_phrases", "") or "—"),
+                "TTR": str(row.get("_ttr", "") or "—"),
+                "alertes": "—",
+            }
+        )
     return rows
 
 
@@ -139,9 +213,9 @@ def dataset_cache_stats(df_valid: pd.DataFrame) -> dict | None:
         "health_score" ou None si aucune fiche n'a de cache.
     """
     cols_map = {
-        "ratio":     "_ratio",
-        "ttr":       "_ttr",
-        "phrases":   "_long_phrases",
+        "ratio": "_ratio",
+        "ttr": "_ttr",
+        "phrases": "_long_phrases",
         "coherence": "_coherence_score",
     }
     parsed: dict[str, list[float]] = {k: [] for k in cols_map}
@@ -166,7 +240,7 @@ def dataset_cache_stats(df_valid: pd.DataFrame) -> dict | None:
     def _stats(values: list[float]) -> dict:
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / max(1, len(values))
-        std = variance ** 0.5
+        std = variance**0.5
         return {"mean": round(mean, 3), "std": round(std, 3), "values": values}
 
     problematic = flag_problematic_rows(df_valid)
@@ -179,9 +253,9 @@ def dataset_cache_stats(df_valid: pd.DataFrame) -> dict | None:
 
     return {
         "n": n,
-        "ratio":     _stats(parsed["ratio"]),
-        "ttr":       _stats(parsed["ttr"]),
-        "phrases":   _stats(parsed["phrases"]),
+        "ratio": _stats(parsed["ratio"]),
+        "ttr": _stats(parsed["ttr"]),
+        "phrases": _stats(parsed["phrases"]),
         "coherence": _stats(parsed["coherence"]),
         "health_score": max(0, min(100, health)),
     }
@@ -206,7 +280,7 @@ def flag_problematic_rows(df_valid: pd.DataFrame) -> list[dict]:
     for _, row in df_valid.iterrows():
         try:
             ratio = float(row.get("_ratio", "") or "")
-            ttr   = float(row.get("_ttr", "") or "")
+            ttr = float(row.get("_ttr", "") or "")
             score = float(row.get("_coherence_score", "") or "")
         except (ValueError, TypeError):
             continue
@@ -218,13 +292,15 @@ def flag_problematic_rows(df_valid: pd.DataFrame) -> list[dict]:
         if ttr < 0.50:
             alertes.append("Vocabulaire répétitif")
         if alertes:
-            result.append({
-                "id":     row.get("id", ""),
-                "type":   row.get("type", ""),
-                "forme":  row.get("forme", ""),
-                "ton":    row.get("ton", ""),
-                "alertes": alertes,
-            })
+            result.append(
+                {
+                    "id": row.get("id", ""),
+                    "type": row.get("type", ""),
+                    "forme": row.get("forme", ""),
+                    "ton": row.get("ton", ""),
+                    "alertes": alertes,
+                }
+            )
     return result
 
 

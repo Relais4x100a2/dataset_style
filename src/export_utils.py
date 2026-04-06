@@ -1,6 +1,7 @@
 """
 Export multi-modèles : JSONL pour fine-tuning (LFM2, Baguettotron, Mistral).
 """
+
 import io
 import json
 from typing import Literal
@@ -92,9 +93,7 @@ def _convert_to_lfm2_jsonl(df_valid: pd.DataFrame, include_stylometry: bool) -> 
     return buf.getvalue()
 
 
-def _convert_to_baguettotron_jsonl(
-    df_valid: pd.DataFrame, include_stylometry: bool
-) -> str:
+def _convert_to_baguettotron_jsonl(df_valid: pd.DataFrame, include_stylometry: bool) -> str:
     """
     Format PleIAs/Baguettotron : ChatML + <think> trace + <H≈…>.
     Si include_stylometry, ajoute une ligne Stylo dans la trace.

@@ -1,0 +1,20 @@
+[project]
+name = "dataset-style"
+version = "0.1.0"
+description = "Dataset Style Studio — curation et export pour fine-tuning stylistique"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "main.py", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]
+# Chaînes françaises longues et blocs Streamlit
+"src/ui_components.py" = ["E501"]
