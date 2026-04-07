@@ -39,13 +39,17 @@ def _hydrate_deployment_env_from_secrets() -> None:
         "LLM_TIMEOUT_SECONDS",
     )
     try:
-        for key in keys:
-            if os.environ.get(key):
-                continue
-            if key in st.secrets:
-                os.environ[key] = str(st.secrets[key])
-    except (AttributeError, KeyError, TypeError):
-        pass
+        secrets_dict = dict(st.secrets)
+    except Exception:
+        # En prod CapRover sans secrets.toml, c'est normal.
+        return
+
+    for key in keys:
+        if os.environ.get(key):
+            continue
+        value = secrets_dict.get(key)
+        if value is not None:
+            os.environ[key] = str(value)
 
 
 _hydrate_deployment_env_from_secrets()
