@@ -9,7 +9,7 @@ dependencies = []
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "main.py", "scripts"]
+src = ["src", "main.py", "scripts", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "W"]

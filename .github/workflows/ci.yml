@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, deploy/caprover-relais4]
   pull_request:
-    branches: [main]
+    branches: [main, deploy/caprover-relais4]
 
 jobs:
   ruff:
@@ -17,3 +17,15 @@ jobs:
       - uses: astral-sh/ruff-action@v2
         with:
           args: "format --check ."
+
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps (minimal for tests)
+        run: pip install pandas "sqlalchemy>=2.0.0,<3" pytest
+      - name: Run pytest
+        run: pytest tests/ -q

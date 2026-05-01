@@ -54,6 +54,10 @@ dataset_style/
 ├── README.md
 ├── scripts/
 │   └── import_csv_to_pg.py   # Import CSV → table entries
+├── tests/
+│   ├── conftest.py           # PYTHONPATH racine dépôt
+│   ├── test_database.py       # Agrégats cache, normalisation, alertes
+│   └── test_export_utils.py   # Exports JSONL (LFM2, Mistral, etc.)
 └── src/
     ├── __init__.py
     ├── database.py       # PostgreSQL : ensure table, load_data, update_data, helpers cache
@@ -224,7 +228,13 @@ Les exports concernent les lignes dont le **statut** est **« Fait et validé »
 
 ### CI
 
-Le workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) exécute **Ruff** (`check` + `format --check`) sur les pushes et pull requests.
+Le workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) exécute **Ruff** (`check` + `format --check`) et **`pytest`** sur le dossier `tests/` (dépendances minimales : pandas, SQLAlchemy) sur les pushes et pull requests vers `main` ou `deploy/caprover-relais4`.
+
+Pour lancer les tests en local après `pip install -r requirements.txt` :
+
+```bash
+pytest tests/ -q
+```
 
 ---
 
