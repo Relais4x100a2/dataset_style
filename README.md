@@ -81,6 +81,17 @@ streamlit run main.py
 
 En local, tu peux aussi définir `DATABASE_URL` dans `.streamlit/secrets.toml` (clé racine `DATABASE_URL = "..."`).
 
+### Tests automatisés (pytest)
+
+Les tests couvrent la logique métier **sans PostgreSQL** (export JSONL, agrégats / alertes depuis le cache) :
+
+```bash
+pip install -r requirements.txt
+pytest
+```
+
+La configuration (`pythonpath`, répertoire `tests/`) est dans `pyproject.toml`.
+
 ---
 
 ## 🚢 Déploiement CapRover (relais4x100a2)
