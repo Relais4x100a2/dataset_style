@@ -209,6 +209,51 @@ def request_password_reset_link(email: str) -> str:
     return _create_password_reset_link(_normalize_email(email))
 
 
+def bootstrap_first_admin(engine: Engine) -> None:
+    """Crée le premier compte super admin si aucun utilisateur n'existe encore.
+
+    Lit BOOTSTRAP_ADMIN_PASSWORD et le premier email de SUPER_ADMIN_EMAILS.
+    À supprimer de APP_CONFIG_JSON après la première connexion réussie.
+    """
+    from src.database import count_users_for_admin, grant_super_admin_by_email, upsert_user_from_su
+
+    password = (os.environ.get("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+    if not password:
+        return
+
+    emails = _super_admin_email_set()
+    if not emails:
+        logger.warning("bootstrap_first_admin: SUPER_ADMIN_EMAILS non défini, skip.")
+        return
+
+    try:
+        if count_users_for_admin(engine) > 0:
+            return
+    except Exception:  # noqa: BLE001
+        logger.exception("bootstrap_first_admin: impossible de compter les utilisateurs.")
+        return
+
+    email = next(iter(sorted(emails)))
+    try:
+        out = _signup(email, password)
+        status = str(out.get("status") or "").strip()
+        if status not in {"OK", "EMAIL_ALREADY_EXISTS_ERROR"}:
+            logger.error("bootstrap_first_admin: signup échoué status=%s", status)
+            return
+        su_user_id = _extract_user_id(out.get("user", {}))
+        upsert_user_from_su(
+            engine, su_user_id=su_user_id, email=email, display_name=email.split("@")[0]
+        )
+        grant_super_admin_by_email(engine, email)
+        logger.info(
+            "bootstrap_first_admin: compte super admin créé pour %s. "
+            "Retirez BOOTSTRAP_ADMIN_PASSWORD de APP_CONFIG_JSON après la première connexion.",
+            email,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("bootstrap_first_admin: erreur lors de la création du compte.")
+
+
 def ensure_invitation_only_policy() -> None:
     """
     Vérifie contractuellement que le signup provider est bloqué.

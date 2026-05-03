@@ -1,7 +1,7 @@
 import os
 
 import streamlit as st
-from src.auth import render_auth_gate
+from src.auth import bootstrap_first_admin, render_auth_gate
 from src.config import initialize_runtime_config
 from src.database import create_db_engine, ensure_schema, get_project_settings, load_project_entries
 from src.presets import load_active_dimensions
@@ -41,6 +41,7 @@ if not db_url:
 
 engine = create_db_engine(db_url)
 ensure_schema(engine)
+bootstrap_first_admin(engine)
 
 user = render_auth_gate(engine)
 if not user:
