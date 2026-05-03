@@ -14,6 +14,9 @@ COPY src ./src
 
 RUN uv sync --frozen --no-dev
 
+RUN addgroup --system appuser && adduser --system --ingroup appuser appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8501
 
 CMD ["uv", "run", "python", "-m", "streamlit", "run", "main.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless", "true"]

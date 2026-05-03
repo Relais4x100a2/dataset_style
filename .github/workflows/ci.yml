@@ -18,10 +18,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install . pytest
-      - uses: astral-sh/ruff-action@v2
+      - uses: astral-sh/ruff-action@248b6d6da365ac08f8a75f97a45e47c1f9d193d2 # v2
         with:
           args: "check ."
-      - uses: astral-sh/ruff-action@v2
+      - uses: astral-sh/ruff-action@248b6d6da365ac08f8a75f97a45e47c1f9d193d2 # v2
         with:
           args: "format --check ."
       - name: Run tests
