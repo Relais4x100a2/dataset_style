@@ -220,13 +220,19 @@ def ensure_schema(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(text(ddl))
         conn.execute(
-            text("ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS active_preset_key TEXT NOT NULL DEFAULT 'roman';")
+            text(
+                "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS active_preset_key TEXT NOT NULL DEFAULT 'roman';"
+            )
         )
         conn.execute(
-            text("ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS custom_presets_json TEXT NOT NULL DEFAULT '';")
+            text(
+                "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS custom_presets_json TEXT NOT NULL DEFAULT '';"
+            )
         )
         conn.execute(
-            text("ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS dimensions_override_json TEXT NOT NULL DEFAULT '';")
+            text(
+                "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS dimensions_override_json TEXT NOT NULL DEFAULT '';"
+            )
         )
         conn.execute(
             text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT '';")
@@ -237,16 +243,38 @@ def ensure_schema(engine: Engine) -> None:
         conn.execute(
             text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS public TEXT NOT NULL DEFAULT '';")
         )
-        conn.execute(text("UPDATE entries SET structure = forme WHERE structure = '' AND forme <> '';"))
-        conn.execute(text("UPDATE entries SET format = support WHERE format = '' AND support <> '';"))
         conn.execute(
-            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT FALSE;")
+            text("UPDATE entries SET structure = forme WHERE structure = '' AND forme <> '';")
         )
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ NULL;"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL;"))
-        conn.execute(text("ALTER TABLE user_deprovision_ops ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL;"))
-        conn.execute(text("ALTER TABLE user_deprovision_ops ADD COLUMN IF NOT EXISTS quarantined_at TIMESTAMPTZ NULL;"))
-        conn.execute(text("ALTER TABLE user_deprovision_ops DROP CONSTRAINT IF EXISTS chk_deprovision_state;"))
+        conn.execute(
+            text("UPDATE entries SET format = support WHERE format = '' AND support <> '';")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT FALSE;"
+            )
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ NULL;")
+        )
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL;")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE user_deprovision_ops ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL;"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE user_deprovision_ops ADD COLUMN IF NOT EXISTS quarantined_at TIMESTAMPTZ NULL;"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE user_deprovision_ops DROP CONSTRAINT IF EXISTS chk_deprovision_state;"
+            )
+        )
         conn.execute(
             text(
                 """
@@ -256,7 +284,11 @@ def ensure_schema(engine: Engine) -> None:
                 """
             )
         )
-        conn.execute(text("UPDATE user_deprovision_ops SET next_retry_at = NOW() WHERE next_retry_at IS NULL;"))
+        conn.execute(
+            text(
+                "UPDATE user_deprovision_ops SET next_retry_at = NOW() WHERE next_retry_at IS NULL;"
+            )
+        )
 
 
 def upsert_user_from_su(
@@ -417,7 +449,9 @@ def count_owned_projects(engine: Engine, user_id: str) -> int:
     return int((row or {}).get("c", 0))
 
 
-def detach_memberships_as_super_admin(engine: Engine, actor_user_id: str, target_user_id: str) -> int:
+def detach_memberships_as_super_admin(
+    engine: Engine, actor_user_id: str, target_user_id: str
+) -> int:
     """Retire toutes les memberships d'un utilisateur (action auditée côté appelant)."""
     require_super_admin(engine, actor_user_id)
     with engine.begin() as conn:
@@ -431,9 +465,11 @@ def detach_memberships_as_super_admin(engine: Engine, actor_user_id: str, target
 def count_users_for_admin(engine: Engine) -> int:
     """Compte les utilisateurs actifs pour la pagination super admin."""
     with engine.begin() as conn:
-        row = conn.execute(
-            text("SELECT COUNT(*) AS c FROM users WHERE disabled_at IS NULL")
-        ).mappings().first()
+        row = (
+            conn.execute(text("SELECT COUNT(*) AS c FROM users WHERE disabled_at IS NULL"))
+            .mappings()
+            .first()
+        )
     return int((row or {}).get("c", 0))
 
 
@@ -481,10 +517,14 @@ def list_accounts_for_super_admin(
     LIMIT :limit OFFSET :offset;
     """
     with engine.begin() as conn:
-        rows = conn.execute(
-            text(sql),
-            {"valid_status": STATUT_VALIDE, "limit": safe_limit, "offset": safe_offset},
-        ).mappings().all()
+        rows = (
+            conn.execute(
+                text(sql),
+                {"valid_status": STATUT_VALIDE, "limit": safe_limit, "offset": safe_offset},
+            )
+            .mappings()
+            .all()
+        )
     out: list[AccountAdminRow] = []
     for row in rows:
         out.append(
@@ -536,8 +576,12 @@ def create_deprovision_operation(
                 state=str(existing["state"]),
                 retry_count=int(existing["retry_count"]),
                 last_error=str(existing["last_error"] or ""),
-                next_retry_at="" if existing.get("next_retry_at") is None else str(existing["next_retry_at"]),
-                quarantined_at="" if existing.get("quarantined_at") is None else str(existing["quarantined_at"]),
+                next_retry_at=""
+                if existing.get("next_retry_at") is None
+                else str(existing["next_retry_at"]),
+                quarantined_at=""
+                if existing.get("quarantined_at") is None
+                else str(existing["quarantined_at"]),
             )
         conn.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:target_uid))"),
@@ -753,9 +797,10 @@ def list_retryable_deprovision_ops(engine: Engine, *, limit: int = 50) -> list[D
     """Liste les opérations à reprendre par le worker planifié."""
     safe_limit = max(1, min(limit, 500))
     with engine.begin() as conn:
-        rows = conn.execute(
-            text(
-                """
+        rows = (
+            conn.execute(
+                text(
+                    """
                 SELECT *
                 FROM user_deprovision_ops
                 WHERE state IN ('pending', 'provider_done', 'failed')
@@ -763,9 +808,12 @@ def list_retryable_deprovision_ops(engine: Engine, *, limit: int = 50) -> list[D
                 ORDER BY updated_at ASC
                 LIMIT :limit
                 """
-            ),
-            {"limit": safe_limit},
-        ).mappings().all()
+                ),
+                {"limit": safe_limit},
+            )
+            .mappings()
+            .all()
+        )
     out: list[DeprovisionOp] = []
     for row in rows:
         out.append(
@@ -777,7 +825,9 @@ def list_retryable_deprovision_ops(engine: Engine, *, limit: int = 50) -> list[D
                 retry_count=int(row["retry_count"]),
                 last_error=str(row["last_error"] or ""),
                 next_retry_at="" if row.get("next_retry_at") is None else str(row["next_retry_at"]),
-                quarantined_at="" if row.get("quarantined_at") is None else str(row["quarantined_at"]),
+                quarantined_at=""
+                if row.get("quarantined_at") is None
+                else str(row["quarantined_at"]),
             )
         )
     return out
@@ -790,17 +840,21 @@ def list_recent_deprovision_ops(
     require_super_admin(engine, actor_user_id)
     safe_limit = max(1, min(limit, 500))
     with engine.begin() as conn:
-        rows = conn.execute(
-            text(
-                """
+        rows = (
+            conn.execute(
+                text(
+                    """
                 SELECT *
                 FROM user_deprovision_ops
                 ORDER BY updated_at DESC
                 LIMIT :limit
                 """
-            ),
-            {"limit": safe_limit},
-        ).mappings().all()
+                ),
+                {"limit": safe_limit},
+            )
+            .mappings()
+            .all()
+        )
     out: list[DeprovisionOp] = []
     for row in rows:
         out.append(
@@ -812,7 +866,9 @@ def list_recent_deprovision_ops(
                 retry_count=int(row["retry_count"]),
                 last_error=str(row["last_error"] or ""),
                 next_retry_at="" if row.get("next_retry_at") is None else str(row["next_retry_at"]),
-                quarantined_at="" if row.get("quarantined_at") is None else str(row["quarantined_at"]),
+                quarantined_at=""
+                if row.get("quarantined_at") is None
+                else str(row["quarantined_at"]),
             )
         )
     return out
@@ -825,18 +881,22 @@ def list_quarantined_deprovision_ops(
     require_super_admin(engine, actor_user_id)
     safe_limit = max(1, min(limit, 200))
     with engine.begin() as conn:
-        rows = conn.execute(
-            text(
-                """
+        rows = (
+            conn.execute(
+                text(
+                    """
                 SELECT *
                 FROM user_deprovision_ops
                 WHERE state = 'quarantined'
                 ORDER BY updated_at DESC
                 LIMIT :limit
                 """
-            ),
-            {"limit": safe_limit},
-        ).mappings().all()
+                ),
+                {"limit": safe_limit},
+            )
+            .mappings()
+            .all()
+        )
     out: list[DeprovisionOp] = []
     for row in rows:
         out.append(
@@ -848,7 +908,9 @@ def list_quarantined_deprovision_ops(
                 retry_count=int(row["retry_count"]),
                 last_error=str(row["last_error"] or ""),
                 next_retry_at="" if row.get("next_retry_at") is None else str(row["next_retry_at"]),
-                quarantined_at="" if row.get("quarantined_at") is None else str(row["quarantined_at"]),
+                quarantined_at=""
+                if row.get("quarantined_at") is None
+                else str(row["quarantined_at"]),
             )
         )
     return out
@@ -1003,7 +1065,8 @@ def create_project(engine: Engine, user_id: str, name: str, description: str = "
     return pid
 
 
-def delete_project(engine: Engine, project_id: str) -> None:
+def delete_project(engine: Engine, project_id: str, user_id: str) -> None:
+    require_admin(engine, project_id, user_id)
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM projects WHERE id = :pid"), {"pid": project_id})
 
@@ -1168,8 +1231,7 @@ def update_project_settings(engine: Engine, project_id: str, settings: ProjectSe
 
 def delete_project_as_admin(engine: Engine, project_id: str, actor_user_id: str) -> None:
     """Supprime un projet après vérification stricte du rôle admin."""
-    require_admin(engine, project_id, actor_user_id)
-    delete_project(engine, project_id)
+    delete_project(engine, project_id, actor_user_id)
 
 
 def add_or_update_member_as_admin(
@@ -1221,7 +1283,8 @@ def _normalize_entry_df(df: pd.DataFrame, project_id: str) -> pd.DataFrame:
     return out[ENTRY_COLUMNS].astype(str).replace(["nan", "None", "<NA>"], "")
 
 
-def load_project_entries(engine: Engine, project_id: str) -> pd.DataFrame:
+def load_project_entries(engine: Engine, project_id: str, user_id: str) -> pd.DataFrame:
+    require_role(engine, project_id, user_id, ("admin", "collaborator", "viewer"))
     ensure_schema(engine)
     with engine.begin() as conn:
         df = pd.read_sql(
@@ -1240,7 +1303,8 @@ def load_project_entries(engine: Engine, project_id: str) -> pd.DataFrame:
     return df.astype(str).replace(["nan", "None", "<NA>"], "")
 
 
-def update_project_entries(engine: Engine, project_id: str, df: pd.DataFrame) -> None:
+def update_project_entries(engine: Engine, project_id: str, df: pd.DataFrame, user_id: str) -> None:
+    require_role(engine, project_id, user_id, ("admin", "collaborator"))
     payload = _normalize_entry_df(df, project_id)
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM entries WHERE project_id = :pid"), {"pid": project_id})
