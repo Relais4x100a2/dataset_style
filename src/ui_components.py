@@ -371,7 +371,9 @@ def _render_dimensions_section(
             custom_presets_json=dumps_custom_presets(updated_custom),
             dimensions_override_json=dumps_dimensions_override(dimensions),
         )
-        _persist_settings(user, engine, project_id, next_settings, "Preset personnalisé enregistré.")
+        _persist_settings(
+            user, engine, project_id, next_settings, "Preset personnalisé enregistré."
+        )
 
 
 def _render_project_delete_guarded_form(
@@ -506,7 +508,9 @@ def render_tab_account(user: CurrentUser, engine: Engine) -> None:
     st.write(f"Projets possédés: **{owned_count}**")
     st.write(f"Memberships actives: **{membership_count}**")
 
-    confirm = st.checkbox("Je confirme vouloir supprimer mon compte", key="account_self_delete_confirm")
+    confirm = st.checkbox(
+        "Je confirme vouloir supprimer mon compte", key="account_self_delete_confirm"
+    )
     typed_email = st.text_input(
         f"Retape ton email ({user.email}) pour confirmer",
         key="account_self_delete_email_input",
@@ -887,7 +891,9 @@ def render_tab_ajout(
             ]
         )
         require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
-        update_project_entries(engine, project_id, pd.concat([df, new_row], ignore_index=True), user.user_id)
+        update_project_entries(
+            engine, project_id, pd.concat([df, new_row], ignore_index=True), user.user_id
+        )
         st.success("Entrée enregistrée.")
         st.rerun()
 
@@ -978,7 +984,9 @@ def render_tab_edition(
             show_warning=False,
         )
         row["input"] = st.text_area("Brouillon", value=row["input"], height=140, disabled=disabled)
-        row["output"] = st.text_area("Texte généré", value=row["output"], height=240, disabled=disabled)
+        row["output"] = st.text_area(
+            "Texte généré", value=row["output"], height=240, disabled=disabled
+        )
         row["statut"] = _select_with_legacy(
             "Statut",
             dimensions["statuts"],
