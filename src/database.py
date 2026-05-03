@@ -234,6 +234,9 @@ def ensure_schema(engine: Engine) -> None:
         )
         conn.execute(text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS project_id TEXT;"))
         conn.execute(
+            text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS date TEXT NOT NULL DEFAULT '';")
+        )
+        conn.execute(
             text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT '';")
         )
         conn.execute(
