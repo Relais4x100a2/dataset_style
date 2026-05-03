@@ -1,1504 +1,1046 @@
 """
-Composants UI Streamlit : sidebar, formulaire ajout, onglet édition (fragment + graphiques).
+UI multi-utilisateur / multi-projet.
 """
 
+from __future__ import annotations
+
+import logging
+import math
 import os
 import uuid
+from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 
 import pandas as pd
-import plotly.graph_objects as go
 import requests
 import streamlit as st
 from sqlalchemy.engine import Engine
 
+from src.auth import CurrentUser, create_invitation_link, logout, revoke_account_with_saga
 from src.database import (
     CACHE_COLUMNS,
     STATUT_VALIDE,
-    audit_rows_from_cache,
-    avg_signature_from_cache,
-    avg_trigrams_from_cache,
-    dataset_cache_stats,
-    flag_problematic_rows,
-    update_data,
+    ProjectSettings,
+    count_active_memberships,
+    count_owned_projects,
+    count_users_for_admin,
+    create_project,
+    delete_project_as_admin,
+    detach_memberships_as_super_admin,
+    get_project_settings,
+    list_accounts_for_super_admin,
+    list_projects_for_user,
+    list_quarantined_deprovision_ops,
+    list_recent_deprovision_ops,
+    replay_quarantined_operation,
+    require_role,
+    update_project_entries,
+    update_project_settings_as_admin,
 )
-from src.export_utils import ExportFormat, convert_to_jsonl
-from src.llm_generate import (
-    MODEL_OPENROUTER,
-    generate_input_from_output,
-    generate_output_from_input,
-    is_local_llm_enabled,
+from src.export_utils import convert_to_jsonl
+from src.llm_generate import generate_input_from_output, generate_output_from_input
+from src.mailer import send_account_link_email
+from src.nlp_engine import corriger_texte_fr
+from src.presets import (
+    DIMENSION_KEYS,
+    PRESETS,
+    available_presets,
+    dumps_custom_presets,
+    dumps_dimensions_override,
+    load_active_dimensions,
+    preset_dimensions,
 )
-from src.nlp_engine import (
-    coherence_level,
-    compute_coherence_score,
-    compute_row_cache,
-    corriger_texte_fr,
-    get_baguette_touch,
-    get_linguistic_insights,
-    get_pos_trigrams,
-    get_stylometric_signature,
-    normalize_signature,
-    palier_details,
-    prioritized_actions,
-    recompute_cache_for_rows,
-    signature_variance,
-    syntax_contrast_score,
-    translate_trigram,
-)
-from src.wiktionary import WiktionaryResult, fetch_wiktionary
+
+logger = logging.getLogger(__name__)
 
 
-@st.cache_resource
-def load_nlp():
-    """Charge le modèle spaCy français une seule fois (cache Streamlit)."""
-    import logging
+def _current_project_id() -> str:
+    return str(st.session_state.get("project_id") or "")
 
-    _log = logging.getLogger(__name__)
+
+def _show_action_error(prefix: str, exc: Exception) -> None:
+    if isinstance(exc, PermissionError):
+        st.error(str(exc))
+    else:
+        logger.exception("Erreur inattendue (%s)", prefix, exc_info=exc)
+        st.error(f"{prefix}: erreur inattendue.")
+
+
+def _safe_index(options: list[str], value: str) -> int:
     try:
-        import spacy
-
-        return spacy.load("fr_core_news_sm")
-    except OSError as e:
-        _log.warning("Modèle spaCy fr_core_news_sm non trouvé: %s", e)
-        return None
-    except (ValueError, ImportError, Exception) as e:
-        _log.warning("spaCy non disponible sur cet environnement.")
-        _log.debug("Détail: %s", e)
-        return None
+        return options.index(value)
+    except ValueError:
+        return 0
 
 
-def render_sidebar(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
-    """Sidebar : stats, modèle LLM, export CSV, export JSONL."""
-    st.title("📊 Dataset Status")
-    if not df.empty and "statut" in df.columns:
-        st.write(df["statut"].value_counts())
+def _select_with_legacy(
+    label: str,
+    options: list[str],
+    current_value: str,
+    key: str,
+    disabled: bool = False,
+    show_warning: bool = True,
+) -> str:
+    clean_options = [str(item) for item in options if str(item).strip()]
+    current = str(current_value or "").strip()
+    label_to_value = {item: item for item in clean_options}
+    display_options = list(clean_options)
+    index = _safe_index(clean_options, current) if clean_options else 0
 
-    if "llm_model" not in st.session_state:
-        st.session_state["llm_model"] = ""
-    st.divider()
-    st.subheader("🤖 Modèle de génération")
-    st.text_input(
-        "ID modèle LLM",
-        key="llm_model",
-        placeholder=MODEL_OPENROUTER,
-        help=(
-            "Ollama : nom local du modèle (ex. mistral). OpenRouter : ID complet "
-            "(ex. mistralai/mistral-small-creative). Vide = variable LLM_MODEL ou défaut OpenRouter."
-        ),
-        label_visibility="visible",
-    )
-
-    st.divider()
-    st.subheader("🚀 Export Fine-tuning")
-    if not df.empty:
-        st.markdown(
-            """
-            <style>
-            section[data-testid="stSidebar"] .stDownloadButton button {
-                min-height: 52px;
-                width: 100%;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        csv = df[df["statut"] == STATUT_VALIDE].to_csv(index=False).encode("utf-8")
-        export_options = [
-            "LFM2-24B-A2B",
-            "PleIAs/Baguettotron",
-            "Mistral Small Creative",
-        ]
-        format_display = st.selectbox(
-            "Format d'export JSONL",
-            export_options,
-            key="export_format",
-            help="Choisis le modèle cible pour le fine-tuning.",
-        )
-        format_map: dict[str, ExportFormat] = {
-            "LFM2-24B-A2B": "lfm2",
-            "PleIAs/Baguettotron": "baguettotron",
-            "Mistral Small Creative": "mistral",
-        }
-        export_format = format_map[format_display]
-        include_stylometry = st.checkbox(
-            "Inclure indicateurs stylométriques dans l'export",
-            key="export_include_stylometry",
-            help="Ajoute TTR, longueur de phrase, densité lexicale, etc. (system/user ou trace selon le format).",
-        )
-        jsonl_data = convert_to_jsonl(df, export_format, include_stylometry)
-        filename_suffix = {"lfm2": "lfm2", "baguettotron": "baguettotron", "mistral": "mistral"}[
-            export_format
-        ]
-        col_csv, col_jsonl = st.columns(2)
-        with col_csv:
-            st.download_button("Télécharger CSV", csv, "dataset_brut.csv", "text/csv", key="dl_csv")
-        with col_jsonl:
-            st.download_button(
-                label="Télécharger JSONL",
-                data=jsonl_data,
-                file_name=f"style_train_{filename_suffix}_{datetime.now().strftime('%Y%m%d')}.jsonl",
-                mime="application/jsonl",
-                key="dl_jsonl",
-                help=f"Format {format_display} pour fine-tuning.",
-            )
-
-    st.info(
-        "Le JSONL dépend du format choisi (LFM2, Baguettotron, Mistral). "
-        "L'export ne contient que les lignes « Fait et validé ». "
-        "Option : inclure les indicateurs stylométriques du cache."
-    )
-
-
-def _run_correction_ortho(output_text: str, pending_key: str) -> bool:
-    """
-    Lance la correction orthographique (LanguageTool) et stocke le résultat
-    dans session_state[pending_key]. Affiche warning/error en cas de problème.
-
-    Returns:
-        True si la correction a été appliquée (le caller doit alors faire st.rerun()),
-        False sinon.
-    """
-    if not (output_text and output_text.strip()):
-        st.warning("Le champ Prose (Output) est vide. Saisis un texte à corriger.")
-        return False
-    try:
-        corrected = corriger_texte_fr(output_text)
-        st.session_state[pending_key] = corrected
-        st.success("Orthographe et grammaire corrigées. Le champ Output a été mis à jour.")
-        return True
-    except requests.Timeout:
-        st.error(
-            "Délai dépassé : le service LanguageTool n'a pas répondu. Réessaie dans un instant."
-        )
-        return False
-    except requests.RequestException as e:
-        st.error(f"Erreur réseau ou service indisponible : {e}")
-        return False
-    except (ValueError, Exception) as e:
-        st.error(f"Impossible de corriger : {e}")
-        return False
-
-
-def _get_llm_api_key() -> str:
-    """Clé Bearer pour OpenRouter (secrets) ou ``LLM_API_KEY`` si serveur local (optionnel)."""
-    if is_local_llm_enabled():
-        return (os.environ.get("LLM_API_KEY") or "").strip()
-    try:
-        conn = getattr(st.secrets, "connections", None)
-        if conn is not None:
-            openrouter = getattr(conn, "openrouter", None)
-            if openrouter is not None:
-                key = getattr(openrouter, "api_key", None)
-                if key and isinstance(key, str):
-                    return key.strip()
-    except (AttributeError, TypeError, KeyError):
-        pass
-    try:
-        conn = st.secrets.get("connections", {}) or {}
-        openrouter = conn.get("openrouter") or {}
-        if isinstance(openrouter, dict):
-            return (openrouter.get("api_key") or "").strip()
-    except (AttributeError, TypeError, KeyError):
-        pass
-    return ""
-
-
-def _llm_ready() -> bool:
-    """True si génération possible (URL locale Ollama, ou clé OpenRouter)."""
-    if is_local_llm_enabled():
-        return True
-    return bool(_get_llm_api_key())
-
-
-def _render_llm_generate_buttons(
-    input_key: str,
-    output_key: str,
-    type_key: str,
-    forme_key: str,
-    ton_key: str,
-    support_key: str,
-) -> None:
-    """
-    Affiche deux boutons : Générer le brouillon depuis la prose / Générer la prose depuis le brouillon.
-    OpenRouter ou serveur local (``LLM_BASE_URL`` / ``OLLAMA_BASE_URL``).
-    """
-    api_key = _get_llm_api_key()
-    model_override = (st.session_state.get("llm_model") or "").strip() or None
-    ready = _llm_ready()
-    if not ready:
-        st.caption(
-            "Génération par LLM : définis **LLM_BASE_URL** (Ollama) sur le serveur, ou configure "
-            "la clé OpenRouter dans les secrets (`[connections.openrouter] api_key`)."
-        )
-    current_input = (st.session_state.get(input_key) or "").strip()
-    current_output = (st.session_state.get(output_key) or "").strip()
-    type_val = st.session_state.get(type_key, "")
-    forme_val = st.session_state.get(forme_key, "")
-    ton_val = st.session_state.get(ton_key, "")
-    support_val = st.session_state.get(support_key, "")
-
-    col_llm1, col_llm2 = st.columns(2)
-    with col_llm1:
-        gen_brouillon = st.button(
-            "📝 Générer le brouillon depuis la prose",
-            key=f"llm_input_from_out_{input_key}",
-            disabled=not ready or not current_output,
-            help="Génère un brouillon synthétique à partir de la prose (type, forme, ton, support pris en compte).",
-        )
-    with col_llm2:
-        gen_prose = st.button(
-            "✨ Générer la prose depuis le brouillon",
-            key=f"llm_output_from_in_{output_key}",
-            disabled=not ready or not current_input,
-            help="Génère la prose développée à partir du brouillon (type, forme, ton, support respectés).",
-        )
-
-    if gen_brouillon and ready and current_output:
-        with st.spinner("Génération du brouillon…"):
-            result = generate_input_from_output(
-                api_key,
-                current_output,
-                type_val,
-                forme_val,
-                ton_val,
-                support_val,
-                model=model_override,
-            )
-        if result is not None:
-            st.session_state["_llm_pending_" + input_key] = result
-            st.success("Brouillon généré. Tu peux le modifier avant d'enregistrer.")
-            st.rerun()
-        else:
-            st.error(
-                "La génération a échoué (réseau, timeout ou modèle). Vérifie l'URL LLM, le nom du modèle "
-                "ou la clé OpenRouter."
-            )
-
-    if gen_prose and ready and current_input:
-        with st.spinner("Génération de la prose…"):
-            result = generate_output_from_input(
-                api_key,
-                current_input,
-                type_val,
-                forme_val,
-                ton_val,
-                support_val,
-                model=model_override,
-            )
-        if result is not None:
-            st.session_state["_llm_pending_" + output_key] = result
-            st.success("Prose générée. Tu peux la modifier avant d'enregistrer.")
-            st.rerun()
-        else:
-            st.error(
-                "La génération a échoué (réseau, timeout ou modèle). Vérifie l'URL LLM, le nom du modèle "
-                "ou la clé OpenRouter."
-            )
-
-
-def _render_wiktionary_block(key_prefix: str) -> None:
-    """
-    Bloc « Mot à vérifier » + bouton + expander avec définitions, synonymes, antonymes,
-    vocabulaire apparenté et anagrammes (Wiktionnaire via API Wikimedia).
-    """
-    col_mot, col_btn = st.columns([2, 1])
-    with col_mot:
-        mot = st.text_input(
-            "Mot à vérifier",
-            key=f"{key_prefix}_wiktionary_mot",
-            placeholder="Saisir un mot puis cliquer sur Chercher",
-            label_visibility="collapsed",
-        )
-    with col_btn:
-        chercher = st.button("📖 Chercher dans le Wiktionnaire", key=f"{key_prefix}_wiktionary_btn")
-    result_key = f"{key_prefix}_wiktionary_result"
-    if chercher and mot and mot.strip():
-        with st.spinner("Recherche dans le Wiktionnaire…"):
-            st.session_state[result_key] = fetch_wiktionary(mot.strip())
-        st.rerun()
-    if result_key not in st.session_state:
-        return
-    res: WiktionaryResult = st.session_state[result_key]
-    expanded = bool(
-        res.definitions
-        or res.synonymes
-        or res.antonymes
-        or res.vocabulaire_apparente
-        or res.anagrammes
-        or res.erreur
-    )
-    with st.expander("📖 Définition et synonymes (Wiktionnaire)", expanded=expanded):
-        if res.erreur:
-            st.warning(res.erreur)
-        else:
-            if res.page_url:
-                st.caption(f"[Ouvrir la page Wiktionnaire]({res.page_url})")
-            if res.definitions:
-                st.markdown("**Définitions**")
-                for i, d in enumerate(res.definitions[:15], 1):
-                    st.write(f"{i}. {d}")
-                if len(res.definitions) > 15:
-                    st.caption(f"… et {len(res.definitions) - 15} autre(s) définition(s).")
-            if res.synonymes:
-                st.markdown("**Synonymes**")
-                st.write(", ".join(res.synonymes))
-            if res.antonymes:
-                st.markdown("**Antonymes**")
-                st.write(", ".join(res.antonymes))
-            if res.vocabulaire_apparente:
-                st.markdown("**Vocabulaire apparenté (par le sens)**")
-                st.write(", ".join(res.vocabulaire_apparente))
-            if res.anagrammes:
-                st.markdown("**Anagrammes**")
-                st.write(", ".join(res.anagrammes))
-            if not (
-                res.definitions
-                or res.synonymes
-                or res.antonymes
-                or res.vocabulaire_apparente
-                or res.anagrammes
-            ):
-                st.info("Aucune définition ou liste trouvée pour la section française.")
-
-
-def _render_analyse_prose(
-    input_text: str,
-    output_text: str,
-    type_value: str,
-    nlp,
-    df_valid: pd.DataFrame,
-    verifier_flag_key: str = "verifier_clique",
-) -> None:
-    """Contenu réutilisable du bloc « Analyse de ta prose » (édition et nouvelle entrée)."""
-    if nlp is None:
-        if st.session_state.get(verifier_flag_key):
+    if current and current not in label_to_value:
+        legacy_label = f"[obsolète] {current}"
+        display_options.insert(0, legacy_label)
+        label_to_value[legacy_label] = current
+        index = 0
+        if show_warning:
             st.warning(
-                "Le modèle d'analyse n'a pas pu se charger "
-                "(environnement ou dépendances). L'export et "
-                "l'édition fonctionnent normalement."
+                "Cette valeur existe dans vos données mais plus dans le preset actif.",
+                icon="⚠️",
             )
-        else:
-            st.info("Clique sur « Vérifier ma prose » ci-dessus pour lancer l'analyse.")
-        return
-    stats = get_linguistic_insights(input_text, output_text, nlp)
-    if not stats:
-        st.info("Remplis le Brouillon et la Prose pour voir l'analyse de ton écriture.")
-        return
-    st.caption(
-        "Ces indicateurs t'aident à écrire une prose "
-        "cohérente et à construire un dataset de qualité. "
-        "L'objectif : que chaque fiche ait un style proche "
-        "de la moyenne du dataset."
+
+    if not display_options:
+        st.error(f"{label}: aucune option disponible.")
+        return current
+
+    selected_label = st.selectbox(
+        label,
+        display_options,
+        index=index,
+        key=key,
+        disabled=disabled,
     )
-    st.markdown("#### Ton écriture en un coup d'œil")
-    c_st1, c_st2, c_st3 = st.columns(3)
-    with c_st1:
-        st.metric(
-            "Amplification",
-            f"x{stats['ratio']:.1f}",
-            help="Combien de fois ta prose est plus longue que le brouillon. x1 = identique, x2 = deux fois plus long.",
+    return label_to_value[selected_label]
+
+
+def _persist_settings(
+    user: CurrentUser,
+    engine: Engine,
+    project_id: str,
+    settings: ProjectSettings,
+    success_message: str,
+) -> None:
+    try:
+        update_project_settings_as_admin(engine, project_id, user.user_id, settings)
+        st.success(success_message)
+        st.rerun()
+    except Exception as exc:  # noqa: BLE001
+        _show_action_error("Mise à jour réglages impossible", exc)
+
+
+def _render_project_create_form(
+    user: CurrentUser,
+    engine: Engine,
+    *,
+    key_prefix: str,
+    label: str = "Nouveau projet",
+) -> None:
+    """
+    Formulaire de création projet.
+
+    Contrat: gère tout le flux (messages + rerun), sans valeur de retour.
+    """
+    with st.form(f"{key_prefix}_create_project_form"):
+        pname = st.text_input(label, key=f"{key_prefix}_new_project_name_input")
+        submit = st.form_submit_button("Créer", key=f"{key_prefix}_create_project_submit")
+    if not submit:
+        return
+    if not pname.strip():
+        st.error("Nom du projet requis.")
+        return
+    try:
+        pid = create_project(engine, user.user_id, pname.strip())
+        st.session_state["project_id"] = pid
+        st.success("Projet créé.")
+        st.rerun()
+    except Exception as exc:  # noqa: BLE001
+        _show_action_error("Création projet impossible", exc)
+
+
+def _render_project_settings_form(
+    user: CurrentUser,
+    engine: Engine,
+    project_id: str,
+    role: str,
+    *,
+    key_prefix: str,
+) -> None:
+    """
+    Formulaire de réglages projet.
+
+    Contrat: gère tout le flux (messages + rerun), sans valeur de retour.
+    """
+    settings = get_project_settings(engine, project_id)
+    disabled = role != "admin"
+    with st.form(f"{key_prefix}_project_settings_form"):
+        llm_base_url = st.text_input(
+            "LLM base URL",
+            value=settings.llm_base_url,
+            disabled=disabled,
+            key=f"{key_prefix}_settings_llm_base_url_input",
         )
-        st.caption(f"Brouillon : {stats['mots_in']} mots — Prose : {stats['mots_out']} mots")
-    with c_st2:
-        st.metric(
-            "Variété du vocabulaire",
-            f"{stats['ttr']:.0%}",
-            help="Pourcentage de mots différents (lemmes) dans ta prose.",
+        llm_model = st.text_input(
+            "LLM model",
+            value=settings.llm_model,
+            disabled=disabled,
+            key=f"{key_prefix}_settings_llm_model_input",
         )
-    with c_st3:
-        st.metric(
-            "Longueur des phrases",
-            f"{stats['long_moy_phrases']:.0f} mots",
-            help="10-18 = rythme équilibré, <10 = vif, >25 = ample.",
+        llm_api_key = st.text_input(
+            "LLM API key",
+            value=settings.llm_api_key,
+            type="password",
+            disabled=disabled,
+            key=f"{key_prefix}_settings_llm_api_key_input",
         )
-    mots_repetes_affichage = [m for m in stats["mots_repetes"] if m and str(m).strip()]
-    if mots_repetes_affichage:
-        mots_list = ", ".join(f"**{m}**" for m in mots_repetes_affichage[:8])
-        suffix = "..." if len(mots_repetes_affichage) > 8 else ""
-        st.warning(
-            f"Mots qui reviennent souvent (3 fois ou plus) : {mots_list}{suffix} — pense à varier.",
-            icon="🔁",
+        llm_timeout_seconds = st.text_input(
+            "LLM timeout (s)",
+            value=settings.llm_timeout_seconds,
+            disabled=disabled,
+            key=f"{key_prefix}_settings_llm_timeout_input",
         )
-    ratio_lvl, ratio_txt = palier_details("ratio", stats["ratio"])
-    ttr_lvl, ttr_txt = palier_details("ttr", stats["ttr"])
-    rythme_lvl, rythme_txt = palier_details("moy_phrases", stats["long_moy_phrases"])
-    st.markdown("##### Ce que ça veut dire")
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        st.info(
-            f"**Amplification x{stats['ratio']:.1f}**\n\nNiveau : **{ratio_lvl}**\n\n{ratio_txt}"
+        languagetool_base_url = st.text_input(
+            "LanguageTool base URL",
+            value=settings.languagetool_base_url,
+            disabled=disabled,
+            key=f"{key_prefix}_settings_languagetool_base_url_input",
         )
-    with f2:
-        st.info(f"**Variété {stats['ttr']:.0%}**\n\nNiveau : **{ttr_lvl}**\n\n{ttr_txt}")
-    with f3:
-        st.info(
-            f"**{stats['long_moy_phrases']:.0f} mots/phrase**\n\nNiveau : **{rythme_lvl}**\n\n{rythme_txt}"
+        save = st.form_submit_button(
+            "Enregistrer réglages",
+            disabled=disabled,
+            key=f"{key_prefix}_settings_save_submit",
         )
-    st.markdown("##### Grain littéraire (Baguette-Touch)")
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        st.metric(
-            "Mots vides (brouillon)",
-            f"{stats.get('stop_ratio_in', 0):.0%}",
-            help="Le brouillon doit rester brut (ratio bas).",
+    if save:
+        next_settings = replace(
+            settings,
+            llm_base_url=llm_base_url.strip(),
+            llm_model=llm_model.strip(),
+            llm_api_key=llm_api_key.strip(),
+            llm_timeout_seconds=llm_timeout_seconds.strip(),
+            languagetool_base_url=languagetool_base_url.strip(),
         )
-        st.metric(
-            "Mots vides (prose)",
-            f"{stats.get('stop_ratio_out', 0):.0%}",
-            help="Prose stylisée : ~40–50 % est normal.",
-        )
-    with b2:
-        bag = get_baguette_touch(output_text, nlp)
-        if bag:
-            pe = bag["punct_exp"]
-            st.caption(
-                f"Ponctuation expressive : — {pe['tiret_cadratin']}× · ... {pe['points_suspension']}× · : {pe['deux_points']}×"
-            )
-    with b3:
-        if bag and bag["weak_verbs"]:
-            wv = ", ".join(f"{v} ({n}×)" for v, n in bag["weak_verbs"])
-            st.warning(f"Verbes faibles : {wv}. Remplace par des verbes plus précis.", icon="✒️")
-        elif bag:
-            st.success("Peu de verbes faibles détectés.")
-    contrast = syntax_contrast_score(input_text, output_text, nlp)
-    st.metric(
-        "Contraste syntaxique (Input vs Output)",
-        f"{contrast:.0%}",
-        help="Élevé = ta prose transforme bien le brouillon.",
+        _persist_settings(user, engine, project_id, next_settings, "Réglages projet enregistrés.")
+    if disabled:
+        st.info("Seul un admin peut modifier les réglages projet.")
+
+
+def _render_single_dimension_editor(
+    user: CurrentUser,
+    engine: Engine,
+    project_id: str,
+    settings: ProjectSettings,
+    dimensions: dict[str, list[str]],
+    dim_key: str,
+    label: str,
+    *,
+    key_prefix: str,
+) -> None:
+    values = list(dimensions.get(dim_key, []))
+    st.caption(label)
+    if values:
+        st.write(" · ".join(values))
+    else:
+        st.write("—")
+
+    new_value = st.text_input(
+        f"Ajouter une valeur ({label})",
+        key=f"{key_prefix}_{dim_key}_add_input",
     )
-    if contrast < 0.2:
-        st.warning(
-            "L'output ressemble trop à l'input. Varie les structures pour que le modèle apprenne.",
-            icon="📐",
+    if st.button("Ajouter", key=f"{key_prefix}_{dim_key}_add_btn"):
+        candidate = new_value.strip()
+        if not candidate:
+            st.error("Valeur vide.")
+            return
+        if candidate in values:
+            st.info("Valeur déjà présente.")
+            return
+        next_dimensions = deepcopy(dimensions)
+        next_dimensions[dim_key] = values + [candidate]
+        next_settings = replace(
+            settings,
+            dimensions_override_json=dumps_dimensions_override(next_dimensions),
         )
-    sig_fiche = get_stylometric_signature(output_text, nlp)
-    sig_dataset = avg_signature_from_cache(df_valid) if not df_valid.empty else None
-    if sig_fiche and sig_dataset:
-        st.markdown("#### Empreinte stylistique")
-        st.caption("Ce radar compare ta fiche (bleu) à la moyenne du dataset (orange).")
-        categories = list(sig_fiche.keys())
-        v_fiche = [sig_fiche[k] for k in categories]
-        v_dataset = [sig_dataset[k] for k in categories]
-        r_fiche_norm = [normalize_signature(k, v) for k, v in zip(categories, v_fiche)]
-        r_dataset_norm = [normalize_signature(k, v) for k, v in zip(categories, v_dataset)]
-        theta = categories + [categories[0]]
-        r_fiche = r_fiche_norm + [r_fiche_norm[0]]
-        r_dataset = r_dataset_norm + [r_dataset_norm[0]]
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatterpolar(
-                r=r_fiche,
-                theta=theta,
-                name="Ta fiche",
-                fill="toself",
-                line=dict(color="rgb(0,120,200)"),
-            )
+        _persist_settings(user, engine, project_id, next_settings, f"{label}: valeur ajoutée.")
+
+    to_remove = st.multiselect(
+        f"Supprimer des valeurs ({label})",
+        values,
+        key=f"{key_prefix}_{dim_key}_remove_select",
+    )
+    if st.button("Supprimer la sélection", key=f"{key_prefix}_{dim_key}_remove_btn"):
+        if not to_remove:
+            st.info("Aucune valeur sélectionnée.")
+            return
+        next_dimensions = deepcopy(dimensions)
+        next_dimensions[dim_key] = [item for item in values if item not in set(to_remove)]
+        if dim_key == "statuts" and not next_dimensions[dim_key]:
+            st.error("La liste des statuts ne peut pas être vide.")
+            return
+        next_settings = replace(
+            settings,
+            dimensions_override_json=dumps_dimensions_override(next_dimensions),
         )
-        fig.add_trace(
-            go.Scatterpolar(
-                r=r_dataset,
-                theta=theta,
-                name="Moyenne dataset",
-                fill="toself",
-                line=dict(color="rgb(200,80,0)", dash="dash"),
-            )
-        )
-        fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-            showlegend=True,
-            title="Radar de signature stylistique",
-            height=420,
-        )
-        st.plotly_chart(fig, width="stretch")
-        with st.expander("Détails chiffrés du radar", expanded=False):
-            df_comp = pd.DataFrame(
-                {
-                    "Axe": categories,
-                    "Ta fiche": [round(v, 3) for v in v_fiche],
-                    "Moy. dataset": [round(v, 3) for v in v_dataset],
-                    "Écart (%)": [
-                        round((v_fiche[i] - v_dataset[i]) / max(1e-6, v_dataset[i]) * 100, 1)
-                        for i in range(len(categories))
-                    ],
-                }
-            )
-            st.dataframe(df_comp, width="stretch", hide_index=True)
-        st.markdown("#### Tes constructions de phrases favorites")
-        st.caption("Quels enchaînements grammaticaux reviennent le plus dans ta prose ?")
-        tri_fiche = get_pos_trigrams(output_text, nlp)
-        tri_dataset = avg_trigrams_from_cache(df_valid) if not df_valid.empty else None
-        if tri_fiche:
-            total_tri_fiche = sum(tri_fiche.values())
-            top5 = tri_fiche.most_common(5)
-            rows_tri = []
-            for gram, count in top5:
-                pct_fiche = count / max(1, total_tri_fiche) * 100
-                pct_ds = (
-                    (tri_dataset.get(gram, 0) / max(1, sum(tri_dataset.values())) * 100)
-                    if tri_dataset
-                    else None
-                )
-                delta_pct = round(pct_fiche - (pct_ds or 0), 1)
-                delta_str = f"+{delta_pct}" if delta_pct >= 0 else str(delta_pct)
-                rows_tri.append(
-                    {
-                        "Construction": translate_trigram(gram),
-                        "Occurrences": count,
-                        "Ta fiche (%)": f"{pct_fiche:.1f}",
-                        "Dataset (%)": f"{pct_ds:.1f}" if pct_ds is not None else "—",
-                        "Écart": delta_str,
-                    }
-                )
-            st.dataframe(pd.DataFrame(rows_tri), width="stretch", hide_index=True)
-        else:
-            st.caption("Texte trop court pour analyser les constructions de phrases.")
-        score, deltas = compute_coherence_score(sig_fiche, sig_dataset, stats["mots_repetes"])
-        level_label, tone = coherence_level(score)
-        st.markdown("#### Cohérence avec le dataset")
-        st.caption(
-            "Ce score mesure à quel point ta fiche ressemble au style moyen de ton dataset. 100 = parfaitement aligné."
-        )
-        c_score1, c_score2 = st.columns([1, 2])
-        with c_score1:
-            st.metric(
-                "Score",
-                f"{score} / 100",
-                help="100 = ta fiche est parfaitement alignée avec le style moyen du dataset.",
-            )
-        with c_score2:
-            _MSG = {
-                "success": f"**{level_label}** — ton style est bien aligné avec le dataset. Continue comme ça !",
-                "info": f"**{level_label}** — quelques petits écarts, rien de bloquant. Consulte les conseils.",
-                "warning": f"**{level_label}** — ta fiche s'éloigne du style général. Lis les conseils ci-dessous.",
-                "error": f"**{level_label}** — gros écart de style. Relis le texte et ajuste selon les conseils.",
-            }
-            getattr(st, tone)(_MSG.get(tone, ""))
-        actions = prioritized_actions(stats, deltas)
-        if actions:
-            st.markdown("#### Conseils pour cette fiche")
-            for i, action in enumerate(actions, start=1):
-                st.write(f"{i}. {action}")
-        scores_trend = []
-        for _, row in df_valid.tail(10).iterrows():
-            sc = row.get("_coherence_score", "")
-            if sc and str(sc).strip():
-                try:
-                    scores_trend.append(float(sc))
-                except (ValueError, TypeError):
-                    pass
-        if len(scores_trend) >= 2:
-            st.markdown("#### Évolution de la cohérence")
-            fig_trend = go.Figure(
-                go.Scatter(y=scores_trend, mode="lines+markers", line=dict(color="rgb(0,120,200)"))
-            )
-            fig_trend.update_layout(
-                height=180,
-                margin=dict(t=20, b=20, l=40, r=20),
-                yaxis=dict(range=[0, 100], title="Score"),
-                xaxis=dict(title="Fiche (récente →)"),
-                showlegend=False,
-            )
-            st.plotly_chart(fig_trend, width="stretch")
-    elif sig_fiche:
-        st.caption(
-            "Ajoute des fiches « Fait et validé » pour débloquer le radar et la comparaison avec le dataset."
-        )
-    if type_value == "Expansion" and stats["ratio"] < 2:
-        st.warning(
-            "Pour une fiche de type « Expansion », essaie de développer davantage le brouillon (au moins x2).",
-            icon="💡",
-        )
+        _persist_settings(user, engine, project_id, next_settings, f"{label}: valeurs supprimées.")
 
 
-_AJOUT_DEFAULTS = [
-    ("ajout_in", lambda listes: ""),
-    ("ajout_out", lambda listes: ""),
-    ("ajout_notes", lambda listes: ""),
-    ("ajout_type", lambda listes: listes["types"][0]),
-    ("ajout_forme", lambda listes: listes["formes"][0]),
-    ("ajout_ton", lambda listes: listes["tons"][0]),
-    ("ajout_support", lambda listes: listes["supports"][0]),
-    ("ajout_statut", lambda listes: listes["statuts"][0]),
-]
-_AJOUT_KEYS = [k for k, _ in _AJOUT_DEFAULTS]
+def _render_dimensions_section(
+    user: CurrentUser,
+    engine: Engine,
+    project_id: str,
+    role: str,
+    *,
+    key_prefix: str,
+) -> None:
+    st.markdown("### Dimensions du texte")
+    st.caption("Ces dimensions sont enregistrées pour ce projet uniquement.")
+    settings = get_project_settings(engine, project_id)
+    active_key, custom_presets, dimensions = load_active_dimensions(settings)
+    presets_map = available_presets(custom_presets)
+    preset_keys = list(presets_map.keys())
+    selected_key = st.selectbox(
+        "Preset",
+        preset_keys,
+        index=_safe_index(preset_keys, active_key),
+        format_func=lambda k: str(presets_map[k].get("label") or k),
+        key=f"{key_prefix}_preset_select",
+        disabled=role != "admin",
+    )
+
+    if role != "admin":
+        st.info("Seul un admin peut modifier les dimensions.")
+        return
+
+    if st.button("Charger le preset", key=f"{key_prefix}_preset_apply_btn"):
+        target_dims = preset_dimensions(presets_map[selected_key])
+        next_settings = replace(
+            settings,
+            active_preset_key=selected_key,
+            dimensions_override_json=dumps_dimensions_override(target_dims),
+        )
+        _persist_settings(user, engine, project_id, next_settings, "Preset appliqué au projet.")
+
+    if st.button("Réinitialiser", key=f"{key_prefix}_preset_reset_btn"):
+        target_dims = preset_dimensions(presets_map[selected_key])
+        next_settings = replace(
+            settings,
+            active_preset_key=selected_key,
+            dimensions_override_json=dumps_dimensions_override(target_dims),
+        )
+        _persist_settings(user, engine, project_id, next_settings, "Dimensions réinitialisées.")
+
+    settings = get_project_settings(engine, project_id)
+    active_key, custom_presets, dimensions = load_active_dimensions(settings)
+
+    labels = {
+        "types": "Type de transformation",
+        "structures": "Structure textuelle",
+        "tons": "Tonalité textuelle",
+        "formats": "Format de sortie",
+        "publics": "Public cible",
+        "statuts": "Statut",
+    }
+    for dim_key in DIMENSION_KEYS:
+        _render_single_dimension_editor(
+            user,
+            engine,
+            project_id,
+            settings,
+            dimensions,
+            dim_key,
+            labels[dim_key],
+            key_prefix=key_prefix,
+        )
+        st.divider()
+
+    st.markdown("#### Enregistrer comme preset")
+    custom_name = st.text_input("Nom du preset", key=f"{key_prefix}_custom_preset_name_input")
+    custom_label = st.text_input("Label du preset", key=f"{key_prefix}_custom_preset_label_input")
+    if st.button("Enregistrer comme preset", key=f"{key_prefix}_custom_preset_save_btn"):
+        preset_key = custom_name.strip().lower().replace(" ", "_")
+        if not preset_key:
+            st.error("Nom de preset requis.")
+            return
+        if preset_key in PRESETS:
+            st.error("Ce nom est réservé par un preset par défaut.")
+            return
+        saved_label = custom_label.strip() or preset_key
+        updated_custom = deepcopy(custom_presets)
+        updated_custom[preset_key] = {"label": saved_label, **dimensions}
+        next_settings = replace(
+            settings,
+            active_preset_key=preset_key,
+            custom_presets_json=dumps_custom_presets(updated_custom),
+            dimensions_override_json=dumps_dimensions_override(dimensions),
+        )
+        _persist_settings(user, engine, project_id, next_settings, "Preset personnalisé enregistré.")
 
 
-def render_tab_ajout(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
-    """Formulaire d'ajout d'une nouvelle entrée (mêmes outils que Gestion & Édition : correction ortho, vérification prose)."""
-    for key, default_fn in _AJOUT_DEFAULTS:
-        st.session_state.setdefault(key, default_fn(listes))
-    st.session_state.setdefault("verifier_ajout_clique", False)
+def _render_project_delete_guarded_form(
+    user: CurrentUser,
+    engine: Engine,
+    project_id: str,
+    project_name: str,
+    role: str,
+    *,
+    key_prefix: str,
+) -> None:
+    """
+    Formulaire de suppression projet avec double confirmation.
 
-    def _idx(lst: list, val) -> int:
+    Contrat: gère tout le flux (messages + rerun), sans valeur de retour.
+    """
+    if role != "admin":
+        st.info("Seul un admin peut supprimer le projet.")
+        return
+
+    confirm = st.checkbox(
+        "Je confirme vouloir supprimer ce projet",
+        key=f"{key_prefix}_proj_delete_confirm_checkbox",
+    )
+    typed_name = st.text_input(
+        f"Retape le nom du projet ({project_name}) pour confirmer",
+        key=f"{key_prefix}_proj_delete_confirm_text",
+    )
+    if st.button(
+        "Supprimer ce projet",
+        key=f"{key_prefix}_proj_delete_btn",
+        type="secondary",
+        disabled=not confirm,
+    ):
+        if typed_name.strip() != project_name:
+            st.error("Nom du projet incorrect. Suppression annulée.")
+            return
         try:
-            return lst.index(val) if val in lst else 0
-        except (ValueError, TypeError):
-            return 0
-
-    st.subheader("Paramètres de Style")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.selectbox(
-            "Type",
-            listes["types"],
-            index=_idx(listes["types"], st.session_state["ajout_type"]),
-            key="ajout_type",
-            help="Normalisation = Transcription simple | Expansion = Développement ou suite",
-        )
-    with c2:
-        st.selectbox(
-            "Forme",
-            listes["formes"],
-            index=_idx(listes["formes"], st.session_state["ajout_forme"]),
-            key="ajout_forme",
-        )
-    with c3:
-        st.selectbox(
-            "Ton",
-            listes["tons"],
-            index=_idx(listes["tons"], st.session_state["ajout_ton"]),
-            key="ajout_ton",
-        )
-    with c4:
-        st.selectbox(
-            "Support",
-            listes["supports"],
-            index=_idx(listes["supports"], st.session_state["ajout_support"]),
-            key="ajout_support",
-        )
-
-    st.divider()
-    st.subheader("Contenu Littéraire")
-    if "pending_correction_ajout" in st.session_state:
-        st.session_state["ajout_out"] = st.session_state.pop("pending_correction_ajout")
-    if "_llm_pending_ajout_in" in st.session_state:
-        st.session_state["ajout_in"] = st.session_state.pop("_llm_pending_ajout_in")
-    if "_llm_pending_ajout_out" in st.session_state:
-        st.session_state["ajout_out"] = st.session_state.pop("_llm_pending_ajout_out")
-    val_input = st.text_area(
-        "Brouillon Synthétique (Input)",
-        value=st.session_state["ajout_in"],
-        height=150,
-        key="ajout_in",
-        placeholder="Note brute avec fautes...",
-    )
-    val_output = st.text_area(
-        "Prose Développée (Output)",
-        value=st.session_state["ajout_out"],
-        height=350,
-        key="ajout_out",
-        placeholder="Texte final dans votre style...",
-    )
-
-    _render_llm_generate_buttons(
-        "ajout_in",
-        "ajout_out",
-        "ajout_type",
-        "ajout_forme",
-        "ajout_ton",
-        "ajout_support",
-    )
-
-    if st.button(
-        "🪄 Corriger l'orthographe",
-        key="correct_ortho_ajout",
-        help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style.",
-    ):
-        if _run_correction_ortho(val_output, "pending_correction_ajout"):
+            delete_project_as_admin(engine, project_id, user.user_id)
+            st.session_state.pop("project_id", None)
+            st.success("Projet supprimé.")
             st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            _show_action_error("Suppression projet impossible", exc)
 
-    if st.button(
-        "🔍 Vérifier ma prose",
-        key="verifier_ajout_btn",
-        help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose.",
-    ):
-        st.session_state["verifier_ajout_clique"] = True
+
+def render_sidebar(
+    user: CurrentUser,
+    engine: Engine,
+) -> tuple[str, str]:
+    """Sidebar minimale: compte, projet courant, rôle."""
+    st.title("👤 Compte")
+    badge = " · super admin" if user.is_super_admin else ""
+    st.caption(f"{user.display_name} · {user.email}{badge}")
+    if st.button("Se déconnecter", key="sb_logout_btn"):
+        logout()
         st.rerun()
 
-    _render_wiktionary_block("ajout")
-
-    df_valid = df[df["statut"] == STATUT_VALIDE]
-    nlp_ajout = load_nlp() if st.session_state["verifier_ajout_clique"] else None
-    with st.expander("🔍 Analyse de ta prose", expanded=st.session_state["verifier_ajout_clique"]):
-        _render_analyse_prose(
-            st.session_state["ajout_in"],
-            st.session_state["ajout_out"],
-            st.session_state["ajout_type"],
-            nlp_ajout,
-            df_valid,
-            verifier_flag_key="verifier_ajout_clique",
-        )
-
     st.divider()
-    c5, c6 = st.columns(2)
-    with c5:
-        st.selectbox(
-            "Statut initial",
-            listes["statuts"],
-            index=_idx(listes["statuts"], st.session_state["ajout_statut"]),
-            key="ajout_statut",
+    st.subheader("Projet courant")
+    projects = list_projects_for_user(engine, user.user_id)
+    if not projects:
+        st.warning("Aucun projet. Crée le premier projet.")
+        _render_project_create_form(
+            user,
+            engine,
+            key_prefix="sb_first",
+            label="Nom du projet",
         )
-    with c6:
-        st.text_input(
-            "Notes libres / Contexte", value=st.session_state["ajout_notes"], key="ajout_notes"
-        )
+        return "", ""
 
-    if st.button("💾 Enregistrer l'entrée", type="primary", key="submit_ajout"):
-        val_input = st.session_state.get("ajout_in", "")
-        val_output = st.session_state.get("ajout_out", "")
-        if not (val_input and val_output):
-            st.error("L'input et l'output sont obligatoires.")
-        else:
-            new_row = pd.DataFrame(
-                [
-                    {
-                        "id": str(uuid.uuid4())[:8],
-                        "date": datetime.now().strftime("%d/%m/%Y"),
-                        "type": st.session_state.get("ajout_type", listes["types"][0]),
-                        "forme": st.session_state.get("ajout_forme", listes["formes"][0]),
-                        "ton": st.session_state.get("ajout_ton", listes["tons"][0]),
-                        "support": st.session_state.get("ajout_support", listes["supports"][0]),
-                        "input": val_input,
-                        "output": val_output,
-                        "statut": st.session_state.get("ajout_statut", listes["statuts"][0]),
-                        "notes": st.session_state.get("ajout_notes", ""),
-                        **{c: "" for c in CACHE_COLUMNS},
-                    }
-                ]
-            )
-            updated_df = pd.concat([df, new_row], ignore_index=True)
-            try:
-                update_data(engine, updated_df)
-            except Exception:
-                st.error(
-                    "Impossible d'enregistrer dans le Google Sheet. "
-                    "Vérifiez la connexion et réessayez."
-                )
-                return
-            for k in _AJOUT_KEYS:
-                st.session_state.pop(k, None)
-            st.session_state["verifier_ajout_clique"] = False
-            st.success("Entrée enregistrée !")
-            st.rerun()
+    options = {f"{p.name} ({p.role})": p for p in projects}
+    labels = list(options.keys())
+    current_pid = _current_project_id()
+    idx = 0
+    for i, p in enumerate(projects):
+        if p.project_id == current_pid:
+            idx = i
+            break
+    chosen_label = st.selectbox("Projet", labels, index=idx, key="sb_project_select")
+    chosen = options[chosen_label]
+    st.session_state["project_id"] = chosen.project_id
+    st.session_state["project_role"] = chosen.role
+    st.caption(f"Rôle: {chosen.role}")
+    return chosen.project_id, chosen.role
 
 
-def render_tab_edition(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
-    """Onglet Gestion & Édition : navigation, fragment édition + analyse."""
-    if df.empty:
-        st.warning("Le dataset est vide.")
-    else:
-        df_valid = df[df["statut"] == STATUT_VALIDE]
-
-        # --- Barre de progression (fiches validées / total) ---
-        total_fiches = len(df)
-        validées = len(df_valid)
-        if total_fiches > 0:
-            st.progress(
-                validées / total_fiches,
-                text=f"📊 {validées} fiche(s) validée(s) / {total_fiches} total",
-            )
-
-        # --- Audit global : uniquement depuis le cache (pas de boucle spaCy) ---
-        rows_audit = audit_rows_from_cache(df_valid) if not df_valid.empty else []
-        if not df_valid.empty:
-            with st.expander("📋 Résumé audit dataset (Fait et validé)", expanded=False):
-                if rows_audit:
-                    st.dataframe(pd.DataFrame(rows_audit), width="stretch")
-                else:
-                    st.info(
-                        "Enregistre des fiches (bouton « Sauvegarder ») pour remplir "
-                        "l'audit à partir des colonnes cache. Aucune analyse lourde au chargement."
-                    )
-
-        st.session_state.setdefault("verifier_clique", False)
-
-        # 1. FILTRAGE
-        st.subheader("🔍 Filtrer les fiches")
-        filtre_statut = st.multiselect(
-            "Statuts à afficher :", listes["statuts"], default=listes["statuts"]
-        )
-
-        df_view = df[df["statut"].isin(filtre_statut)].reset_index(drop=True)
-
-        if df_view.empty:
-            st.info("Aucune fiche trouvée.")
-        else:
-            # 2. NAVIGATION
-            if "index_fiche" not in st.session_state:
-                st.session_state.index_fiche = 0
-
-            # Ajustement de l'index si on filtre
-            st.session_state.index_fiche = min(st.session_state.index_fiche, len(df_view) - 1)
-
-            c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
-            with c_nav1:
-                if st.button("⬅️ Précédent") and st.session_state.index_fiche > 0:
-                    st.session_state.index_fiche -= 1
-                    st.rerun()  # On force le rafraîchissement immédiat
-            with c_nav2:
-                st.markdown(
-                    f"<center><h3>Fiche {st.session_state.index_fiche + 1} / {len(df_view)}</h3></center>",
-                    unsafe_allow_html=True,
-                )
-            with c_nav3:
-                if st.button("Suivant ➡️") and st.session_state.index_fiche < len(df_view) - 1:
-                    st.session_state.index_fiche += 1
-                    st.rerun()
-
-            # 3. RÉCUPÉRATION DE LA DONNÉE
-            current_row = df_view.iloc[st.session_state.index_fiche]
-            row_id = current_row["id"]
-
-            st.divider()
-
-            @st.fragment
-            def _bloc_edition_et_analyse():
-                nlp = load_nlp() if st.session_state["verifier_clique"] else None
-                col_e1, col_e2, col_e3, col_e4 = st.columns(4)
-                try:
-                    idx_type = listes["types"].index(current_row["type"])
-                    idx_forme = listes["formes"].index(current_row["forme"])
-                    idx_ton = listes["tons"].index(current_row["ton"])
-                    idx_supp = listes["supports"].index(current_row["support"])
-                    idx_statut = listes["statuts"].index(current_row["statut"])
-                except (ValueError, KeyError):
-                    idx_type = idx_forme = idx_ton = idx_supp = idx_statut = 0
-
-                edit_type = col_e1.selectbox(
-                    "Type", listes["types"], index=idx_type, key=f"type_{row_id}"
-                )
-                edit_forme = col_e2.selectbox(
-                    "Forme", listes["formes"], index=idx_forme, key=f"forme_{row_id}"
-                )
-                edit_ton = col_e3.selectbox(
-                    "Ton", listes["tons"], index=idx_ton, key=f"ton_{row_id}"
-                )
-                edit_support = col_e4.selectbox(
-                    "Support", listes["supports"], index=idx_supp, key=f"supp_{row_id}"
-                )
-
-                # Appliquer résultats LLM / correction en attente avant d'instancier les widgets (Streamlit interdit de modifier la clé après)
-                pending_key = f"pending_correction_{row_id}"
-                if f"_llm_pending_in_{row_id}" in st.session_state:
-                    st.session_state[f"in_{row_id}"] = st.session_state.pop(
-                        f"_llm_pending_in_{row_id}"
-                    )
-                if f"_llm_pending_out_{row_id}" in st.session_state:
-                    st.session_state[f"out_{row_id}"] = st.session_state.pop(
-                        f"_llm_pending_out_{row_id}"
-                    )
-                if pending_key in st.session_state:
-                    st.session_state[f"out_{row_id}"] = st.session_state.pop(pending_key)
-                edit_input = st.text_area(
-                    "Brouillon (Input)", value=current_row["input"], height=150, key=f"in_{row_id}"
-                )
-                edit_output = st.text_area(
-                    "Prose (Output)", value=current_row["output"], height=350, key=f"out_{row_id}"
-                )
-
-                _render_llm_generate_buttons(
-                    f"in_{row_id}",
-                    f"out_{row_id}",
-                    f"type_{row_id}",
-                    f"forme_{row_id}",
-                    f"ton_{row_id}",
-                    f"supp_{row_id}",
-                )
-
-                if st.button(
-                    "🪄 Corriger l'orthographe",
-                    key=f"correct_ortho_{row_id}",
-                    help="Correction orthographe/grammaire (LanguageTool, français). Ne modifie pas le style.",
-                ):
-                    if _run_correction_ortho(edit_output, pending_key):
-                        st.rerun()
-
-                if st.button(
-                    "🔍 Vérifier ma prose",
-                    key=f"verifier_btn_{row_id}",
-                    type="secondary",
-                    help="Lancer l'analyse linguistique (spaCy) sur le brouillon et la prose.",
-                ):
-                    st.session_state["verifier_clique"] = True
-                    st.rerun()
-
-                _render_wiktionary_block(f"edit_{row_id}")
-
-                col_e5, col_e6 = st.columns([1, 2])
-                edit_statut = col_e5.selectbox(
-                    "Statut", listes["statuts"], index=idx_statut, key=f"stat_{row_id}"
-                )
-                edit_notes = col_e6.text_input(
-                    "Notes libres", value=current_row["notes"], key=f"note_{row_id}"
-                )
-
-                # --- PANNEAU DIAGNOSTICS LINGUISTIQUES ---
-                st.divider()
-                with st.expander("🔍 Analyse de ta prose", expanded=True):
-                    _render_analyse_prose(edit_input, edit_output, edit_type, nlp, df_valid)
-                # 5. SAUVEGARDE (met à jour le cache pour cette ligne si "Vérifier" a été cliqué)
-                if st.button("💾 Enregistrer les modifications", type="primary", width="stretch"):
-                    cols_main = [
-                        "type",
-                        "forme",
-                        "ton",
-                        "support",
-                        "input",
-                        "output",
-                        "statut",
-                        "notes",
-                    ]
-                    df.loc[df["id"] == row_id, cols_main] = [
-                        edit_type,
-                        edit_forme,
-                        edit_ton,
-                        edit_support,
-                        edit_input,
-                        edit_output,
-                        edit_statut,
-                        edit_notes,
-                    ]
-                    if st.session_state["verifier_clique"]:
-                        nlp_save = load_nlp()
-                        cache_vals = compute_row_cache(
-                            edit_input,
-                            edit_output,
-                            nlp_save,
-                            df_valid,
-                            row_id,
-                            CACHE_COLUMNS,
-                            avg_signature_from_cache,
-                        )
-                        for col, val in cache_vals.items():
-                            df.loc[df["id"] == row_id, col] = val
-                    try:
-                        update_data(engine, df)
-                    except Exception:
-                        st.error(
-                            "Impossible de mettre à jour le Google Sheet. "
-                            "Vérifiez la connexion et réessayez."
-                        )
-                        return
-                    st.success(f"Fiche {row_id} mise à jour !")
-                    st.rerun()
-
-            _bloc_edition_et_analyse()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ONGLET 3 — TABLEAU DE BORD
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def _render_overview(df: pd.DataFrame, listes: dict) -> None:
-    """Section 1 — Composition du dataset (métadonnées, aucun cache requis)."""
-    df_valid = df[df["statut"] == STATUT_VALIDE]
-    total = len(df)
-    n_valide = len(df_valid)
-    n_cours = len(df[df["statut"] == "En cours"])
-    n_relire = len(df[df["statut"] == "A relire"])
-    n_todo = len(df[df["statut"] == "A faire"])
-
-    st.subheader("Composition du dataset")
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Total fiches", total)
-    m2.metric("Validées", n_valide)
-    m3.metric("En cours", n_cours)
-    m4.metric("A relire", n_relire)
-    m5.metric("A faire", n_todo)
-
-    if total > 0:
-        st.progress(
-            n_valide / total, text=f"{n_valide}/{total} fiches validées ({n_valide / total:.0%})"
-        )
-
-    if df.empty:
+def render_tab_projects(
+    user: CurrentUser,
+    role: str,
+    project_id: str,
+    engine: Engine,
+) -> None:
+    """Gestion des projets (1 projet = 1 utilisateur)."""
+    st.subheader("Projets")
+    projects = list_projects_for_user(engine, user.user_id)
+    current = next((p for p in projects if p.project_id == project_id), None)
+    if current is None:
+        st.error("Projet introuvable. Sélectionne un projet valide.")
         return
 
-    col_left, col_right = st.columns(2)
+    st.markdown("### Projet")
+    st.text_input("Projet courant", value=current.name, disabled=True, key="proj_current_name")
+    _render_project_create_form(user, engine, key_prefix="proj_tab")
 
-    with col_left:
-        counts_statut = df["statut"].value_counts().reset_index()
-        counts_statut.columns = ["Statut", "Nombre"]
-        fig_statut = go.Figure(
-            go.Bar(
-                x=counts_statut["Nombre"],
-                y=counts_statut["Statut"],
-                orientation="h",
-                text=counts_statut["Nombre"],
-                textposition="auto",
-            )
-        )
-        fig_statut.update_layout(
-            title="Répartition par statut",
-            height=220,
-            margin=dict(t=40, b=20, l=10, r=10),
-            yaxis=dict(autorange="reversed"),
-        )
-        st.plotly_chart(fig_statut, width="stretch")
-
-    with col_right:
-        counts_type = df["type"].value_counts().reset_index()
-        counts_type.columns = ["Type", "Nombre"]
-        fig_type = go.Figure(
-            go.Bar(
-                x=counts_type["Nombre"],
-                y=counts_type["Type"],
-                orientation="h",
-                text=counts_type["Nombre"],
-                textposition="auto",
-            )
-        )
-        fig_type.update_layout(
-            title="Répartition par type",
-            height=220,
-            margin=dict(t=40, b=20, l=10, r=10),
-            yaxis=dict(autorange="reversed"),
-        )
-        st.plotly_chart(fig_type, width="stretch")
-
-    with st.expander("Détail formes / tons / supports", expanded=False):
-        for dim, label in [("forme", "Formes"), ("ton", "Tons"), ("support", "Supports")]:
-            counts = df[dim].value_counts().reset_index()
-            counts.columns = [label, "Nombre"]
-            fig = go.Figure(
-                go.Bar(
-                    x=counts["Nombre"],
-                    y=counts[label],
-                    orientation="h",
-                    text=counts["Nombre"],
-                    textposition="auto",
-                )
-            )
-            fig.update_layout(
-                title=label,
-                height=max(160, len(counts) * 30 + 60),
-                margin=dict(t=40, b=10, l=10, r=10),
-                yaxis=dict(autorange="reversed"),
-            )
-            st.plotly_chart(fig, width="stretch")
-
-
-def _render_quality_panel(df_valid: pd.DataFrame, stats: dict) -> None:
-    """Section 2 — Qualité stylistique (lit uniquement le cache, pas de spaCy)."""
-    st.subheader("Qualité stylistique")
-    n = stats["n"]
-
-    health = stats["health_score"]
-    _, health_tone = coherence_level(health)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(
-        "Score santé dataset",
-        f"{health} / 100",
-        help="0.4×cohérence + 0.3×TTR normalisé + 0.3×% fiches sans alerte",
-    )
-    m2.metric(
-        "Cohérence moyenne",
-        f"{stats['coherence']['mean']:.0f} / 100",
-        help=f"Écart-type : {stats['coherence']['std']:.1f}",
-    )
-    m3.metric(
-        "TTR moyen",
-        f"{stats['ttr']['mean']:.0%}",
-        help=f"Écart-type : {stats['ttr']['std']:.2f}",
-    )
-    m4.metric(
-        "Ratio moyen",
-        f"x{stats['ratio']['mean']:.1f}",
-        help=f"Écart-type : {stats['ratio']['std']:.2f}",
+    st.markdown("### Zone sensible")
+    _render_project_delete_guarded_form(
+        user,
+        engine,
+        project_id,
+        current.name,
+        role,
+        key_prefix="proj_tab",
     )
 
-    # Histogrammes triples : ratio / TTR / longueur phrases
-    c1, c2, c3 = st.columns(3)
-    for col, key, label, xrange in [
-        (c1, "ratio", "Ratio d'amplification", None),
-        (c2, "ttr", "TTR (diversité vocabulaire)", [0, 1]),
-        (c3, "phrases", "Moy. mots / phrase", None),
-    ]:
-        with col:
-            fig = go.Figure(go.Histogram(x=stats[key]["values"], nbinsx=12))
-            fig.update_layout(
-                title=label,
-                height=220,
-                margin=dict(t=40, b=20, l=10, r=10),
-                xaxis=dict(range=xrange) if xrange else {},
-            )
-            st.plotly_chart(fig, width="stretch")
 
-    # Histogramme cohérence avec zones colorées
-    scores = stats["coherence"]["values"]
-    fig_coh = go.Figure()
-    fig_coh.add_vrect(x0=0, x1=45, fillcolor="red", opacity=0.08, line_width=0)
-    fig_coh.add_vrect(x0=45, x1=65, fillcolor="orange", opacity=0.08, line_width=0)
-    fig_coh.add_vrect(x0=65, x1=100, fillcolor="green", opacity=0.08, line_width=0)
-    fig_coh.add_trace(go.Histogram(x=scores, nbinsx=15, name="Cohérence"))
-    fig_coh.add_vline(
-        x=stats["coherence"]["mean"],
-        line_dash="dash",
-        line_color="white",
-        annotation_text=f"Moy. {stats['coherence']['mean']:.0f}",
-        annotation_position="top right",
+def _saga_max_retries() -> int:
+    raw = (os.environ.get("ACCOUNT_SAGA_MAX_RETRIES") or "5").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 5
+    return max(1, min(value, 20))
+
+
+def render_tab_account(user: CurrentUser, engine: Engine) -> None:
+    """Espace personnel: suppression de son propre compte."""
+    st.subheader("Mon compte")
+    st.caption("Suppression possible uniquement sans projet propriétaire ni membership active.")
+    owned_count = count_owned_projects(engine, user.user_id)
+    membership_count = count_active_memberships(engine, user.user_id)
+    st.write(f"Projets possédés: **{owned_count}**")
+    st.write(f"Memberships actives: **{membership_count}**")
+
+    confirm = st.checkbox("Je confirme vouloir supprimer mon compte", key="account_self_delete_confirm")
+    typed_email = st.text_input(
+        f"Retape ton email ({user.email}) pour confirmer",
+        key="account_self_delete_email_input",
     )
-    fig_coh.update_layout(
-        title=f"Distribution des scores de cohérence ({n} fiches)",
-        height=280,
-        margin=dict(t=40, b=20, l=10, r=10),
-        xaxis=dict(range=[0, 100], title="Score"),
-        yaxis=dict(title="Nb fiches"),
-        showlegend=False,
-    )
-    st.plotly_chart(fig_coh, width="stretch")
-
-
-def _render_stylometry_panel(df_valid: pd.DataFrame) -> None:
-    """Section 3 — Stylométrie globale (radar moyen + variance + trigrammes + trend)."""
-    st.subheader("Stylométrie globale")
-
-    sig_avg = avg_signature_from_cache(df_valid)
-    sig_std = signature_variance(df_valid)
-
-    if sig_avg:
-        categories = list(sig_avg.keys())
-        r_avg = [normalize_signature(k, sig_avg[k]) for k in categories]
-
-        col_radar, col_tri = st.columns([1, 1])
-
-        with col_radar:
-            fig_radar = go.Figure()
-            theta = categories + [categories[0]]
-            r_plot = r_avg + [r_avg[0]]
-
-            # Bandes d'erreur si variance disponible
-            if sig_std:
-                r_upper = [
-                    min(1.0, normalize_signature(k, sig_avg[k] + sig_std[k])) for k in categories
-                ]
-                r_lower = [
-                    max(0.0, normalize_signature(k, sig_avg[k] - sig_std[k])) for k in categories
-                ]
-                fig_radar.add_trace(
-                    go.Scatterpolar(
-                        r=r_upper + [r_upper[0]],
-                        theta=theta,
-                        fill=None,
-                        line=dict(color="rgba(0,120,200,0.2)", width=0),
-                        showlegend=False,
-                        name="Zone ±σ",
-                    )
-                )
-                fig_radar.add_trace(
-                    go.Scatterpolar(
-                        r=r_lower + [r_lower[0]],
-                        theta=theta,
-                        fill="tonext",
-                        fillcolor="rgba(0,120,200,0.12)",
-                        line=dict(color="rgba(0,120,200,0.2)", width=0),
-                        showlegend=False,
-                        name="Zone ±σ",
-                    )
-                )
-
-            fig_radar.add_trace(
-                go.Scatterpolar(
-                    r=r_plot,
-                    theta=theta,
-                    name="Signature moyenne",
-                    fill="toself",
-                    line=dict(color="rgb(0,120,200)"),
-                )
-            )
-            fig_radar.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-                showlegend=False,
-                title="Signature stylistique moyenne (zone = ±σ)",
-                height=380,
-                margin=dict(t=60, b=20, l=20, r=20),
-            )
-            st.plotly_chart(fig_radar, width="stretch")
-
-            if sig_std:
-                with st.expander("Dispersion par axe (écart-type)", expanded=False):
-                    rows_var = [
-                        {"Axe": k, "Moy.": round(sig_avg[k], 3), "σ": round(sig_std[k], 4)}
-                        for k in categories
-                    ]
-                    st.dataframe(pd.DataFrame(rows_var), hide_index=True, width="stretch")
-
-        with col_tri:
-            tri_total = avg_trigrams_from_cache(df_valid)
-            if tri_total:
-                top15 = tri_total.most_common(15)
-                labels = [translate_trigram(g) for g, _ in top15]
-                values = [c for _, c in top15]
-                fig_tri = go.Figure(
-                    go.Bar(
-                        x=values[::-1],
-                        y=labels[::-1],
-                        orientation="h",
-                        text=values[::-1],
-                        textposition="auto",
-                    )
-                )
-                fig_tri.update_layout(
-                    title="Top 15 constructions grammaticales (POS)",
-                    height=380,
-                    margin=dict(t=60, b=20, l=10, r=10),
-                )
-                st.plotly_chart(fig_tri, width="stretch")
-            else:
-                st.info(
-                    "Aucun trigramme POS disponible. Enregistre des fiches en cliquant sur « Vérifier ma prose »."
-                )
-    else:
-        st.info(
-            "Signature stylométrique non disponible. Clique sur « Vérifier ma prose » dans l'onglet Gestion & Édition pour remplir le cache."
-        )
-
-    # Évolution temporelle de la cohérence
-    scores_trend: list[float] = []
-    ids_trend: list[str] = []
-    for _, row in df_valid.iterrows():
-        sc = row.get("_coherence_score", "") or ""
-        if not sc:
-            continue
+    if st.button(
+        "Supprimer mon compte",
+        type="secondary",
+        disabled=not confirm,
+        key="account_self_delete_btn",
+    ):
+        if typed_email.strip().lower() != user.email.strip().lower():
+            st.error("Email de confirmation invalide.")
+            return
+        op_id = f"op_{uuid.uuid4().hex[:20]}"
         try:
-            scores_trend.append(float(sc))
-            ids_trend.append(str(row.get("id", "")))
-        except (ValueError, TypeError):
-            continue
-
-    if len(scores_trend) >= 3:
-        st.markdown("#### Évolution de la cohérence (ordre de saisie)")
-        st.caption(
-            "Chaque point représente une fiche validée dans l'ordre des lignes. Si la courbe descend, le style dérive."
-        )
-        fig_trend = go.Figure()
-        fig_trend.add_hrect(y0=0, y1=45, fillcolor="red", opacity=0.07, line_width=0)
-        fig_trend.add_hrect(y0=45, y1=65, fillcolor="orange", opacity=0.07, line_width=0)
-        fig_trend.add_hrect(y0=65, y1=100, fillcolor="green", opacity=0.07, line_width=0)
-        fig_trend.add_trace(
-            go.Scatter(
-                y=scores_trend,
-                x=list(range(1, len(scores_trend) + 1)),
-                mode="lines+markers",
-                line=dict(color="rgb(0,120,200)"),
-                hovertext=ids_trend,
-                hovertemplate="Fiche %{hovertext}<br>Score : %{y}<extra></extra>",
+            revoke_account_with_saga(
+                engine,
+                actor_user_id=user.user_id,
+                target_user_id=user.user_id,
+                operation_id=op_id,
+                max_retries=_saga_max_retries(),
+                detach_memberships=False,
             )
-        )
-        fig_trend.update_layout(
-            height=240,
-            margin=dict(t=20, b=20, l=40, r=20),
-            yaxis=dict(range=[0, 100], title="Score cohérence"),
-            xaxis=dict(title="Fiche (ordre dataset)"),
-            showlegend=False,
-        )
-        st.plotly_chart(fig_trend, width="stretch")
+            logout()
+            st.success("Compte supprimé.")
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            _show_action_error("Suppression de compte impossible", exc)
 
 
-def _render_alerts_panel(problematic: list[dict]) -> None:
-    """Section 4 — Alertes qualité issues du cache."""
-    st.subheader("Alertes qualité")
-    if not problematic:
-        st.success("Aucune fiche problématique détectée. Bon travail !")
+def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
+    """Administration globale des comptes."""
+    st.subheader("Super Admin")
+    if not user.is_super_admin:
+        st.info("Accès réservé aux super admins.")
         return
 
-    # Résumé par type d'alerte
-    from collections import Counter as _Counter
-
-    alerte_counts: _Counter = _Counter()
-    for row in problematic:
-        for a in row["alertes"]:
-            alerte_counts[a] += 1
-
-    col_bar, col_info = st.columns([1, 2])
-    with col_bar:
-        labels = list(alerte_counts.keys())
-        values = [alerte_counts[k] for k in labels]
-        fig_al = go.Figure(
-            go.Bar(
-                x=values,
-                y=labels,
-                orientation="h",
-                text=values,
-                textposition="auto",
+    st.markdown("### Inviter un utilisateur")
+    with st.form("super_admin_invite_form"):
+        invite_email = st.text_input("Email utilisateur", key="sa_invite_email_input")
+        invite_submit = st.form_submit_button("Envoyer l'invitation")
+    if invite_submit:
+        try:
+            invite_link = create_invitation_link(engine, user.user_id, invite_email)
+            delivery = send_account_link_email(
+                to_email=invite_email.strip().lower(),
+                subject="Invitation Dataset Style Studio",
+                intro="Tu as été invité. Clique sur le lien pour définir ton mot de passe.",
+                link=invite_link,
             )
-        )
-        fig_al.update_layout(
-            title="Alertes par type",
-            height=max(160, len(labels) * 50 + 60),
-            margin=dict(t=40, b=10, l=10, r=10),
-            yaxis=dict(autorange="reversed"),
-        )
-        st.plotly_chart(fig_al, width="stretch")
+            if delivery.mode == "smtp":
+                st.success("Invitation envoyée par email.")
+            else:
+                st.warning("Mode dev: partage le lien affiché au destinataire.")
+                st.code(delivery.preview)
+        except Exception as exc:  # noqa: BLE001
+            _show_action_error("Invitation impossible", exc)
 
-    with col_info:
-        st.caption(
-            f"**{len(problematic)} fiche(s) concernée(s)** sur les fiches validées avec cache. "
-            "Ouvre l'onglet Gestion & Édition pour corriger."
-        )
-        for alerte, count in alerte_counts.items():
-            level_label, tone = coherence_level(0 if alerte == "Cohérence critique" else 50)
-            st.markdown(f"- **{alerte}** : {count} fiche(s)")
-
-    # Tableau détaillé
-    rows_display = []
-    for r in problematic:
-        rows_display.append(
+    st.markdown("### Comptes")
+    page_size = st.selectbox(
+        "Taille de page",
+        [10, 25, 50, 100],
+        index=1,
+        key="sa_page_size_select",
+    )
+    total_users = count_users_for_admin(engine)
+    total_pages = max(1, math.ceil(total_users / page_size))
+    page_idx = st.number_input(
+        f"Page (1-{total_pages})",
+        min_value=1,
+        max_value=total_pages,
+        value=1,
+        step=1,
+        key="sa_page_number_input",
+    )
+    offset = (int(page_idx) - 1) * int(page_size)
+    rows = list_accounts_for_super_admin(
+        engine,
+        user.user_id,
+        limit=int(page_size),
+        offset=int(offset),
+    )
+    accounts_df = pd.DataFrame(
+        [
             {
-                "ID": r["id"],
-                "Type": r["type"],
-                "Forme": r["forme"],
-                "Ton": r["ton"],
-                "Alertes": " · ".join(r["alertes"]),
+                "user_id": row.user_id,
+                "email": row.email,
+                "super_admin": row.is_super_admin,
+                "nb_projets": row.project_count,
+                "derniere_connexion": row.last_login_at or "—",
+                "entrees_total": row.entries_total,
+                "entrees_validees": row.entries_validated,
             }
+            for row in rows
+        ]
+    )
+    if accounts_df.empty:
+        st.info("Aucun compte actif.")
+    else:
+        st.dataframe(accounts_df, hide_index=True, width="stretch")
+
+    st.markdown("### Opérations compte")
+    if not rows:
+        return
+    choices = {f"{row.email} ({row.user_id})": row for row in rows}
+    selected_label = st.selectbox("Compte cible", list(choices.keys()), key="sa_target_select")
+    target = choices[selected_label]
+    owner_count = count_owned_projects(engine, target.user_id)
+    membership_count = count_active_memberships(engine, target.user_id)
+    st.caption(f"Bloquants suppression: projets={owner_count}, memberships={membership_count}")
+
+    if membership_count > 0:
+        st.warning(
+            f"Action destructive: retirer {membership_count} membership(s) du compte {target.email}.",
+            icon="⚠️",
         )
+        detach_confirm = st.checkbox(
+            "Je confirme le detach complet des memberships",
+            key="sa_detach_confirm_checkbox",
+        )
+        detach_typed_email = st.text_input(
+            f"Retape l'email cible ({target.email})",
+            key="sa_detach_email_confirm_input",
+        )
+        if st.button(
+            "Detach memberships",
+            key="sa_detach_memberships_btn",
+            type="secondary",
+            disabled=not detach_confirm,
+        ):
+            if detach_typed_email.strip().lower() != target.email.strip().lower():
+                st.error("Email de confirmation invalide.")
+                return
+            try:
+                removed = detach_memberships_as_super_admin(engine, user.user_id, target.user_id)
+                st.success(f"Memberships détachées: {removed}")
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                _show_action_error("Detach memberships impossible", exc)
+
+    confirm_delete = st.checkbox(
+        "Je confirme vouloir supprimer ce compte",
+        key="sa_delete_confirm_checkbox",
+    )
+    if st.button(
+        "Supprimer le compte",
+        type="secondary",
+        disabled=not confirm_delete,
+        key="sa_delete_account_btn",
+    ):
+        op_id = f"op_{uuid.uuid4().hex[:20]}"
+        try:
+            revoke_account_with_saga(
+                engine,
+                actor_user_id=user.user_id,
+                target_user_id=target.user_id,
+                operation_id=op_id,
+                max_retries=_saga_max_retries(),
+                detach_memberships=False,
+            )
+            st.success("Compte supprimé.")
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            _show_action_error("Suppression compte impossible", exc)
+
+    st.markdown("### Monitoring saga comptes")
+    monitor_rows = list_recent_deprovision_ops(engine, user.user_id, limit=100)
+    if monitor_rows:
+        monitor_df = pd.DataFrame(
+            [
+                {
+                    "operation_id": row.operation_id,
+                    "target_user_id": row.target_user_id,
+                    "state": row.state,
+                    "retry_count": row.retry_count,
+                    "next_retry_at": row.next_retry_at or "—",
+                    "quarantined_at": row.quarantined_at or "—",
+                    "last_error": row.last_error[:120],
+                }
+                for row in monitor_rows
+            ]
+        )
+        state_counts = monitor_df["state"].value_counts().to_dict()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Pending", int(state_counts.get("pending", 0)))
+        c2.metric("Provider done", int(state_counts.get("provider_done", 0)))
+        c3.metric("Failed", int(state_counts.get("failed", 0)))
+        c4.metric("Quarantined", int(state_counts.get("quarantined", 0)))
+        st.dataframe(monitor_df, hide_index=True, width="stretch")
+    else:
+        st.info("Aucune opération de saga récente.")
+
+    st.markdown("### DLQ (quarantaine)")
+    dlq_rows = list_quarantined_deprovision_ops(engine, user.user_id, limit=50)
+    if not dlq_rows:
+        st.info("Aucune opération en quarantaine.")
+        return
+    dlq_df = pd.DataFrame(
+        [
+            {
+                "operation_id": row.operation_id,
+                "target_user_id": row.target_user_id,
+                "retry_count": row.retry_count,
+                "quarantined_at": row.quarantined_at or "—",
+                "last_error": row.last_error[:180],
+            }
+            for row in dlq_rows
+        ]
+    )
+    st.dataframe(dlq_df, hide_index=True, width="stretch")
+    selected_op = st.selectbox(
+        "Opération DLQ",
+        [row.operation_id for row in dlq_rows],
+        key="sa_dlq_operation_select",
+    )
+    replay_confirm = st.checkbox(
+        "Je confirme le replay de l'opération DLQ",
+        key="sa_dlq_replay_confirm_checkbox",
+    )
+    if st.button(
+        "Replay opération",
+        key="sa_dlq_replay_btn",
+        disabled=not replay_confirm,
+    ):
+        try:
+            replay_quarantined_operation(engine, user.user_id, selected_op)
+            st.success("Opération remise en file d'attente.")
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            _show_action_error("Replay DLQ impossible", exc)
+
+
+def render_tab_settings_export(
+    user: CurrentUser,
+    role: str,
+    project_id: str,
+    df: pd.DataFrame,
+    engine: Engine,
+) -> None:
+    """Réglages projet + export dataset."""
+    st.subheader("Réglages & Export")
+    st.markdown("### Réglages projet")
+    _render_project_settings_form(user, engine, project_id, role, key_prefix="settings_tab")
+    _render_dimensions_section(user, engine, project_id, role, key_prefix="dims_tab")
+
+    st.markdown("### Export")
+    if df.empty:
+        st.info("Aucune donnée à exporter.")
+        return
+    csv = df[df["statut"] == STATUT_VALIDE].to_csv(index=False).encode("utf-8")
+    export_format = st.selectbox(
+        "Format JSONL",
+        ["lfm2", "baguettotron", "mistral"],
+        key="export_format_select",
+    )
+    jsonl_data = convert_to_jsonl(df, export_format, include_stylometry=True)
+    st.download_button(
+        "Télécharger CSV",
+        csv,
+        "dataset.csv",
+        "text/csv",
+        key="export_csv_download_btn",
+    )
+    st.download_button(
+        "Télécharger JSONL",
+        jsonl_data,
+        f"dataset_{export_format}.jsonl",
+        "application/jsonl",
+        key="export_jsonl_download_btn",
+    )
+
+
+def _llm_env(settings: ProjectSettings) -> None:
+    pairs = {
+        "LLM_BASE_URL": settings.llm_base_url,
+        "LLM_MODEL": settings.llm_model,
+        "LLM_API_KEY": settings.llm_api_key,
+        "LLM_TIMEOUT_SECONDS": settings.llm_timeout_seconds,
+        "LANGUAGETOOL_BASE_URL": settings.languagetool_base_url,
+    }
+    for key, value in pairs.items():
+        if value:
+            os.environ[key] = value
+
+
+def render_tab_ajout(
+    user: CurrentUser,
+    role: str,
+    project_id: str,
+    project_settings: ProjectSettings,
+    df: pd.DataFrame,
+    engine: Engine,
+    dimensions: dict[str, list[str]],
+) -> None:
+    """Ajout d'entrée (collaborator/admin)."""
+    st.subheader("Nouvelle entrée")
+    if role == "viewer":
+        st.info("Lecture seule (viewer).")
+        return
+    _llm_env(project_settings)
+    with st.form("new_entry_form"):
+        type_ = st.selectbox("Type de transformation", dimensions["types"])
+        structure = st.selectbox("Structure textuelle", dimensions["structures"])
+        ton = st.selectbox("Tonalité textuelle", dimensions["tons"])
+        format_ = st.selectbox("Format de sortie", dimensions["formats"])
+        public = st.selectbox("Public cible", dimensions["publics"])
+        input_text = st.text_area("Brouillon", height=120)
+        output_text = st.text_area("Texte généré", height=220)
+        statut = st.selectbox("Statut", dimensions["statuts"])
+        notes = st.text_input("Notes")
+        col1, col2, col3 = st.columns(3)
+        gen_out = col1.form_submit_button("Générer texte")
+        gen_in = col2.form_submit_button("Générer brouillon")
+        save = col3.form_submit_button("Enregistrer", type="primary")
+    if gen_out and input_text.strip():
+        try:
+            with st.spinner("Génération en cours..."):
+                generated = generate_output_from_input(
+                    api_key=project_settings.llm_api_key,
+                    input_text=input_text,
+                    type_=type_,
+                    structure=structure,
+                    ton=ton,
+                    format_=format_,
+                    public=public,
+                    model=project_settings.llm_model or None,
+                )
+            if generated:
+                st.session_state["new_generated_output"] = generated
+                st.toast("Texte généré.")
+            else:
+                st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Erreur génération texte", exc_info=exc)
+            st.error("Génération impossible: erreur inattendue côté service.")
+    if gen_in and output_text.strip():
+        try:
+            with st.spinner("Génération en cours..."):
+                generated = generate_input_from_output(
+                    api_key=project_settings.llm_api_key,
+                    output=output_text,
+                    type_=type_,
+                    structure=structure,
+                    ton=ton,
+                    format_=format_,
+                    public=public,
+                    model=project_settings.llm_model or None,
+                )
+            if generated:
+                st.session_state["new_generated_input"] = generated
+                st.toast("Brouillon généré.")
+            else:
+                st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Erreur génération brouillon", exc_info=exc)
+            st.error("Génération impossible: erreur inattendue côté service.")
+    if save:
+        if not input_text.strip() or not output_text.strip():
+            st.error("Brouillon/Texte généré obligatoires.")
+            return
+        new_row = pd.DataFrame(
+            [
+                {
+                    "id": str(uuid.uuid4())[:8],
+                    "project_id": project_id,
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "type": type_,
+                    "structure": structure,
+                    "ton": ton,
+                    "format": format_,
+                    "public": public,
+                    "input": input_text,
+                    "output": output_text,
+                    "statut": statut,
+                    "notes": notes,
+                    **{c: "" for c in CACHE_COLUMNS},
+                }
+            ]
+        )
+        require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
+        update_project_entries(engine, project_id, pd.concat([df, new_row], ignore_index=True))
+        st.success("Entrée enregistrée.")
+        st.rerun()
+
+
+def render_tab_edition(
+    user: CurrentUser,
+    role: str,
+    project_id: str,
+    project_settings: ProjectSettings,
+    df: pd.DataFrame,
+    engine: Engine,
+    dimensions: dict[str, list[str]],
+) -> None:
+    """Edition des entrées du projet."""
+    st.subheader("Gestion & édition")
+    _llm_env(project_settings)
+    if df.empty:
+        st.info("Aucune entrée.")
+        return
+    if "structure" not in df.columns and "forme" in df.columns:
+        df["structure"] = df["forme"]
+    if "format" not in df.columns and "support" in df.columns:
+        df["format"] = df["support"]
+    if "public" not in df.columns:
+        df["public"] = ""
+    options = [f"{row['id']} · {row['type']} · {row['statut']}" for _, row in df.iterrows()]
+    idx = st.selectbox("Entrée", list(range(len(options))), format_func=lambda i: options[i])
+    row = df.iloc[int(idx)].copy()
+    disabled = role == "viewer"
+    legacy_fields: list[str] = []
+    legacy_candidates = [
+        ("Type de transformation", "type", "types"),
+        ("Structure textuelle", "structure", "structures"),
+        ("Tonalité textuelle", "ton", "tons"),
+        ("Format de sortie", "format", "formats"),
+        ("Public cible", "public", "publics"),
+        ("Statut", "statut", "statuts"),
+    ]
+    for label, row_key, dim_key in legacy_candidates:
+        value = str(row.get(row_key, "") or "").strip()
+        if value and value not in dimensions[dim_key]:
+            legacy_fields.append(label)
+    if legacy_fields:
+        st.warning(
+            f"{len(legacy_fields)} champ(s) obsolète(s) détecté(s): {', '.join(legacy_fields)}. "
+            "Cette valeur existe dans vos données mais plus dans le preset actif.",
+            icon="⚠️",
+        )
+    with st.form("edit_entry_form"):
+        row["type"] = _select_with_legacy(
+            "Type de transformation",
+            dimensions["types"],
+            str(row["type"]),
+            key="edit_type_select",
+            disabled=disabled,
+            show_warning=False,
+        )
+        row["structure"] = _select_with_legacy(
+            "Structure textuelle",
+            dimensions["structures"],
+            str(row["structure"]),
+            key="edit_structure_select",
+            disabled=disabled,
+            show_warning=False,
+        )
+        row["ton"] = _select_with_legacy(
+            "Tonalité textuelle",
+            dimensions["tons"],
+            str(row["ton"]),
+            key="edit_ton_select",
+            disabled=disabled,
+            show_warning=False,
+        )
+        row["format"] = _select_with_legacy(
+            "Format de sortie",
+            dimensions["formats"],
+            str(row["format"]),
+            key="edit_format_select",
+            disabled=disabled,
+            show_warning=False,
+        )
+        row["public"] = _select_with_legacy(
+            "Public cible",
+            dimensions["publics"],
+            str(row["public"]),
+            key="edit_public_select",
+            disabled=disabled,
+            show_warning=False,
+        )
+        row["input"] = st.text_area("Brouillon", value=row["input"], height=140, disabled=disabled)
+        row["output"] = st.text_area("Texte généré", value=row["output"], height=240, disabled=disabled)
+        row["statut"] = _select_with_legacy(
+            "Statut",
+            dimensions["statuts"],
+            str(row["statut"]),
+            key="edit_statut_select",
+            disabled=disabled,
+            show_warning=False,
+        )
+        row["notes"] = st.text_input("Notes", value=row["notes"], disabled=disabled)
+        col1, col2 = st.columns(2)
+        fix = col1.form_submit_button("Corriger output", disabled=disabled)
+        save = col2.form_submit_button("Sauvegarder", disabled=disabled, type="primary")
+    if fix:
+        try:
+            corrected = corriger_texte_fr(
+                str(row["output"]),
+                languagetool_base_url=project_settings.languagetool_base_url or None,
+            )
+            st.info(corrected[:1500] + ("..." if len(corrected) > 1500 else ""))
+        except requests.RequestException as exc:
+            st.error(f"Correction impossible: {exc}")
+    if save:
+        require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
+        out = df.copy()
+        for col in [
+            "type",
+            "structure",
+            "ton",
+            "format",
+            "public",
+            "input",
+            "output",
+            "statut",
+            "notes",
+        ]:
+            out.loc[out["id"] == row["id"], col] = str(row[col])
+        update_project_entries(engine, project_id, out)
+        st.success("Entrée mise à jour.")
+        st.rerun()
+
+
+def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
+    st.subheader("Tableau de bord")
+    st.caption(f"Rôle projet: {role}")
+    if df.empty:
+        st.info("Aucune donnée.")
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total", len(df))
+    c2.metric("Validées", int((df["statut"] == STATUT_VALIDE).sum()))
+    c3.metric("Types", int(df["type"].nunique()))
+    if "structure" not in df.columns and "forme" in df.columns:
+        df = df.copy()
+        df["structure"] = df["forme"]
+    if "format" not in df.columns and "support" in df.columns:
+        df = df.copy()
+        df["format"] = df["support"]
+    if "public" not in df.columns:
+        df = df.copy()
+        df["public"] = ""
     st.dataframe(
-        pd.DataFrame(rows_display),
+        df[["id", "date", "type", "structure", "ton", "format", "public", "statut"]],
         hide_index=True,
         width="stretch",
-        column_config={
-            "ID": st.column_config.TextColumn(width="small"),
-            "Alertes": st.column_config.TextColumn(width="large"),
-        },
     )
-
-
-def render_tab_dashboard(df: pd.DataFrame, engine: Engine, listes: dict[str, list[str]]) -> None:
-    """Onglet Tableau de bord : composition, qualité, stylométrie, alertes, gestion du cache."""
-    df_valid = df[df["statut"] == STATUT_VALIDE]
-
-    n_total = len(df)
-    n_valid = len(df_valid)
-
-    if n_total == 0:
-        st.info(
-            "Le dataset est vide. Commence à ajouter des fiches dans l'onglet « Nouvelle Entrée »."
-        )
-        return
-
-    # Section 1 — Composition (pas besoin du cache)
-    _render_overview(df, listes)
-
-    st.divider()
-
-    if n_valid == 0:
-        st.info(
-            "Aucune fiche validée. Passe des fiches au statut « Fait et validé » pour débloquer les indicateurs qualité et stylistiques."
-        )
-        return
-
-    # --- Section Cache stylométrique : générer / écraser / enregistrer ---
-    with st.expander("📐 Cache stylométrique — Générer ou écraser", expanded=True):
-        st.caption(
-            "Recalcule les indicateurs (ratio, TTR, signature, cohérence, densité lexicale, etc.) "
-            "pour les fiches « Fait et validé » et met à jour le Google Sheet. "
-            "Utile après import de données ou pour harmoniser tout le cache."
-        )
-        nlp = load_nlp()
-        coherence_col = df_valid.get("_coherence_score")
-        if coherence_col is not None:
-            has_cache = (coherence_col.fillna("").astype(str).str.strip() != "").sum()
-        else:
-            has_cache = 0
-        n_sans_cache = n_valid - int(has_cache)
-
-        col_gen, col_ecrase = st.columns(2)
-        with col_gen:
-            gen_empty = st.button(
-                "Générer le cache (fiches sans cache)",
-                key="dashboard_gen_cache_empty",
-                disabled=nlp is None or n_sans_cache == 0,
-                help="Remplit le cache uniquement pour les fiches validées qui n'en ont pas encore.",
-            )
-        with col_ecrase:
-            confirm_ecrase = st.checkbox(
-                "Confirmer l'écrasement de tout le cache",
-                key="dashboard_confirm_ecrase",
-                help="Coche pour débloquer le bouton « Écraser tout ».",
-            )
-            ecrase_all = st.button(
-                "Écraser tout le cache et enregistrer",
-                key="dashboard_ecrase_cache",
-                disabled=nlp is None or not confirm_ecrase,
-                type="primary",
-                help="Recalcule et écrase le cache de toutes les fiches validées, puis enregistre dans le Sheet.",
-            )
-
-        if gen_empty and nlp is not None and n_sans_cache > 0:
-            with st.spinner("Génération du cache pour les fiches sans cache…"):
-                if coherence_col is not None:
-                    df_sans = df_valid[coherence_col.fillna("").astype(str).str.strip() == ""]
-                else:
-                    df_sans = df_valid
-                for _, row in df_sans.iterrows():
-                    rid = row["id"]
-                    inp = (str(row.get("input") or "")).strip()
-                    out = (str(row.get("output") or "")).strip()
-                    if not (inp and out):
-                        continue
-                    others = df_valid[df_valid["id"].astype(str) != str(rid)]
-                    cache_vals = compute_row_cache(
-                        inp, out, nlp, others, rid, CACHE_COLUMNS, avg_signature_from_cache
-                    )
-                    for col, val in cache_vals.items():
-                        df.loc[df["id"].astype(str) == str(rid), col] = val
-                try:
-                    update_data(engine, df)
-                except Exception:
-                    st.error(
-                        "Impossible d'enregistrer le cache dans le Google Sheet. "
-                        "Vérifiez la connexion et réessayez."
-                    )
-                    return
-            st.success(
-                f"Cache généré pour {len(df_sans)} fiche(s) sans cache. Données enregistrées."
-            )
-            st.rerun()
-
-        if ecrase_all and nlp is not None and confirm_ecrase:
-            with st.spinner("Recalcul de tout le cache…"):
-                updated_valid = recompute_cache_for_rows(df_valid, nlp, CACHE_COLUMNS)
-                for _, row in updated_valid.iterrows():
-                    rid = row["id"]
-                    for col in CACHE_COLUMNS:
-                        if col in row:
-                            df.loc[df["id"].astype(str) == str(rid), col] = row[col]
-                try:
-                    update_data(engine, df)
-                except Exception:
-                    st.error(
-                        "Impossible d'enregistrer le cache dans le Google Sheet. "
-                        "Vérifiez la connexion et réessayez."
-                    )
-                    return
-            st.success("Cache entièrement recalculé et enregistré dans le Google Sheet.")
-            st.rerun()
-
-    # Calcul unique des stats cache — passé aux sections qui en ont besoin
-    stats = dataset_cache_stats(df_valid)
-
-    if stats is None:
-        st.warning(
-            "Le cache n'est pas encore rempli. Utilise la section « Cache stylométrique » ci‑dessus "
-            "pour générer ou écraser le cache des fiches validées."
-        )
-        return
-
-    # Section 2 — Qualité
-    _render_quality_panel(df_valid, stats)
-
-    st.divider()
-
-    # Section 3 — Stylométrie
-    _render_stylometry_panel(df_valid)
-
-    st.divider()
-
-    # Section 4 — Alertes (flag_problematic_rows réutilise le cache, déjà chargé dans dataset_cache_stats)
-    problematic = flag_problematic_rows(df_valid)
-    _render_alerts_panel(problematic)

@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dataset_style}
+      POSTGRES_USER: ${POSTGRES_USER:-dataset_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-dataset_user} -d ${POSTGRES_DB:-dataset_style}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  supertokens:
+    image: registry.supertokens.io/supertokens/supertokens-postgresql
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRESQL_CONNECTION_URI: postgresql://${POSTGRES_USER:-dataset_user}:${POSTGRES_PASSWORD:-change_me}@postgres:5432/${SUPERTOKENS_DB:-dataset_style}
+      API_KEYS: ${SUPERTOKENS_CORE_API_KEY:-change_me_core_key_2026_local_dev}
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      supertokens:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dataset_user}:${POSTGRES_PASSWORD:-change_me}@postgres:5432/${POSTGRES_DB:-dataset_style}
+      SUPERTOKENS_CONNECTION_URI: http://supertokens:3567
+      SUPERTOKENS_API_KEY: ${SUPERTOKENS_CORE_API_KEY:-change_me_core_key_2026_local_dev}
+      AUTH_ENFORCE_INVITATION_ONLY: ${AUTH_ENFORCE_INVITATION_ONLY:-true}
+      SUPERTOKENS_SIGNUP_DISABLED: ${SUPERTOKENS_SIGNUP_DISABLED:-true}
+      POSTGRES_HOST: postgres
+      SUPERTOKENS_HOST: supertokens
+      SUPERTOKENS_PORT: 3567
+    ports:
+      - "${APP_PORT:-8501}:8501"
+
+volumes:
+  postgres_data:

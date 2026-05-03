@@ -19,9 +19,9 @@ LANGUAGETOOL_PUBLIC_URL = "https://api.languagetool.org/v2/check"
 LANGUAGETOOL_TIMEOUT = 15
 
 
-def languagetool_check_url() -> str:
+def languagetool_check_url(base_url: str | None = None) -> str:
     """URL complète du endpoint ``/v2/check`` (serveur local ou API publique)."""
-    base = (os.environ.get("LANGUAGETOOL_BASE_URL") or "").strip().rstrip("/")
+    base = (base_url or os.environ.get("LANGUAGETOOL_BASE_URL") or "").strip().rstrip("/")
     if not base:
         return LANGUAGETOOL_PUBLIC_URL
     return urljoin(base + "/", "v2/check")
@@ -50,7 +50,7 @@ _POS_FR: dict[str, str] = {
 }
 
 
-def corriger_texte_fr(text: str) -> str:
+def corriger_texte_fr(text: str, languagetool_base_url: str | None = None) -> str:
     """
     Corrige l'orthographe et la grammaire du texte en français via l'API
     LanguageTool (pas de réécriture, uniquement corrections ciblées).
@@ -71,7 +71,7 @@ def corriger_texte_fr(text: str) -> str:
 
     try:
         resp = requests.post(
-            languagetool_check_url(),
+            languagetool_check_url(languagetool_base_url),
             data={"text": text, "language": "fr"},
             timeout=LANGUAGETOOL_TIMEOUT,
         )
