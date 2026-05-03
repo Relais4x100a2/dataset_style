@@ -11,6 +11,7 @@ import requests
 import streamlit as st
 from sqlalchemy.engine import Engine
 
+from src import mailer
 from src.database import (
     UserRecord,
     create_deprovision_operation,
@@ -197,6 +198,25 @@ def request_password_reset_link(email: str) -> str:
     return _create_password_reset_link(_normalize_email(email))
 
 
+def _probe_signup_disabled() -> None:
+    """Vérifie empiriquement que le Core SuperTokens refuse le signup public (fail-secure)."""
+    probe_email = f"probe.noreply.{secrets.token_hex(8)}@probe.invalid"
+    probe_password = f"Probe!{secrets.token_urlsafe(16)}"
+    try:
+        out = _signup(probe_email, probe_password)
+    except RuntimeError:
+        # signup bloqué au niveau HTTP — c'est ce qu'on veut
+        return
+    status = str(out.get("status") or "").strip()
+    if status in {"OK", "EMAIL_ALREADY_EXISTS_ERROR"}:
+        raise RuntimeError(
+            "SuperTokens Core accepte encore le signup public. "
+            "Désactiver côté Core avant déploiement."
+        )
+    # Tout autre status (GENERAL_ERROR, etc.) → signup bloqué
+    return
+
+
 def ensure_invitation_only_policy() -> None:
     """
     Vérifie contractuellement que le signup provider est bloqué.
@@ -223,6 +243,7 @@ def ensure_invitation_only_policy() -> None:
         raise RuntimeError(
             "AUTH_ENFORCE_INVITATION_ONLY=true exige SUPERTOKENS_SIGNUP_DISABLED=true."
         )
+    _probe_signup_disabled()
     st.session_state["auth_invitation_policy_checked"] = True
 
 
@@ -440,11 +461,18 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
             return None
 
     if reset_btn:
+        normalized_email = _normalize_email(reset_email)
         try:
-            link = request_password_reset_link(reset_email)
-            st.success("Lien de réinitialisation généré.")
-            st.code(_mask_link(link))
+            link = request_password_reset_link(normalized_email)
+            result = mailer.send_account_link_email(
+                to_email=normalized_email,
+                subject="Réinitialisation de votre mot de passe",
+                intro="Cliquez sur le lien ci-dessous pour définir votre mot de passe.",
+                link=link,
+            )
+            if result.mode == "dev":
+                logger.debug("reset link for %s: %s", normalized_email, link)
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Réinitialisation impossible: {exc}")
-            return None
+            logger.debug("password reset failed: %s", exc)
+        st.success("Si cet email existe, un lien a été envoyé.")
     return None

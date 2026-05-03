@@ -37,7 +37,7 @@ class AuthSecurityTests(unittest.TestCase):
                 auth.ensure_invitation_only_policy()
                 signup_mock.assert_not_called()
 
-    def test_invitation_only_policy_marks_checked_without_probe(self) -> None:
+    def test_invitation_only_policy_marks_checked_when_core_blocks_signup(self) -> None:
         with patch.dict(
             os.environ,
             {"AUTH_ENFORCE_INVITATION_ONLY": "true", "SUPERTOKENS_SIGNUP_DISABLED": "true"},
@@ -46,9 +46,10 @@ class AuthSecurityTests(unittest.TestCase):
             state = {}
             with patch.object(auth.st, "session_state", state):
                 with patch.object(auth, "_signup") as signup_mock:
+                    signup_mock.return_value = {"status": "GENERAL_ERROR"}
                     auth.ensure_invitation_only_policy()
+                    signup_mock.assert_called_once()
                     self.assertTrue(state.get("auth_invitation_policy_checked"))
-                    signup_mock.assert_not_called()
 
     def test_saga_provider_done_error_increments_retry(self) -> None:
         op = SimpleNamespace(state="provider_done", retry_count=0)
