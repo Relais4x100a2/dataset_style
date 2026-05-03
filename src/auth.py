@@ -70,7 +70,12 @@ def _signin(email: str, password: str) -> dict:
     try:
         return _post(
             "/recipe/signin",
-            {"formFields": [{"id": "email", "value": email}, {"id": "password", "value": password}]},
+            {
+                "formFields": [
+                    {"id": "email", "value": email},
+                    {"id": "password", "value": password},
+                ]
+            },
         )
     except RuntimeError as exc:
         # Compatibilité entre versions SuperTokens Core (formFields vs email/password).
@@ -83,7 +88,12 @@ def _signup(email: str, password: str) -> dict:
     try:
         return _post(
             "/recipe/signup",
-            {"formFields": [{"id": "email", "value": email}, {"id": "password", "value": password}]},
+            {
+                "formFields": [
+                    {"id": "email", "value": email},
+                    {"id": "password", "value": password},
+                ]
+            },
         )
     except RuntimeError as exc:
         # Compatibilité entre versions SuperTokens Core (formFields vs email/password).
@@ -167,7 +177,9 @@ def _provider_delete_user(su_user_id: str) -> None:
                 return
             last_error = exc
     if last_error:
-        raise RuntimeError(f"Suppression utilisateur provider impossible: {last_error}") from last_error
+        raise RuntimeError(
+            f"Suppression utilisateur provider impossible: {last_error}"
+        ) from last_error
 
 
 def _mask_link(link: str) -> str:

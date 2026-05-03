@@ -52,9 +52,7 @@ def _derive_database_url() -> None:
     if not all([database, user, password]):
         return
 
-    os.environ["DATABASE_URL"] = (
-        f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
-    )
+    os.environ["DATABASE_URL"] = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
 
 def _derive_su_connection_uri() -> None:
