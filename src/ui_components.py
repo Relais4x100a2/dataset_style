@@ -891,7 +891,9 @@ def render_tab_ajout(
             ]
         )
         require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
-        update_project_entries(engine, project_id, pd.concat([df, new_row], ignore_index=True))
+        update_project_entries(
+            engine, project_id, pd.concat([df, new_row], ignore_index=True), user.user_id
+        )
         st.success("Entrée enregistrée.")
         st.rerun()
 
@@ -1021,7 +1023,7 @@ def render_tab_edition(
             "notes",
         ]:
             out.loc[out["id"] == row["id"], col] = str(row[col])
-        update_project_entries(engine, project_id, out)
+        update_project_entries(engine, project_id, out, user.user_id)
         st.success("Entrée mise à jour.")
         st.rerun()
 

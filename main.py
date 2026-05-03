@@ -54,7 +54,7 @@ if not project_id:
     st.info("Crée un projet pour commencer.")
     st.stop()
 
-df = load_project_entries(engine, project_id)
+df = load_project_entries(engine, project_id, user.user_id)
 project_settings = get_project_settings(engine, project_id)
 _, _, dimensions = load_active_dimensions(project_settings)
 

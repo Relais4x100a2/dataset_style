@@ -1065,7 +1065,8 @@ def create_project(engine: Engine, user_id: str, name: str, description: str = "
     return pid
 
 
-def delete_project(engine: Engine, project_id: str) -> None:
+def delete_project(engine: Engine, project_id: str, user_id: str) -> None:
+    require_admin(engine, project_id, user_id)
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM projects WHERE id = :pid"), {"pid": project_id})
 
@@ -1230,8 +1231,7 @@ def update_project_settings(engine: Engine, project_id: str, settings: ProjectSe
 
 def delete_project_as_admin(engine: Engine, project_id: str, actor_user_id: str) -> None:
     """Supprime un projet après vérification stricte du rôle admin."""
-    require_admin(engine, project_id, actor_user_id)
-    delete_project(engine, project_id)
+    delete_project(engine, project_id, actor_user_id)
 
 
 def add_or_update_member_as_admin(
@@ -1283,7 +1283,8 @@ def _normalize_entry_df(df: pd.DataFrame, project_id: str) -> pd.DataFrame:
     return out[ENTRY_COLUMNS].astype(str).replace(["nan", "None", "<NA>"], "")
 
 
-def load_project_entries(engine: Engine, project_id: str) -> pd.DataFrame:
+def load_project_entries(engine: Engine, project_id: str, user_id: str) -> pd.DataFrame:
+    require_role(engine, project_id, user_id, ("admin", "collaborator", "viewer"))
     ensure_schema(engine)
     with engine.begin() as conn:
         df = pd.read_sql(
@@ -1302,7 +1303,8 @@ def load_project_entries(engine: Engine, project_id: str) -> pd.DataFrame:
     return df.astype(str).replace(["nan", "None", "<NA>"], "")
 
 
-def update_project_entries(engine: Engine, project_id: str, df: pd.DataFrame) -> None:
+def update_project_entries(engine: Engine, project_id: str, df: pd.DataFrame, user_id: str) -> None:
+    require_role(engine, project_id, user_id, ("admin", "collaborator"))
     payload = _normalize_entry_df(df, project_id)
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM entries WHERE project_id = :pid"), {"pid": project_id})
