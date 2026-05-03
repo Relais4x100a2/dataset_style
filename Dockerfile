@@ -19,4 +19,4 @@ USER appuser
 
 EXPOSE 8501
 
-CMD ["uv", "run", "python", "-m", "streamlit", "run", "main.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless", "true"]
+CMD ["/app/.venv/bin/python", "-m", "streamlit", "run", "main.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless", "true"]
