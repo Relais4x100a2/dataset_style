@@ -33,7 +33,7 @@ jobs:
         image: registry.supertokens.io/supertokens/supertokens-postgresql
         env:
           POSTGRESQL_CONNECTION_URI: postgresql://dataset_user:change_me@postgres:5432/dataset_style
-          API_KEYS: contract-core-key
+          API_KEYS: contract-core-key-ci-2026
         ports:
           - 3567:3567
     steps:
@@ -78,7 +78,7 @@ jobs:
                   {"id": "password", "value": "Aa1!contract-test"},
               ]
           }
-          headers = {"api-key": "contract-core-key"}
+          headers = {"api-key": "contract-core-key-ci-2026"}
           resp = requests.post(
               "http://localhost:3567/recipe/signup",
               json=payload,
