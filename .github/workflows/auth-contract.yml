@@ -36,6 +36,12 @@ jobs:
           API_KEYS: contract-core-key
         ports:
           - 3567:3567
+        options: >-
+          --health-cmd "curl -fsS http://localhost:3567/hello"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 30s
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
