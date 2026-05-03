@@ -2,18 +2,30 @@
 Moteur linguistique : insights linguistiques, stylométrie, cohérence.
 Sans dépendance Streamlit — testable indépendamment.
 """
+
 import json
 import logging
+import os
 from collections import Counter
-from typing import Callable
+from collections.abc import Callable
+from urllib.parse import urljoin
 
 import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
 
-LANGUAGETOOL_API_URL = "https://api.languagetool.org/v2/check"
+LANGUAGETOOL_PUBLIC_URL = "https://api.languagetool.org/v2/check"
 LANGUAGETOOL_TIMEOUT = 15
+
+
+def languagetool_check_url(base_url: str | None = None) -> str:
+    """URL complète du endpoint ``/v2/check`` (serveur local ou API publique)."""
+    base = (base_url or os.environ.get("LANGUAGETOOL_BASE_URL") or "").strip().rstrip("/")
+    if not base:
+        return LANGUAGETOOL_PUBLIC_URL
+    return urljoin(base + "/", "v2/check")
+
 
 VERBES_FAIBLES = {"être", "avoir", "faire", "aller", "dire"}
 
@@ -38,7 +50,7 @@ _POS_FR: dict[str, str] = {
 }
 
 
-def corriger_texte_fr(text: str) -> str:
+def corriger_texte_fr(text: str, languagetool_base_url: str | None = None) -> str:
     """
     Corrige l'orthographe et la grammaire du texte en français via l'API
     LanguageTool (pas de réécriture, uniquement corrections ciblées).
@@ -59,7 +71,7 @@ def corriger_texte_fr(text: str) -> str:
 
     try:
         resp = requests.post(
-            LANGUAGETOOL_API_URL,
+            languagetool_check_url(languagetool_base_url),
             data={"text": text, "language": "fr"},
             timeout=LANGUAGETOOL_TIMEOUT,
         )
@@ -117,12 +129,9 @@ def get_linguistic_insights(
 
     lemmes_out = {t.lemma_.lower() for t in doc_out if not t.is_punct}
     ttr = len(lemmes_out) / max(1, len_out)
-    comptage = Counter(
-        t.lemma_.lower() for t in doc_out if not t.is_punct and not t.is_stop
-    )
+    comptage = Counter(t.lemma_.lower() for t in doc_out if not t.is_punct and not t.is_stop)
     mots_repetes = [
-        lem for lem, n in comptage.items()
-        if n >= seuil_repetition and lem and str(lem).strip()
+        lem for lem, n in comptage.items() if n >= seuil_repetition and lem and str(lem).strip()
     ]
 
     sents = list(doc_out.sents)
@@ -161,9 +170,7 @@ def get_baguette_touch(text_out: str, nlp) -> dict | None:
         "deux_points": text.count(":"),
     }
     weak_verbs: list[tuple[str, int]] = []
-    verb_counts = Counter(
-        t.lemma_.lower() for t in doc if t.pos_ in ("VERB", "AUX")
-    )
+    verb_counts = Counter(t.lemma_.lower() for t in doc if t.pos_ in ("VERB", "AUX"))
     for v in VERBES_FAIBLES:
         c = verb_counts.get(v, 0)
         if c > 0:
@@ -185,7 +192,7 @@ def syntax_contrast_score(text_in: str, text_out: str, nlp) -> float:
     keys = list(sig_in.keys())
     total = 0.0
     for k in keys:
-        total += abs((sig_in.get(k, 0) - sig_out.get(k, 0)))
+        total += abs(sig_in.get(k, 0) - sig_out.get(k, 0))
     return min(1.0, total / max(1, len(keys)) * 2)
 
 
@@ -193,21 +200,21 @@ def syntax_contrast_score(text_in: str, text_out: str, nlp) -> float:
 # Le dernier tuple (seuil_max=inf) est le palier par défaut (valeur >= dernier seuil).
 _PALIERS: dict[str, list[tuple[float, str, str]]] = {
     "ratio": [
-        (1.3, "Minimal",    "Tu restes proche du brouillon."),
+        (1.3, "Minimal", "Tu restes proche du brouillon."),
         (2.0, "Progressif", "Tu développes."),
-        (2.5, "Solide",     "Tu as bien développé l'idée."),
+        (2.5, "Solide", "Tu as bien développé l'idée."),
         (float("inf"), "Amplifié", "Tu déploies beaucoup."),
     ],
     "ttr": [
-        (0.50, "Bas",           "Vocabulaire répétitif."),
+        (0.50, "Bas", "Vocabulaire répétitif."),
         (0.65, "Intermédiaire", "Vocabulaire correct."),
-        (0.80, "Élevé",         "Vocabulaire soutenu."),
+        (0.80, "Élevé", "Vocabulaire soutenu."),
         (float("inf"), "Très élevé", "Vocabulaire très riche."),
     ],
     "moy_phrases": [
-        (10,  "Court",      "Rythme vif, phrases courtes."),
-        (18,  "Équilibré",  "Rythme équilibré."),
-        (25,  "Ample",      "Rythme ample."),
+        (10, "Court", "Rythme vif, phrases courtes."),
+        (18, "Équilibré", "Rythme équilibré."),
+        (25, "Ample", "Rythme ample."),
         (float("inf"), "Très ample", "Phrases très longues."),
     ],
 }
@@ -265,9 +272,7 @@ def compute_coherence_score(
     return final_score, deltas
 
 
-def prioritized_actions(
-    stats: dict, deltas: dict[str, float], max_actions: int = 3
-) -> list[str]:
+def prioritized_actions(stats: dict, deltas: dict[str, float], max_actions: int = 3) -> list[str]:
     """Génère des conseils d'écriture concrets à partir des métriques courantes."""
     actions: list[str] = []
     if stats["ratio"] < 1.3:
@@ -299,15 +304,13 @@ def prioritized_actions(
         )
     elif stats["long_moy_phrases"] > 25:
         actions.append(
-            "Tes phrases sont longues — découpe-en quelques-unes pour "
-            "faciliter la lecture."
+            "Tes phrases sont longues — découpe-en quelques-unes pour faciliter la lecture."
         )
 
     if stats["mots_repetes"]:
         sample = ", ".join(f"« {m} »" for m in stats["mots_repetes"][:3])
         actions.append(
-            f"Les mots {sample} reviennent souvent — remplace-en "
-            "certains par des synonymes."
+            f"Les mots {sample} reviennent souvent — remplace-en certains par des synonymes."
         )
 
     top_deltas = sorted(deltas.items(), key=lambda x: x[1], reverse=True)[:2]
@@ -377,9 +380,7 @@ def get_stylometric_signature(text: str, nlp) -> dict[str, float] | None:
     }
 
 
-def _get_finetuning_insights(
-    text_in: str, text_out: str, nlp
-) -> dict[str, str] | None:
+def _get_finetuning_insights(text_in: str, text_out: str, nlp) -> dict[str, str] | None:
     """
     Calcule les indicateurs additionnels pour le fine-tuning (densité lexicale,
     verbes faibles, contraste syntaxique, nb phrases, ponctuation expressive, stop ratio).
@@ -394,9 +395,7 @@ def _get_finetuning_insights(
     content_count = sum(1 for t in doc_out if not t.is_punct and t.pos_ in content_pos)
     lexical_density = content_count / nb_tokens
 
-    verb_counts = Counter(
-        t.lemma_.lower() for t in doc_out if t.pos_ in ("VERB", "AUX")
-    )
+    verb_counts = Counter(t.lemma_.lower() for t in doc_out if t.pos_ in ("VERB", "AUX"))
     total_verbs = sum(verb_counts.values())
     weak_count = sum(verb_counts.get(v, 0) for v in VERBES_FAIBLES)
     weak_verb_ratio = weak_count / max(1, total_verbs)
@@ -446,9 +445,7 @@ def compute_row_cache(
     others = df_valid[df_valid["id"].astype(str) != str(row_id)]
     sig_dataset = get_avg_signature(others)
     if sig_dataset:
-        score, _ = compute_coherence_score(
-            sig_fiche, sig_dataset, ins.get("mots_repetes", [])
-        )
+        score, _ = compute_coherence_score(sig_fiche, sig_dataset, ins.get("mots_repetes", []))
     else:
         score = 100
 
@@ -490,7 +487,7 @@ def recompute_cache_for_rows(
     row_data: list[dict] = []
 
     for _, row in df_valid.iterrows():
-        inp = (str(row.get("input") or "").strip())
+        inp = str(row.get("input") or "").strip()
         out_text = (str(row.get("output") or "")).strip()
         row_id = row.get("id", "")
         if not (inp and out_text):
@@ -503,13 +500,15 @@ def recompute_cache_for_rows(
         if not ins or not sig:
             row_data.append({"row_id": row_id, "cache": {col: "" for col in cache_columns}})
             continue
-        row_data.append({
-            "row_id": row_id,
-            "ins": ins,
-            "sig": sig,
-            "tri": tri,
-            "extra": extra or {},
-        })
+        row_data.append(
+            {
+                "row_id": row_id,
+                "ins": ins,
+                "sig": sig,
+                "tri": tri,
+                "extra": extra or {},
+            }
+        )
 
     all_sigs = [r["sig"] for r in row_data if "sig" in r and r.get("sig")]
     if not all_sigs:
@@ -535,13 +534,8 @@ def recompute_cache_for_rows(
                 result.loc[result["id"].astype(str) == str(row_id), col] = val
             continue
         sig_fiche = r["sig"]
-        others_mean = {
-            k: (sum_sigs[k] - sig_fiche[k]) / max(1, n - 1)
-            for k in sig_fiche.keys()
-        }
-        score, _ = compute_coherence_score(
-            sig_fiche, others_mean, r["ins"].get("mots_repetes", [])
-        )
+        others_mean = {k: (sum_sigs[k] - sig_fiche[k]) / max(1, n - 1) for k in sig_fiche.keys()}
+        score, _ = compute_coherence_score(sig_fiche, others_mean, r["ins"].get("mots_repetes", []))
         cache = {
             "_ratio": str(round(r["ins"]["ratio"], 3)),
             "_ttr": f"{r['ins']['ttr']:.2f}",
@@ -592,5 +586,5 @@ def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:
             continue
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
-        result[k] = round(variance ** 0.5, 4)
+        result[k] = round(variance**0.5, 4)
     return result

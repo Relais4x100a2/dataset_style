@@ -1,0 +1,116 @@
+name: Auth Contract
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  pull_request:
+    paths:
+      - "src/auth.py"
+      - "src/database.py"
+      - "src/ui_components.py"
+      - "scripts/retry_deprovision_ops.py"
+      - "tests/test_auth.py"
+      - ".github/workflows/auth-contract.yml"
+
+jobs:
+  auth-contract:
+    runs-on: ubuntu-latest
+    env:
+      EXPECT_INVITATION_ONLY_BLOCKED: "true"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: dataset_style
+          POSTGRES_USER: dataset_user
+          POSTGRES_PASSWORD: change_me
+        options: >-
+          --health-cmd "pg_isready -U dataset_user -d dataset_style"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      supertokens:
+        image: registry.supertokens.io/supertokens/supertokens-postgresql
+        env:
+          POSTGRESQL_CONNECTION_URI: postgresql://dataset_user:change_me@postgres:5432/dataset_style
+          API_KEYS: contract-core-key-ci-2026
+        ports:
+          - 3567:3567
+        options: >-
+          --health-cmd "curl -fsS http://localhost:3567/hello"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 30s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      - name: Wait for SuperTokens
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3567/hello >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "SuperTokens not ready" >&2
+          exit 1
+      - name: Provider smoke test
+        run: |
+          python - <<'PY'
+          import requests
+          r = requests.get("http://localhost:3567/hello", timeout=10)
+          r.raise_for_status()
+          print("Provider hello OK")
+          PY
+      - name: Invitation-only contract (integration)
+        run: |
+          python - <<'PY'
+          import os
+          import uuid
+          import requests
+
+          expect_blocked = os.environ.get("EXPECT_INVITATION_ONLY_BLOCKED", "true").lower() in {"1", "true", "yes", "on"}
+          email = f"contract-{uuid.uuid4().hex[:10]}@example.invalid"
+          payload = {
+              "formFields": [
+                  {"id": "email", "value": email},
+                  {"id": "password", "value": "Aa1!contract-test"},
+              ]
+          }
+          headers = {"api-key": "contract-core-key-ci-2026"}
+          resp = requests.post(
+              "http://localhost:3567/recipe/signup",
+              json=payload,
+              headers=headers,
+              timeout=20,
+          )
+          if resp.status_code >= 400:
+              print("Signup blocked at HTTP layer with api-key:", resp.status_code)
+              raise SystemExit(0)
+
+          data = resp.json()
+          status = str(data.get("status") or "").strip()
+          print("Signup status with api-key:", status)
+          if expect_blocked and status == "OK":
+              raise SystemExit("Invitation-only contract FAILED: signup still open with valid api-key.")
+          raise SystemExit(0)
+          PY
+      - name: Provider API key contract
+        run: |
+          python - <<'PY'
+          import requests
+          payload = {"formFields":[{"id":"email","value":"keycheck@example.invalid"},{"id":"password","value":"Aa1!contract-test"}]}
+          resp = requests.post("http://localhost:3567/recipe/signup", json=payload, timeout=20)
+          if resp.status_code < 400:
+              raise SystemExit("Provider contract FAILED: signup must be blocked without api-key.")
+          print("Provider api-key gate OK:", resp.status_code)
+          PY
+      - name: Run auth unit tests
+        run: python -m unittest discover -s tests -p "test_auth.py"

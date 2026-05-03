@@ -1,6 +1,7 @@
 """
 Export multi-modèles : JSONL pour fine-tuning (LFM2, Baguettotron, Mistral).
 """
+
 import io
 import json
 from typing import Literal
@@ -54,10 +55,14 @@ def _stylometry_summary(row: pd.Series) -> str:
 
 
 def _instruction_text(row: pd.Series) -> str:
-    """Texte d'instruction commun pour les exports (forme, ton, support)."""
+    """Texte d'instruction commun pour les exports."""
+    structure = row.get("structure") or row.get("forme") or ""
+    format_ = row.get("format") or row.get("support") or ""
+    public = row.get("public") or ""
     return (
-        f"Réécris ce brouillon. Forme : {row['forme']}. "
-        f"Ton : {row['ton']}. Support : {row['support']}."
+        f"Réécris ce brouillon. Structure textuelle : {structure}. "
+        f"Tonalité textuelle : {row['ton']}. Format de sortie : {format_}. "
+        f"Public cible : {public}."
     )
 
 
@@ -70,8 +75,10 @@ def _build_lfm2_messages(row: pd.Series, include_stylometry: bool) -> list[dict]
         stylo = _stylometry_summary(row)
         if stylo:
             system_content = (
-                f"Paramètres : type={row['type']}, forme={row['forme']}, "
-                f"ton={row['ton']}, support={row['support']}. Indicateurs : {stylo}."
+                f"Paramètres : type={row['type']}, structure={row.get('structure', '')}, "
+                f"ton={row['ton']}, format={row.get('format', '')}, "
+                f"public={row.get('public', '')}. "
+                f"Indicateurs : {stylo}."
             )
             messages.append({"role": "system", "content": system_content})
     messages.append({"role": "user", "content": user_content})
@@ -92,9 +99,7 @@ def _convert_to_lfm2_jsonl(df_valid: pd.DataFrame, include_stylometry: bool) -> 
     return buf.getvalue()
 
 
-def _convert_to_baguettotron_jsonl(
-    df_valid: pd.DataFrame, include_stylometry: bool
-) -> str:
+def _convert_to_baguettotron_jsonl(df_valid: pd.DataFrame, include_stylometry: bool) -> str:
     """
     Format PleIAs/Baguettotron : ChatML + <think> trace + <H≈…>.
     Si include_stylometry, ajoute une ligne Stylo dans la trace.
@@ -103,7 +108,7 @@ def _convert_to_baguettotron_jsonl(
     for _, row in df_valid.iterrows():
         h_token = "<H≈0.3>" if row["type"] == "Normalisation" else "<H≈1.5>"
         short_input = " ".join(str(row.get("input", "")).split()[:5]) + "..."
-        trace = f"{row['forme']} → {row['ton']} ※ {short_input} ∴ {row['type']}"
+        trace = f"{row.get('structure', '')} → {row['ton']} ※ {short_input} ∴ {row['type']}"
         if include_stylometry:
             stylo = _stylometry_summary(row)
             if stylo:

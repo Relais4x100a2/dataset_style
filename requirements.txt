@@ -1,10 +1,12 @@
-# NumPy 2 requis pour thinc/spaCy (compatibilité binaire sur Streamlit Cloud)
+# NumPy 2 requis pour thinc/spaCy (compatibilité binaire)
 numpy>=2.0.0,<2.1
 pandas>=2.2.2
 requests
 streamlit
-st-gsheets-connection
+sqlalchemy>=2.0.0,<3
+psycopg[binary]>=3.1.0,<4
 # spaCy 3.8 + modèle 3.8 = stack compatible NumPy 2 (évite "dtype size changed")
 plotly
 spacy>=3.8.0,<3.9.0
 https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.8.0/fr_core_news_sm-3.8.0-py3-none-any.whl
+pytest>=8.0.0,<9

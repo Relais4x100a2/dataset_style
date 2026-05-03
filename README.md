@@ -1,256 +1,177 @@
-# ✒️ Dataset Style Studio
+# Dataset Style Studio (Multi-tenant)
 
-Interface de curation de données pour le **fine-tuning** stylistique (brouillon → prose). Catégorisation forme / ton / support, indicateurs stylométriques et exports multi-modèles (LFM2-24B-A2B, PleIAs/Baguettotron, Mistral Small Creative).
+Application Streamlit de curation de datasets littéraires, en mode multi-utilisateur et multi-projet.
 
----
+## Ce qui est implémenté
 
-## Sommaire
+- Authentification via SuperTokens (`src/auth.py`) en mode invitation-only.
+- Modèle `1 projet = 1 dataset`.
+- Modèle d'accès simplifié:
+  - `1 projet = 1 utilisateur propriétaire`
+  - `1 utilisateur = N projets`
+- Dimensions textuelles pilotées par presets:
+  - `types` (Type de transformation)
+  - `structures` (Structure textuelle)
+  - `tons` (Tonalité textuelle)
+  - `formats` (Format de sortie)
+  - `publics` (Public cible)
+  - `statuts`
+- Paramétrage LLM + LanguageTool par projet (`project_settings`).
+- Persistance PostgreSQL multi-tenant (`src/database.py`).
 
-- [Architecture et stack](#-architecture-et-stack)
-- [Structure du projet](#-structure-du-projet)
-- [Installation et lancement](#-installation-et-lancement)
-- [Configuration Google Sheets](#-configuration-google-sheets)
-- [Secrets (local et Cloud)](#-gestion-des-secrets)
-- [Structure du dataset](#-structure-du-dataset)
-- [Fonctionnalités](#-fonctionnalités)
-- [Export (CSV et JSONL)](#-export-csv-et-jsonl)
-- [Contrôle d'accès](#-contrôle-daccès)
-- [Dépannage](#-dépannage)
-- [Architecture interne](#-architecture-interne)
+## Schéma PostgreSQL
 
----
+Tables principales:
 
-## 🏗️ Architecture et stack
+- `users`
+- `projects`
+- `project_settings`
+- `entries` (avec `project_id`)
 
-| Composant        | Technologie |
-|------------------|------------|
-| Interface        | [Streamlit](https://streamlit.io/), déploiement possible sur Streamlit Community Cloud |
-| Données          | [Google Sheets](https://www.google.com/sheets/about/) (API Sheets + Drive) |
-| Connexion        | `st-gsheets-connection` (authentification par compte de service) |
-| NLP / analyse    | [spaCy](https://spacy.io/) `fr_core_news_sm` (métriques, cohérence, cache) |
-| Correction FR    | [LanguageTool](https://languagetool.org/) (API publique HTTP, pas de Java) |
-| Dictionnaire     | [Wiktionnaire](https://fr.wiktionary.org/) via [API Wikimedia](https://www.mediawiki.org/wiki/API:Main_page) (définitions, synonymes, antonymes, vocabulaire apparenté, anagrammes) |
-| Génération LLM   | [OpenRouter](https://openrouter.ai/) (modèle `liquid/lfm-2-24b-a2b`) pour brouillon ↔ prose selon type, forme, ton, support |
-| Visualisation    | [Plotly](https://plotly.com/python/) (radar, histogrammes, tendances) |
+Les presets par défaut et la logique de sérialisation sont dans `src/presets.py`.
 
-Les appels à l'API Google Sheets sont retentés en cas d'erreur temporaire (503, 429, etc.) avec backoff exponentiel.
+Le schéma est créé automatiquement au démarrage via `ensure_schema()`.
 
----
+## Variables d'environnement
 
-## 📁 Structure du projet
+### Source unique
 
-```
-dataset_style/
-├── main.py              # Point d'entrée Streamlit, chargement des données, 3 onglets
-├── requirements.txt     # Dépendances Python (Streamlit, spaCy, requests, etc.)
-├── runtime.txt          # Version Python pour le déploiement Cloud
-├── README.md
-└── src/
-    ├── __init__.py
-    ├── database.py      # Connexion Sheets, load_data (retry), update_data, helpers cache
-    ├── export_utils.py  # Export JSONL multi-modèles (LFM2, Baguettotron, Mistral) + option stylométrie
-    ├── nlp_engine.py    # Insights linguistiques, stylométrie, cohérence, LanguageTool — sans Streamlit
-    ├── wiktionary.py    # Wiktionnaire (API Wikimedia) : définitions, synonymes, antonymes, vocabulaire apparenté, anagrammes
-    ├── llm_generate.py  # Génération brouillon ↔ prose par LLM (OpenRouter, liquid/lfm-2-24b-a2b)
-    └── ui_components.py # Sidebar, onglets Nouvelle Entrée / Gestion & Édition / Tableau de bord
-```
+Le projet centralise la configuration runtime:
 
----
+- en **dev**: fichier `.env`
+- en **prod CapRover**: variable unique `APP_CONFIG_JSON`
 
-## 🚀 Installation et lancement
+Le chargeur (`src/config.py`) applique cet ordre:
+1. variables déjà présentes dans l'environnement
+2. `APP_CONFIG_JSON` (JSON)
+3. `.env`
+4. dérivation automatique de `DATABASE_URL` et `SUPERTOKENS_CONNECTION_URI`
 
-**Prérequis :** Python 3.12 recommandé (compatibilité Streamlit Cloud et blis/spaCy).
+### Variables auth/comptes
+
+- `SUPER_ADMIN_EMAILS`: liste d'emails (séparés par virgules) promus au premier login si email vérifié provider.
+- `AUTH_ENFORCE_INVITATION_ONLY`: si `true`, l'app vérifie contractuellement que `signup` provider est bloqué.
+- `SUPERTOKENS_SIGNUP_DISABLED`: source de vérité non-destructive attendue quand `AUTH_ENFORCE_INVITATION_ONLY=true`.
+- `SUPERTOKENS_CORE_API_KEY`: clé API côté SuperTokens Core (à aligner avec `SUPERTOKENS_API_KEY` côté app).
+- `APP_PUBLIC_BASE_URL`: URL publique servant à construire les liens invitation/reset.
+- `ACCOUNT_SAGA_MAX_RETRIES`: nombre maximum de retries pour les opérations de révocation/suppression compte.
+- `ACCOUNT_RETRY_BATCH_SIZE`: taille de lot du worker de reprise des opérations en échec.
+
+### Variables email
+
+- `MAIL_MODE`: `dev` (affiche un lien masqué en UI) ou `smtp`.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`: configuration SMTP en mode `smtp`.
+
+## Dev local (une commande)
 
 ```bash
-git clone <url-du-depot>
-cd dataset_style
-pip install -r requirements.txt
-streamlit run main.py
+cp .env.example .env
+make dev
 ```
 
-L'app s'ouvre dans le navigateur. Une configuration Google Sheets (projet Cloud, compte de service, secrets) est nécessaire pour charger et enregistrer les données.
+`make dev` lance le stack complet via `compose.yaml`:
+- `postgres`
+- `supertokens`
+- `app` (Streamlit)
 
----
+Commandes utiles:
 
-## 🔑 Configuration Google Sheets
-
-1. **Créer un projet** dans la [Google Cloud Console](https://console.cloud.google.com/).
-2. **Activer les API** : **Google Sheets** et **Google Drive**.
-3. **Compte de service** : *Identifiants* → *Créer des identifiants* → *Compte de service*. Dans l'onglet *Clés* du compte, *Ajouter une clé* → *Créer une nouvelle clé* → **JSON**.
-4. **Télécharger** le fichier JSON (clés secrètes).
-5. **Partager le Google Sheet** avec l'adresse e‑mail du compte de service (ex. `xxx@project-id.iam.gserviceaccount.com`) en **Éditeur**.
-
----
-
-## 🔒 Gestion des secrets
-
-### En local
-
-Créer `.streamlit/secrets.toml` à la racine du projet :
-
-```toml
-[connections.gsheets]
-type = "service_account"
-project_id = "votre-project-id"
-private_key_id = "votre-key-id"
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-client_email = "votre-email@project-id.iam.gserviceaccount.com"
-client_id = "..."
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "..."
-spreadsheet = "URL_COMPLETE_DE_VOTRE_GOOGLE_SHEET"
+```bash
+make dev-build
+make rebuild
+make logs
+make down
 ```
 
-Pour activer la **génération par LLM** (brouillon ↔ prose via OpenRouter), ajouter dans le même fichier (ou dans les Secrets du Cloud) :
+- `make dev`: démarrage rapide (sans rebuild forcé)
+- `make dev-build`: rebuild + démarrage
+- `make rebuild`: rebuild image app seul
+- `postgres` et `supertokens` n'exposent plus de ports hôte par défaut (évite les conflits avec services locaux)
+- En cas de conflit de ports hôtes, adapter `APP_PORT` dans `.env`
+- Par défaut, `SUPERTOKENS_DB=dataset_style` (base partagée) pour éviter un bootstrap SQL supplémentaire
 
-```toml
-[connections.openrouter]
-api_key = "votre-cle-openrouter"
+### Tests
+
+```bash
+pytest -q
 ```
 
-Le modèle utilisé est `liquid/lfm-2-24b-a2b`. Sans clé, les boutons de génération restent désactivés et un message indique comment configurer.
+Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine.
 
-### Sur Streamlit Community Cloud
+## Déploiement CapRover (une commande)
 
-*App Settings* → *Secrets* : coller le contenu du `secrets.toml` ci‑dessus.
+1. Définir une seule variable `APP_CONFIG_JSON` dans CapRover (voir `docs/caprover_env_example.md`).
+2. Déployer:
 
----
+```bash
+make prod
+```
 
-## 📊 Structure du dataset
+Cette commande exécute `caprover deploy`.
 
-Chaque ligne du Sheet correspond à une fiche de curation :
+- Les URL internes entre apps doivent utiliser `srv-captain--<app-name>`.
+- Le workflow CI est défini dans `.github/workflows/ci.yml` (ruff).
 
-| Champ     | Rôle |
-|-----------|------|
-| `id`      | Identifiant unique |
-| `type`    | **Normalisation** ou **Expansion** |
-| `forme`   | Narration, Description, Portrait, Dialogue, Monologue intérieur, Réflexion, Scène |
-| `ton`     | Neutre, Lyrique, Mélancolique, Tendu, Sardonique, Chaleureux, Clinique |
-| `support` | Narratif, Épistolaire, Instantané, Formel, Journal intime |
-| `input`   | Brouillon / note brute |
-| `output`  | Prose finale stylisée |
-| `statut`  | A faire, En cours, A relire, **Fait et validé** |
-| `notes`   | Notes libres |
+## Règles de permissions
 
-Colonnes de **cache** (calculées automatiquement à la sauvegarde, utilisables comme **insights pour le fine-tuning**) :
+- Le propriétaire du projet a tous les droits sur son projet.
+- Aucun partage multi-membres n'est actif.
+- Le super admin global peut inviter/supprimer des comptes depuis l'onglet dédié.
+- Les actions super admin sont validées côté backend (pas uniquement via visibilité UI).
 
-| Colonne             | Contenu |
-|---------------------|---------|
-| `_ratio`            | Ratio d'amplification (nb mots output / input) |
-| `_ttr`              | Type-Token Ratio (diversité du vocabulaire) |
-| `_long_phrases`     | Longueur moyenne des phrases (mots) |
-| `_signature_json`   | Signature stylométrique (7 axes) en JSON |
-| `_coherence_score`  | Score de cohérence avec la moyenne du dataset (0–100) |
-| `_trigrams_json`    | Distribution des trigrammes POS en JSON |
-| `_lexical_density`  | Densité lexicale (N+V+Adj+Adv) / tokens |
-| `_weak_verb_ratio`  | Proportion de verbes faibles (être, avoir, faire, aller, dire) |
-| `_syntax_contrast`  | Contraste stylistique input ↔ output (0–1) |
-| `_nb_sentences`     | Nombre de phrases (output) |
-| `_punct_exp`        | Ponctuation expressive : "n,m,p" (tirets —, ..., :) |
-| `_stop_ratio_out`   | Proportion de mots-outils dans l'output |
+Les garde-fous sont appliqués dans `src/database.py` (`require_role`, `require_admin`), pas uniquement dans l'UI.
 
-Voir [docs/stylometrie_finetuning.md](docs/stylometrie_finetuning.md) pour le rôle de chaque indicateur lors du fine-tuning.
+## Organisation UI
 
----
+- Sidebar minimale:
+  - compte
+  - projet courant
+  - rôle
+  - déconnexion
+- Onglets centraux:
+  - `Nouvelle entrée`
+  - `Gestion & édition`
+  - `Tableau de bord`
+  - `Projets`
+  - `Réglages & Export`
 
-## ✨ Fonctionnalités
+Dans `Réglages & Export`, section **Dimensions du texte**:
+- choix de preset (`roman`, `pro`, `contenu`)
+- bouton explicite `Charger le preset` pour appliquer le preset sélectionné au projet
+- édition des listes par dimension (ajout/retrait)
+- enregistrement comme preset personnalisé
+- réinitialisation depuis le preset sélectionné
+- message de portée: ces dimensions s'appliquent au projet courant uniquement
+- en édition, une valeur hors preset est conservée via l'option `[obsolète] <valeur>` (jamais écrasée silencieusement)
 
-### Onglet « Nouvelle Entrée »
+Dans les formulaires:
+- `Input` est renommé `Brouillon`
+- `Output` est renommé `Texte généré`
+- les actions de génération affichent un spinner `Génération en cours...`
 
-Formulaire de saisie (type, forme, ton, support, brouillon, prose, statut). Identique à Gestion & Édition pour l'analyse :
+Toutes les actions sensibles (suppression projet, réglages) sont validées côté backend via les fonctions `*_as_admin`, même si l'UI est contournée.
 
-- **Corriger l'orthographe** : appel à l'API LanguageTool avant enregistrement.
-- **Génération par LLM** : deux boutons — « Générer le brouillon depuis la prose » et « Générer la prose depuis le brouillon » (OpenRouter, type / forme / ton / support pris en compte).
-- **Vérifier ma prose** : analyse linguistique (spaCy) avec métriques, radar, conseils.
-- **Wiktionnaire** : champ « Mot à vérifier » + recherche (API Wikimedia) pour afficher définitions, synonymes, antonymes, vocabulaire apparenté et anagrammes.
-- **Enregistrer l'entrée** : crée une nouvelle ligne dans le Sheet avec calcul du cache.
+## Parcours comptes
 
-### Onglet « Gestion & Édition »
+- Connexion: email + mot de passe (pas de signup public UI).
+- Mot de passe oublié: génération d'un lien de reset depuis l'écran de connexion.
+- Invitation: un super admin crée un compte via email; l'utilisateur définit ensuite son mot de passe.
+- Suppression de compte:
+  - utilisateur: refusée si projets owner ou memberships actives
+  - super admin: procédure de detach memberships puis suppression via saga idempotente.
 
-Navigation fiche par fiche avec filtrage par statut.
+## Résilience saga comptes
 
-- **Corriger l'orthographe** : bouton sous le champ *Prose (Output)*. Uniquement corrections orthographe/grammaire (LanguageTool, pas de réécriture). Gestion du timeout et des erreurs réseau.
-- **Génération par LLM** : mêmes boutons qu’en Nouvelle Entrée pour générer le brouillon à partir de la prose ou l’inverse (paramètres de la fiche utilisés).
-- **Vérifier ma prose** : calcul des indicateurs linguistiques (amplification, TTR, longueur phrases, répétitions, Baguette-Touch, radar stylistique, conseils).
-- **Wiktionnaire** : même outil que dans Nouvelle Entrée pour consulter définitions, synonymes, antonymes, vocabulaire apparenté et anagrammes pendant l’édition.
-- **Enregistrer les modifications** : écriture dans le Sheet + mise à jour du cache si une vérification a été faite.
+- Les opérations de suppression/révocation peuvent passer en quarantaine (DLQ) après `ACCOUNT_SAGA_MAX_RETRIES`.
+- Replay admin disponible dans l'onglet **Super Admin**.
+- Worker planifié disponible: `python scripts/retry_deprovision_ops.py`.
 
-### Onglet « Tableau de bord »
+## Documentation architecture
 
-Vue d'ensemble du dataset, entièrement basée sur le **cache** (sauf pour la gestion du cache).
+Voir `docs/multi_tenant_architecture.md`.
 
-**Cache stylométrique (générer / écraser / enregistrer)**
-- **Générer le cache (fiches sans cache)** : remplit le cache uniquement pour les fiches « Fait et validé » qui n'en ont pas encore (sans toucher aux autres).
-- **Écraser tout le cache et enregistrer** : recalcule tout le cache des fiches validées et met à jour le Google Sheet (avec case à cocher de confirmation).
+## Merge-ready & incidents
 
-**Section 1 — Composition**
-- Métriques rapides (total / validées / en cours / à faire), barre de progression.
-- Distribution des statuts et types (bar charts).
-- Expander détaillant formes, tons et supports.
+- Checklist de validation: `docs/merge_ready_checklist.md`
+- Runbook incident comptes: `docs/incident_accounts_runbook.md`
 
-**Section 2 — Qualité stylistique**
-- Score santé global (0–100), cohérence moyenne, TTR moyen, ratio moyen.
-- Histogrammes de distribution : ratio, TTR, longueur des phrases.
-- Histogramme des scores de cohérence avec zones colorées (rouge < 45, orange 45–65, vert > 65).
-
-**Section 3 — Stylométrie globale**
-- Radar de la signature moyenne du dataset avec bandes d'erreur (±σ).
-- Tableau de dispersion par axe stylistique.
-- Top 15 constructions grammaticales (trigrammes POS).
-- Courbe d'évolution de la cohérence dans le temps.
-
-**Section 4 — Alertes qualité**
-- Fiches problématiques identifiées depuis le cache : cohérence critique (< 45), expansion faible (ratio < 1.5), vocabulaire répétitif (TTR < 0.50).
-- Bar chart des alertes par type + tableau détaillé avec ID, type, forme, ton.
-
-### Sidebar
-
-Statistiques par statut. **Export Fine-tuning** : choix du **format d'export JSONL** (LFM2-24B-A2B, PleIAs/Baguettotron, Mistral Small Creative), option **Inclure indicateurs stylométriques**, puis boutons **Télécharger CSV** et **Télécharger JSONL** (même taille, CSS harmonisé).
-
----
-
-## 📤 Export (CSV et JSONL)
-
-Les deux exports ne concernent que les lignes dont le **statut** est **« Fait et validé »**.
-
-- **CSV** : export tabulaire brut (analyse, tableaux, etc.).
-- **JSONL** : format dépend du **modèle cible** choisi dans la sidebar :
-  - **LFM2-24B-A2B** : structure `messages` (system optionnel, user, assistant), une ligne JSON par fiche. Option stylométrie → message system.
-  - **PleIAs/Baguettotron** : ChatML avec balise `<think>` (trace forme/ton) et marqueurs d'entropie `<H≈0.3>` (Normalisation) ou `<H≈1.5>` (Expansion). Option stylométrie → ligne « Stylo » dans la trace.
-  - **Mistral Small Creative** : structure `messages` (user, assistant). Option stylométrie → préfixe dans le message user.
-
-Si **Inclure indicateurs stylométriques** est coché, les colonnes de cache (TTR, longueur de phrase, densité lexicale, etc.) sont injectées dans l'export selon le format (voir [docs/stylometrie_finetuning.md](docs/stylometrie_finetuning.md)).
-
----
-
-## 🛡️ Contrôle d'accès
-
-Pour limiter l'accès à l'app sur Streamlit Cloud : dépôt GitHub en **privé**, puis dans les paramètres de l'app, onglet **Sharing**, désactiver l'accès public et ajouter les adresses e‑mail autorisées (connexion Google requise).
-
----
-
-## 🔧 Dépannage
-
-- **503 / Google Sheets indisponible** : l'app réessaie automatiquement (retry + backoff exponentiel, 4 tentatives). Si l'erreur persiste, réessayer plus tard.
-- **spaCy non disponible après déploiement** : faire **Reboot** ou **Clear cache and redeploy** dans les paramètres de l'app. Utiliser **Python 3.12** (Advanced settings) pour éviter les incompatibilités blis/NumPy sous 3.13.
-- **OOM (mémoire)** : spaCy ne tourne que sur la fiche en cours (Vérifier / Enregistrer) ; le Tableau de bord n'appelle jamais spaCy. Le bloc édition est dans un fragment Streamlit pour limiter les rechargements.
-- **Dashboard vide** : les indicateurs stylistiques nécessitent que le cache soit rempli. Soit utiliser l'onglet Gestion & Édition (« Vérifier ma prose » puis « Enregistrer »), soit dans le Tableau de bord ouvrir « Cache stylométrique » et cliquer sur « Générer le cache (fiches sans cache) » ou « Écraser tout le cache et enregistrer ».
-
----
-
-## 🧱 Architecture interne
-
-Les modules sont conçus pour être orthogonaux :
-
-| Module | Responsabilité | Dépendances |
-|--------|---------------|-------------|
-| `database.py` | Accès données, cache, helpers DataFrame | `pandas`, `json` |
-| `nlp_engine.py` | Calculs analytiques (insights, stylométrie, cohérence, LanguageTool) | `pandas`, `requests` — **sans Streamlit** |
-| `export_utils.py` | Export JSONL multi-modèles (LFM2, Baguettotron, Mistral) | `pandas`, `json`, `database.py` |
-| `ui_components.py` | Rendu Streamlit, état session, graphiques | tous les modules ci-dessus, `streamlit`, `plotly` |
-
-`nlp_engine.py` ne contient aucun import Streamlit — il est testable indépendamment de l'app.
-
-Les seuils des paliers d'interprétation sont centralisés dans `_PALIERS` (table de données) pour éviter toute duplication. La constante `STATUT_VALIDE` est déclarée une seule fois dans `database.py` et importée partout.
