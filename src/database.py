@@ -193,8 +193,6 @@ def ensure_schema(engine: Engine) -> None:
         _stop_ratio_out TEXT NOT NULL DEFAULT ''
     );
 
-    CREATE INDEX IF NOT EXISTS idx_entries_project_statut ON entries(project_id, statut);
-    CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id, id);
     CREATE INDEX IF NOT EXISTS idx_memberships_user_project ON project_memberships(user_id, project_id);
     CREATE INDEX IF NOT EXISTS idx_projects_created_by ON projects(created_by);
     CREATE INDEX IF NOT EXISTS idx_users_last_login_at ON users(last_login_at);
@@ -234,6 +232,7 @@ def ensure_schema(engine: Engine) -> None:
                 "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS dimensions_override_json TEXT NOT NULL DEFAULT '';"
             )
         )
+        conn.execute(text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS project_id TEXT;"))
         conn.execute(
             text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT '';")
         )
@@ -242,6 +241,14 @@ def ensure_schema(engine: Engine) -> None:
         )
         conn.execute(
             text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS public TEXT NOT NULL DEFAULT '';")
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_entries_project_statut ON entries(project_id, statut);"
+            )
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id, id);")
         )
         conn.execute(
             text("UPDATE entries SET structure = forme WHERE structure = '' AND forme <> '';")
