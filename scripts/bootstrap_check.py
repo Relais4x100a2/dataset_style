@@ -132,7 +132,9 @@ def check_super_admin_exists() -> CheckResult:
         engine = create_db_engine(url)
         with engine.connect() as conn:
             count = conn.execute(
-                text("SELECT COUNT(*) FROM users WHERE is_super_admin = TRUE AND disabled_at IS NULL")
+                text(
+                    "SELECT COUNT(*) FROM users WHERE is_super_admin = TRUE AND disabled_at IS NULL"
+                )
             ).scalar()
         n = int(count or 0)
         if n > 0:
@@ -150,7 +152,9 @@ def check_supertokens_connection() -> CheckResult:
     """Vérifie que SuperTokens répond sur /hello."""
     uri = os.environ.get("SUPERTOKENS_CONNECTION_URI", "").strip().rstrip("/")
     if not uri:
-        return CheckResult("supertokens:connection", False, "SUPERTOKENS_CONNECTION_URI non définie")
+        return CheckResult(
+            "supertokens:connection", False, "SUPERTOKENS_CONNECTION_URI non définie"
+        )
     try:
         api_key = os.environ.get("SUPERTOKENS_API_KEY", "").strip()
         headers: dict[str, str] = {}
@@ -158,7 +162,9 @@ def check_supertokens_connection() -> CheckResult:
             headers["api-key"] = api_key
         resp = requests.get(f"{uri}/hello", headers=headers, timeout=5)
         if resp.status_code == 200 and "OK" in resp.text:
-            return CheckResult("supertokens:connection", True, f"HTTP {resp.status_code} — {resp.text.strip()}")
+            return CheckResult(
+                "supertokens:connection", True, f"HTTP {resp.status_code} — {resp.text.strip()}"
+            )
         return CheckResult(
             "supertokens:connection",
             False,
@@ -179,7 +185,9 @@ def check_supertokens_api_key() -> CheckResult:
     if not uri:
         return CheckResult("supertokens:api_key", False, "SUPERTOKENS_CONNECTION_URI non définie")
     if not api_key:
-        return CheckResult("supertokens:api_key", False, "SUPERTOKENS_API_KEY vide — auth désactivée ou manquante")
+        return CheckResult(
+            "supertokens:api_key", False, "SUPERTOKENS_API_KEY vide — auth désactivée ou manquante"
+        )
     try:
         resp = requests.get(
             f"{uri}/recipe/dashboard/api/list",
@@ -187,9 +195,15 @@ def check_supertokens_api_key() -> CheckResult:
             timeout=5,
         )
         if resp.status_code in (200, 404):
-            return CheckResult("supertokens:api_key", True, f"Clé acceptée (HTTP {resp.status_code})")
+            return CheckResult(
+                "supertokens:api_key", True, f"Clé acceptée (HTTP {resp.status_code})"
+            )
         if resp.status_code == 401:
-            return CheckResult("supertokens:api_key", False, "Clé API refusée (HTTP 401) — vérifier SUPERTOKENS_API_KEY vs API_KEYS")
+            return CheckResult(
+                "supertokens:api_key",
+                False,
+                "Clé API refusée (HTTP 401) — vérifier SUPERTOKENS_API_KEY vs API_KEYS",
+            )
         return CheckResult("supertokens:api_key", True, f"HTTP {resp.status_code} (présumé OK)")
     except Exception as exc:
         return CheckResult("supertokens:api_key", False, f"{type(exc).__name__}: {exc}")

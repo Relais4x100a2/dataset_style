@@ -245,9 +245,15 @@ def ensure_schema(engine: Engine) -> None:
         conn.execute(text(ddl))
 
         # ── Migrations incrémentales : project_settings ──
-        _add_column_if_missing(conn, "project_settings", "active_preset_key", "TEXT NOT NULL DEFAULT 'roman'")
-        _add_column_if_missing(conn, "project_settings", "custom_presets_json", "TEXT NOT NULL DEFAULT ''")
-        _add_column_if_missing(conn, "project_settings", "dimensions_override_json", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(
+            conn, "project_settings", "active_preset_key", "TEXT NOT NULL DEFAULT 'roman'"
+        )
+        _add_column_if_missing(
+            conn, "project_settings", "custom_presets_json", "TEXT NOT NULL DEFAULT ''"
+        )
+        _add_column_if_missing(
+            conn, "project_settings", "dimensions_override_json", "TEXT NOT NULL DEFAULT ''"
+        )
 
         # ── Migrations incrémentales : entries ──
         _add_column_if_missing(conn, "entries", "project_id", "TEXT")
