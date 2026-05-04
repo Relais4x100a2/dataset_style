@@ -119,8 +119,33 @@ def create_db_engine(database_url: str) -> Engine:
     return create_engine(url, pool_pre_ping=True)
 
 
+def _column_exists(conn: object, table: str, column: str) -> bool:
+    """Retourne True si la colonne existe déjà dans la table."""
+    row = conn.execute(  # type: ignore[union-attr]
+        text(
+            "SELECT 1 FROM information_schema.columns"
+            " WHERE table_schema = 'public' AND table_name = :tbl AND column_name = :col"
+        ),
+        {"tbl": table, "col": column},
+    ).first()
+    return row is not None
+
+
+def _add_column_if_missing(conn: object, table: str, column: str, definition: str) -> None:
+    """Ajoute une colonne si elle est absente et logue l'opération."""
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition};"))  # type: ignore[union-attr]
+        logger.info("ensure_schema: colonne ajoutée → %s.%s (%s)", table, column, definition)
+    else:
+        logger.debug("ensure_schema: colonne existante — %s.%s", table, column)
+
+
 def ensure_schema(engine: Engine) -> None:
-    """Crée le schéma multi-tenant s'il n'existe pas."""
+    """Crée le schéma multi-tenant s'il n'existe pas et applique les migrations incrementales.
+
+    Chaque colonne ajoutée dynamiquement est loguée au niveau INFO pour faciliter
+    le diagnostic lors des déploiements.
+    """
     ddl = """
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -215,36 +240,22 @@ def ensure_schema(engine: Engine) -> None:
     CREATE INDEX IF NOT EXISTS idx_deprovision_state_updated ON user_deprovision_ops(state, updated_at);
     CREATE INDEX IF NOT EXISTS idx_deprovision_next_retry ON user_deprovision_ops(next_retry_at);
     """
+    logger.debug("ensure_schema: début de l'initialisation du schéma")
     with engine.begin() as conn:
         conn.execute(text(ddl))
-        conn.execute(
-            text(
-                "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS active_preset_key TEXT NOT NULL DEFAULT 'roman';"
-            )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS custom_presets_json TEXT NOT NULL DEFAULT '';"
-            )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS dimensions_override_json TEXT NOT NULL DEFAULT '';"
-            )
-        )
-        conn.execute(text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS project_id TEXT;"))
-        conn.execute(
-            text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS date TEXT NOT NULL DEFAULT '';")
-        )
-        conn.execute(
-            text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS structure TEXT NOT NULL DEFAULT '';")
-        )
-        conn.execute(
-            text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS format TEXT NOT NULL DEFAULT '';")
-        )
-        conn.execute(
-            text("ALTER TABLE entries ADD COLUMN IF NOT EXISTS public TEXT NOT NULL DEFAULT '';")
-        )
+
+        # ── Migrations incrémentales : project_settings ──
+        _add_column_if_missing(conn, "project_settings", "active_preset_key", "TEXT NOT NULL DEFAULT 'roman'")
+        _add_column_if_missing(conn, "project_settings", "custom_presets_json", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "project_settings", "dimensions_override_json", "TEXT NOT NULL DEFAULT ''")
+
+        # ── Migrations incrémentales : entries ──
+        _add_column_if_missing(conn, "entries", "project_id", "TEXT")
+        _add_column_if_missing(conn, "entries", "date", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "entries", "structure", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "entries", "format", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "entries", "public", "TEXT NOT NULL DEFAULT ''")
+
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_entries_project_statut ON entries(project_id, statut);"
@@ -253,33 +264,25 @@ def ensure_schema(engine: Engine) -> None:
         conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id, id);")
         )
+
+        # Backfill : propager les anciennes colonnes renommées
         conn.execute(
             text("UPDATE entries SET structure = forme WHERE structure = '' AND forme <> '';")
         )
         conn.execute(
             text("UPDATE entries SET format = support WHERE format = '' AND support <> '';")
         )
-        conn.execute(
-            text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT FALSE;"
-            )
-        )
-        conn.execute(
-            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ NULL;")
-        )
-        conn.execute(
-            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL;")
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE user_deprovision_ops ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL;"
-            )
-        )
-        conn.execute(
-            text(
-                "ALTER TABLE user_deprovision_ops ADD COLUMN IF NOT EXISTS quarantined_at TIMESTAMPTZ NULL;"
-            )
-        )
+
+        # ── Migrations incrémentales : users ──
+        _add_column_if_missing(conn, "users", "is_super_admin", "BOOLEAN NOT NULL DEFAULT FALSE")
+        _add_column_if_missing(conn, "users", "disabled_at", "TIMESTAMPTZ NULL")
+        _add_column_if_missing(conn, "users", "last_login_at", "TIMESTAMPTZ NULL")
+
+        # ── Migrations incrémentales : user_deprovision_ops ──
+        _add_column_if_missing(conn, "user_deprovision_ops", "next_retry_at", "TIMESTAMPTZ NULL")
+        _add_column_if_missing(conn, "user_deprovision_ops", "quarantined_at", "TIMESTAMPTZ NULL")
+
+        # Contrainte CHECK sur les états de saga (idempotente : drop + recreate)
         conn.execute(
             text(
                 "ALTER TABLE user_deprovision_ops DROP CONSTRAINT IF EXISTS chk_deprovision_state;"
@@ -299,6 +302,7 @@ def ensure_schema(engine: Engine) -> None:
                 "UPDATE user_deprovision_ops SET next_retry_at = NOW() WHERE next_retry_at IS NULL;"
             )
         )
+    logger.debug("ensure_schema: schéma initialisé avec succès")
 
 
 def upsert_user_from_su(

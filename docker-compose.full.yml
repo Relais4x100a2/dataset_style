@@ -1,0 +1,89 @@
+# Stack complète pour tests locaux : App + SuperTokens + PostgreSQL
+#
+# Usage :
+#   cp .env.example .env        # puis adapter les valeurs
+#   docker compose -f docker-compose.full.yml up --build
+#
+# L'application est accessible sur http://localhost:8501
+# SuperTokens dashboard : http://localhost:3567
+#
+# Variables d'environnement personnalisables via .env (voir .env.example)
+
+services:
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dataset_style}
+      POSTGRES_USER: ${POSTGRES_USER:-dataset_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT_EXPOSED:-5433}:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-dataset_user} -d ${POSTGRES_DB:-dataset_style}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  supertokens:
+    image: registry.supertokens.io/supertokens/supertokens-postgresql
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # SuperTokens requiert postgresql:// (driver JDBC natif, pas SQLAlchemy)
+      POSTGRESQL_CONNECTION_URI: "postgresql://${POSTGRES_USER:-dataset_user}:${POSTGRES_PASSWORD:-change_me_local_2026}@postgres:5432/${SUPERTOKENS_DB:-dataset_style}"
+      API_KEYS: ${SUPERTOKENS_CORE_API_KEY:-change_me_core_key_2026_local_dev}
+    ports:
+      - "${SUPERTOKENS_PORT_EXPOSED:-3567}:3567"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3567/hello | grep -q OK"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      supertokens:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Préfixe postgresql+psycopg:// requis par SQLAlchemy + psycopg v3
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-dataset_user}:${POSTGRES_PASSWORD:-change_me_local_2026}@postgres:5432/${POSTGRES_DB:-dataset_style}"
+      SUPERTOKENS_CONNECTION_URI: "http://supertokens:3567"
+      SUPERTOKENS_API_KEY: "${SUPERTOKENS_CORE_API_KEY:-change_me_core_key_2026_local_dev}"
+      AUTH_ENFORCE_INVITATION_ONLY: "${AUTH_ENFORCE_INVITATION_ONLY:-false}"
+      SUPERTOKENS_SIGNUP_DISABLED: "${SUPERTOKENS_SIGNUP_DISABLED:-false}"
+      # Hosts résolus par Docker Compose (noms de service)
+      POSTGRES_HOST: postgres
+      SUPERTOKENS_HOST: supertokens
+      SUPERTOKENS_PORT: "3567"
+    ports:
+      - "${APP_PORT:-8501}:8501"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8501/_stcore/health | grep -q ok || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+    driver: local
