@@ -22,7 +22,7 @@ src = ["src", "main.py", "scripts", "tests"]
 select = ["E", "F", "I", "UP", "W"]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/*" = ["E402"]
+"scripts/*" = ["E402", "E501"]
 # Chaînes françaises longues et blocs Streamlit
 "src/ui_components.py" = ["E501"]
 "src/database.py" = ["E501"]
