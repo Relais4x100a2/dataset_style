@@ -100,6 +100,8 @@ Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémo
 
 ## Déploiement CapRover (une commande)
 
+Guide pas à pas (variables, ordre des apps, health checks, rollback) : **`docs/caprover_deployment.md`**.
+
 1. Définir une seule variable `APP_CONFIG_JSON` dans CapRover (voir `docs/caprover_env_example.md`).
 2. Déployer:
 
@@ -111,6 +113,22 @@ Cette commande exécute `caprover deploy`.
 
 - Les URL internes entre apps doivent utiliser `srv-captain--<app-name>`.
 - Le workflow CI est défini dans `.github/workflows/ci.yml` (ruff).
+
+### Vérification pré-déploiement
+
+```bash
+uv run python scripts/bootstrap_check.py
+```
+
+Option `--apply-schema` pour exécuter `ensure_schema()` après un ping DB (voir le script).
+
+### Stack complet local (alternative à `compose.yaml`)
+
+```bash
+docker compose -f docker-compose.full.yml --env-file .env up --build
+```
+
+Ce fichier ajoute un healthcheck HTTP sur SuperTokens et attend que Postgres **et** SuperTokens soient sains avant de démarrer l’app.
 
 ## Règles de permissions
 
