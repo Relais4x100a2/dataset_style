@@ -1,9 +1,17 @@
+import logging
 import os
 
 import streamlit as st
 from src.auth import bootstrap_first_admin, render_auth_gate
 from src.config import initialize_runtime_config
 from src.database import create_db_engine, ensure_schema, get_project_settings, load_project_entries
+from src.db_startup import (
+    DbFailureCategory,
+    classify_database_startup_error,
+    is_development_ui,
+    technical_hint_for_dev,
+    user_facing_summary,
+)
 from src.presets import load_active_dimensions
 from src.ui_components import (
     render_sidebar,
@@ -15,6 +23,8 @@ from src.ui_components import (
     render_tab_settings_export,
     render_tab_super_admin,
 )
+
+logger = logging.getLogger(__name__)
 
 initialize_runtime_config()
 
@@ -32,15 +42,40 @@ def _database_url() -> str:
     return ""
 
 
+def _render_database_unavailable(
+    category: DbFailureCategory,
+    *,
+    exc: BaseException | None = None,
+) -> None:
+    """Affiche un message utilisateur compréhensible ; journalise le détail côté serveur."""
+    summary = user_facing_summary(category)
+    st.error(summary)
+    if is_development_ui():
+        hint = technical_hint_for_dev(exc, category=category)
+        with st.expander("Détails techniques (mode développement)"):
+            st.code(hint)
+
+
 st.set_page_config(page_title="Dataset Style Studio", layout="wide")
 
 db_url = _database_url()
 if not db_url:
-    st.error("Variable DATABASE_URL requise.")
+    logger.error(
+        "Database URL missing after runtime config "
+        "(set DATABASE_URL, APP_CONFIG_JSON, POSTGRES_*-derived URL, or Streamlit secrets)."
+    )
+    _render_database_unavailable("missing_url", exc=None)
     st.stop()
 
-engine = create_db_engine(db_url)
-ensure_schema(engine)
+try:
+    engine = create_db_engine(db_url)
+    ensure_schema(engine)
+except Exception as exc:
+    logger.exception("Database engine creation or schema initialization failed")
+    category = classify_database_startup_error(exc)
+    _render_database_unavailable(category, exc=exc)
+    st.stop()
+
 bootstrap_first_admin(engine)
 
 user = render_auth_gate(engine)
