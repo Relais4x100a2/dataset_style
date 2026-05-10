@@ -40,7 +40,7 @@ from src.database import (
     update_project_entries,
     update_project_settings_as_admin,
 )
-from src.export_utils import convert_to_jsonl
+from src.export_utils import ExportScope, convert_to_jsonl, dataframe_for_export
 from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.mailer import send_account_link_email
 from src.nlp_engine import corriger_texte_fr
@@ -792,13 +792,39 @@ def render_tab_settings_export(
     if df.empty:
         st.info("Aucune donnée à exporter.")
         return
-    csv = df[df["statut"] == STATUT_VALIDE].to_csv(index=False).encode("utf-8")
+
+    _scope_labels: dict[ExportScope, str] = {
+        "validated_only": "Validées seulement",
+        "full_dataset": "Tout le dataset",
+    }
+    export_scope: ExportScope = st.radio(
+        "Périmètre d'export",
+        ("validated_only", "full_dataset"),
+        format_func=lambda k: _scope_labels[k],
+        key="export_scope_radio",
+        help=(
+            "Choisissez si les téléchargements incluent uniquement les fiches "
+            "« Fait et validé » ou l'ensemble des lignes du projet."
+        ),
+    )
+    st.caption(
+        "« Tout le dataset » inclut les brouillons et les fiches dont le statut "
+        "n'est pas « Fait et validé » (par ex. « À faire »), pas seulement les entrées finalisées."
+    )
+
+    df_export = dataframe_for_export(df, export_scope)
+    csv = df_export.to_csv(index=False).encode("utf-8")
     export_format = st.selectbox(
         "Format JSONL",
         ["lfm2", "baguettotron", "mistral"],
         key="export_format_select",
     )
-    jsonl_data = convert_to_jsonl(df, export_format, include_stylometry=True)
+    jsonl_data = convert_to_jsonl(
+        df,
+        export_format,
+        include_stylometry=True,
+        scope=export_scope,
+    )
     st.download_button(
         "Télécharger CSV",
         csv,
