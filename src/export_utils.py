@@ -11,6 +11,24 @@ import pandas as pd
 from src.database import STATUT_VALIDE
 
 ExportFormat = Literal["lfm2", "baguettotron", "mistral"]
+ExportScope = Literal["validated_only", "full_dataset"]
+
+
+def dataframe_for_export(df: pd.DataFrame, scope: ExportScope) -> pd.DataFrame:
+    """
+    Rows included in CSV and JSONL for a given export perimeter.
+
+    Args:
+        df: Full project dataset.
+        scope: ``validated_only`` keeps rows whose ``statut`` is ``STATUT_VALIDE``;
+            ``full_dataset`` keeps every row regardless of status.
+
+    Returns:
+        Filtered dataframe ready for serialisation.
+    """
+    if scope == "validated_only":
+        return df[df["statut"] == STATUT_VALIDE]
+    return df
 
 
 def _stylometry_summary(row: pd.Series) -> str:
@@ -150,16 +168,20 @@ def convert_to_jsonl(
     df: pd.DataFrame,
     format: ExportFormat,
     include_stylometry: bool = False,
+    scope: ExportScope = "validated_only",
 ) -> str:
     """
-    Point d'entrée unique : exporte le dataset (fiches « Fait et validé ») en JSONL
-    selon le format cible (LFM2, Baguettotron, Mistral).
+    Point d'entrée unique : exporte le dataset en JSONL selon le format cible
+    (LFM2, Baguettotron, Mistral).
+
+    Par défaut, seules les fiches « Fait et validé » sont incluses ; avec
+    ``scope='full_dataset'``, toutes les lignes sont exportées (y compris brouillons).
     """
-    df_valid = df[df["statut"] == STATUT_VALIDE]
+    df_export = dataframe_for_export(df, scope)
     if format == "lfm2":
-        return _convert_to_lfm2_jsonl(df_valid, include_stylometry)
+        return _convert_to_lfm2_jsonl(df_export, include_stylometry)
     if format == "baguettotron":
-        return _convert_to_baguettotron_jsonl(df_valid, include_stylometry)
+        return _convert_to_baguettotron_jsonl(df_export, include_stylometry)
     if format == "mistral":
-        return _convert_to_mistral_jsonl(df_valid, include_stylometry)
+        return _convert_to_mistral_jsonl(df_export, include_stylometry)
     raise ValueError(f"Format inconnu : {format}")

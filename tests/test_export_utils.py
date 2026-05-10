@@ -9,7 +9,7 @@ import json
 import pandas as pd
 import pytest
 from src.database import STATUT_VALIDE
-from src.export_utils import convert_to_jsonl
+from src.export_utils import convert_to_jsonl, dataframe_for_export
 
 
 def _minimal_valid_row() -> dict[str, str]:
@@ -53,8 +53,8 @@ def test_convert_to_jsonl_lfm2_includes_system_when_stylometry() -> None:
     assert "system" in roles
 
 
-def test_convert_to_jsonl_only_validated_rows() -> None:
-    """Seules les fiches STATUT_VALIDE sont exportées."""
+def test_convert_to_jsonl_only_validated_rows_by_default() -> None:
+    """Par défaut, seules les fiches STATUT_VALIDE sont exportées."""
     df = pd.DataFrame(
         [
             {**_minimal_valid_row(), "id": "a", "statut": STATUT_VALIDE},
@@ -64,6 +64,40 @@ def test_convert_to_jsonl_only_validated_rows() -> None:
     raw = convert_to_jsonl(df, "mistral", include_stylometry=False)
     lines = [ln for ln in raw.strip().split("\n") if ln]
     assert len(lines) == 1
+
+
+def test_convert_to_jsonl_full_dataset_includes_all_statuses() -> None:
+    """Avec scope full_dataset, les lignes non validées sont incluses."""
+    df = pd.DataFrame(
+        [
+            {**_minimal_valid_row(), "id": "a", "statut": STATUT_VALIDE},
+            {**_minimal_valid_row(), "id": "b", "statut": "A faire"},
+        ]
+    )
+    raw = convert_to_jsonl(
+        df,
+        "mistral",
+        include_stylometry=False,
+        scope="full_dataset",
+    )
+    lines = [ln for ln in raw.strip().split("\n") if ln]
+    assert len(lines) == 2
+
+
+def test_export_record_count_matches_between_csv_and_jsonl_per_scope() -> None:
+    """Même périmètre : autant d'enregistrements en CSV (lignes de données) qu'en JSONL."""
+    df = pd.DataFrame(
+        [
+            {**_minimal_valid_row(), "id": "a", "statut": STATUT_VALIDE},
+            {**_minimal_valid_row(), "id": "b", "statut": "A faire"},
+        ]
+    )
+    for scope in ("validated_only", "full_dataset"):
+        df_slice = dataframe_for_export(df, scope)
+        jsonl_lines = [
+            ln for ln in convert_to_jsonl(df, "lfm2", scope=scope).split("\n") if ln.strip()
+        ]
+        assert len(jsonl_lines) == len(df_slice)
 
 
 def test_convert_to_jsonl_baguettotron_h_token() -> None:

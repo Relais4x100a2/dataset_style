@@ -153,6 +153,9 @@ Les garde-fous sont appliqués dans `src/database.py` (`require_role`, `require_
   - `Projets`
   - `Réglages & Export`
 
+Dans **Export** (même onglet), un contrôle unique définit le périmètre pour **CSV et JSONL** :
+« Validées seulement » (statut « Fait et validé ») ou « Tout le dataset » (tous les statuts, y compris brouillons).
+
 Dans `Réglages & Export`, section **Dimensions du texte**:
 - choix de preset (`roman`, `pro`, `contenu`)
 - bouton explicite `Charger le preset` pour appliquer le preset sélectionné au projet
