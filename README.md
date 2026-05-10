@@ -165,6 +165,7 @@ Dans `Réglages & Export`, section **Dimensions du texte**:
 Dans les formulaires:
 - `Input` est renommé `Brouillon`
 - `Output` est renommé `Texte généré`
+- `Corriger output` (LanguageTool) met à jour directement le champ « Texte généré » pour permettre sauvegarde ou validation sans copier depuis un encart
 - les actions de génération affichent un spinner `Génération en cours...`
 
 Toutes les actions sensibles (suppression projet, réglages) sont validées côté backend via les fonctions `*_as_admin`, même si l'UI est contournée.
