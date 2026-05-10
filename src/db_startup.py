@@ -20,11 +20,15 @@ _DEV_ENV_VALUES = frozenset({"development", "dev", "local", "debug"})
 def is_development_ui() -> bool:
     """Retourne True si l'UI peut afficher des détails techniques (dev / flag explicite)."""
     raw = (
-        os.environ.get("APP_ENV")
-        or os.environ.get("ENVIRONMENT")
-        or os.environ.get("STREAMLIT_ENV")
-        or ""
-    ).strip().lower()
+        (
+            os.environ.get("APP_ENV")
+            or os.environ.get("ENVIRONMENT")
+            or os.environ.get("STREAMLIT_ENV")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     if raw in _DEV_ENV_VALUES:
         return True
     flag = os.environ.get("SHOW_DB_TECHNICAL_ERRORS", "").strip().lower()

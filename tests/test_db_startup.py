@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy.exc import OperationalError
-
 from src.db_startup import (
     DbFailureCategory,
     classify_database_startup_error,
