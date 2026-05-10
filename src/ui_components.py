@@ -966,12 +966,8 @@ def render_tab_ajout(
 
     keys = ensure_new_entry_widget_keys_initialized(st.session_state, project_id, dimensions)
 
-    type_ = st.selectbox(
-        "Type de transformation", dimensions["types"], key=keys["type"]
-    )
-    structure = st.selectbox(
-        "Structure textuelle", dimensions["structures"], key=keys["structure"]
-    )
+    type_ = st.selectbox("Type de transformation", dimensions["types"], key=keys["type"])
+    structure = st.selectbox("Structure textuelle", dimensions["structures"], key=keys["structure"])
     ton = st.selectbox("Tonalité textuelle", dimensions["tons"], key=keys["ton"])
     format_ = st.selectbox("Format de sortie", dimensions["formats"], key=keys["format"])
     public = st.selectbox("Public cible", dimensions["publics"], key=keys["public"])

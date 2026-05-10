@@ -41,7 +41,14 @@ def test_ensure_new_entry_repairs_stale_select_value() -> None:
     session: dict[str, object] = {}
     keys = new_entry_session_keys("p1")
     session[keys["type"]] = "gone"
-    dims = {"types": ["a", "b"], "structures": ["s"], "tons": ["n"], "formats": ["f"], "publics": ["p"], "statuts": ["x"]}
+    dims = {
+        "types": ["a", "b"],
+        "structures": ["s"],
+        "tons": ["n"],
+        "formats": ["f"],
+        "publics": ["p"],
+        "statuts": ["x"],
+    }
     ensure_new_entry_widget_keys_initialized(session, "p1", dims)
     assert session[keys["type"]] == "a"
 
