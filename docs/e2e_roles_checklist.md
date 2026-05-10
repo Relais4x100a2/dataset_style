@@ -28,8 +28,10 @@
    - `active_preset_key == contenu`,
    - dimensions alignées sur le preset `contenu`.
 
-### C. Feedback génération
-1. Dans `Nouvelle entrée`, cliquer `Générer texte` puis `Générer brouillon`.
-2. Vérifier l'affichage du spinner "Génération en cours...".
-3. Vérifier un retour explicite en succès ou en erreur actionnable.
+### C. Feedback génération (Nouvelle entrée — M1)
+1. Saisir un brouillon non vide, cliquer `Générer texte`.
+2. Vérifier l'affichage du spinner « Génération en cours... » puis un retour succès ou erreur actionnable.
+3. Vérifier que le **Texte généré** se remplit sans copier-coller (valeur visible immédiatement après succès).
+4. Saisir un texte généré non vide, cliquer `Générer brouillon`, vérifier que le **Brouillon** se met à jour de la même façon.
+5. Cliquer `Enregistrer` et confirmer en base que brouillon et texte généré correspondent à ce qui était affiché.
 
