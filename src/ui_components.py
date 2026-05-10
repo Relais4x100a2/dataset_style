@@ -1002,6 +1002,9 @@ def render_tab_ajout(
             if generated:
                 st.session_state[keys["output"]] = generated
                 st.toast("Texte généré.")
+                # Rerun so text widgets render after state update (same-run widget
+                # ordering would otherwise keep stale output on screen).
+                st.rerun()
             else:
                 st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
         except Exception as exc:  # noqa: BLE001
@@ -1023,6 +1026,7 @@ def render_tab_ajout(
             if generated:
                 st.session_state[keys["input"]] = generated
                 st.toast("Brouillon généré.")
+                st.rerun()
             else:
                 st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
         except Exception as exc:  # noqa: BLE001

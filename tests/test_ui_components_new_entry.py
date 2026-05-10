@@ -53,6 +53,29 @@ def test_ensure_new_entry_repairs_stale_select_value() -> None:
     assert session[keys["type"]] == "a"
 
 
+def test_ensure_new_entry_preserves_long_buffers_when_repairing_dimension() -> None:
+    """LLM buffers must survive preset repair (no accidental wipe on init)."""
+    session: dict[str, object] = {}
+    keys = new_entry_session_keys("p1")
+    long_in = "draft " * 200
+    long_out = "output " * 200
+    session[keys["input"]] = long_in
+    session[keys["output"]] = long_out
+    session[keys["type"]] = "gone"
+    dims = {
+        "types": ["a", "b"],
+        "structures": ["s"],
+        "tons": ["n"],
+        "formats": ["f"],
+        "publics": ["p"],
+        "statuts": ["x"],
+    }
+    ensure_new_entry_widget_keys_initialized(session, "p1", dims)
+    assert session[keys["input"]] == long_in
+    assert session[keys["output"]] == long_out
+    assert session[keys["type"]] == "a"
+
+
 def test_new_entry_missing_required_body_message() -> None:
     """Validation message only when one or both bodies are blank."""
     assert new_entry_missing_required_body_message("", "x") is not None
