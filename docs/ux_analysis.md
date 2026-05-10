@@ -101,34 +101,13 @@ De plus, la colonne `_syntax_contrast` (distance syntaxique input→output) est 
 
 Ces points ne sont pas des hypothèses ergonomiques : ce sont des dysfonctionnements vérifiés dans le code.
 
-### 3.1 Génération LLM inopérante dans l'onglet "Nouvelle entrée"
+### 3.1 Génération LLM inopérante dans l'onglet "Nouvelle entrée" (corrigé)
 
-**Localisation** : `src/ui_components.py` l. 814-898 (`render_tab_ajout`)
+**Localisation** : `src/ui_components.py` — `render_tab_ajout`, helpers `new_entry_session_keys` / `ensure_new_entry_widget_keys_initialized`.
 
-Le formulaire place trois boutons submit à l'intérieur d'un `st.form` :
+**Historique (bug)** : un `st.form` regroupait `text_area` et trois `form_submit_button`. La génération écrivait dans `session_state["new_generated_output"]` / `["new_generated_input"]` sans lier ces clés aux widgets, donc le texte LLM n'apparaissait pas après rerun.
 
-```python
-with st.form("new_entry_form"):
-    input_text = st.text_area("Brouillon", height=120)
-    output_text = st.text_area("Texte généré", height=220)
-    ...
-    gen_out = col1.form_submit_button("Générer texte")
-    gen_in  = col2.form_submit_button("Générer brouillon")
-    save    = col3.form_submit_button("Enregistrer", type="primary")
-```
-
-Quand `gen_out` est déclenché, le résultat LLM est stocké dans `session_state` :
-
-```python
-st.session_state["new_generated_output"] = generated  # l. 841
-st.toast("Texte généré.")
-```
-
-Mais les `text_area` ne lisent pas `session_state` : leur `value=` est câblé sur les variables locales `input_text` / `output_text`, réinitialisées à chaque rerun par le form lui-même.
-
-**Conséquence** : l'utilisateur voit le spinner et le toast, mais le texte généré ne s'affiche jamais dans les zones de saisie. Le bouton "Générer texte" est visuellement actif mais fonctionnellement vide.
-
-**Correction** : sortir les deux `text_area` du `st.form`, les piloter depuis `session_state` en lecture/écriture. Seul le bouton "Enregistrer" reste dans le form.
+**Comportement actuel** : plus de `st.form` sur cet onglet ; brouillon et texte généré utilisent des `text_area` avec `key=` stable par projet (`new_entry_{project_id}_input` / `_output`). Les boutons « Générer » mettent à jour les mêmes clés ; « Enregistrer » relit `session_state` au moment du save (alignement affichage / persistance). Les anciennes clés `new_generated_*` sont ignorées puis supprimées à l'entrée de l'onglet.
 
 ---
 
@@ -167,7 +146,7 @@ Les deux boutons sont côte à côte sans libellé expliquant la différence de 
 
 ### 3.4 Feedback stylométrique absent après sauvegarde
 
-**Localisation** : `src/ui_components.py` l. 1011-1028 (`render_tab_edition`) et l. 870-898 (`render_tab_ajout`)
+**Localisation** : `src/ui_components.py` — `render_tab_edition` et `render_tab_ajout`
 
 Après chaque sauvegarde réussie, le code appelle `update_project_entries` puis `st.rerun()`. Les colonnes de cache `_coherence_score`, `_ttr`, `_syntax_contrast` sont bien calculées et persistées — mais rien n'est affiché à l'utilisateur.
 

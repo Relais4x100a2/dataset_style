@@ -87,6 +87,91 @@ def sync_edition_output_widget_state(
     return widget_key
 
 
+def new_entry_session_keys(project_id: str) -> dict[str, str]:
+    """Build stable ``session_state`` keys for the « Nouvelle entrée » tab.
+
+    Keys are scoped by ``project_id`` so drafts from one project never leak
+    into another when the user switches context.
+
+    Args:
+        project_id: Active project identifier.
+
+    Returns:
+        Mapping of logical field names to session keys (``input``, ``output``,
+        dimension keys, ``statut``, ``notes``).
+    """
+    prefix = f"new_entry_{project_id}"
+    return {
+        "input": f"{prefix}_input",
+        "output": f"{prefix}_output",
+        "type": f"{prefix}_type",
+        "structure": f"{prefix}_structure",
+        "ton": f"{prefix}_ton",
+        "format": f"{prefix}_format",
+        "public": f"{prefix}_public",
+        "statut": f"{prefix}_statut",
+        "notes": f"{prefix}_notes",
+    }
+
+
+def ensure_new_entry_widget_keys_initialized(
+    session: MutableMapping[str, Any],
+    project_id: str,
+    dimensions: dict[str, list[str]],
+) -> dict[str, str]:
+    """Ensure new-entry widget keys exist with safe defaults.
+
+    If a stored select value is no longer in the active preset options (e.g.
+    after a dimensions change), it is reset to the first available option.
+
+    Args:
+        session: Streamlit ``st.session_state`` or any mutable mapping (tests).
+        project_id: Active project identifier.
+        dimensions: Preset dimension lists (``types``, ``structures``, …).
+
+    Returns:
+        The same mapping as :func:`new_entry_session_keys`.
+    """
+    keys = new_entry_session_keys(project_id)
+    dim_pairs: tuple[tuple[str, str], ...] = (
+        ("type", "types"),
+        ("structure", "structures"),
+        ("ton", "tons"),
+        ("format", "formats"),
+        ("public", "publics"),
+        ("statut", "statuts"),
+    )
+    for short, dim_list_key in dim_pairs:
+        key = keys[short]
+        options = [str(x) for x in (dimensions.get(dim_list_key) or []) if str(x).strip()]
+        if key not in session:
+            session[key] = options[0] if options else ""
+        elif options and str(session[key]) not in options:
+            session[key] = options[0]
+    if keys["input"] not in session:
+        session[keys["input"]] = ""
+    if keys["output"] not in session:
+        session[keys["output"]] = ""
+    if keys["notes"] not in session:
+        session[keys["notes"]] = ""
+    return keys
+
+
+def new_entry_missing_required_body_message(input_text: str, output_text: str) -> str | None:
+    """Validate that both body fields are non-empty before persisting.
+
+    Args:
+        input_text: Draft (brouillon) content.
+        output_text: Generated text content.
+
+    Returns:
+        A short French error message if validation fails, otherwise ``None``.
+    """
+    if not str(input_text).strip() or not str(output_text).strip():
+        return "Brouillon/Texte généré obligatoires."
+    return None
+
+
 def _current_project_id() -> str:
     return str(st.session_state.get("project_id") or "")
 
@@ -863,26 +948,48 @@ def render_tab_ajout(
     engine: Engine,
     dimensions: dict[str, list[str]],
 ) -> None:
-    """Ajout d'entrée (collaborator/admin)."""
+    """Ajout d'entrée (collaborator/admin).
+
+    Draft and generated text are bound to ``st.session_state`` (per project) so
+    LLM generation updates the same buffers that « Enregistrer » persists,
+    without the anti-pattern of mixing ``st.form`` submit with out-of-band
+    writes to unrelated session keys.
+    """
     st.subheader("Nouvelle entrée")
     if role == "viewer":
         st.info("Lecture seule (viewer).")
         return
     _llm_env(project_settings)
-    with st.form("new_entry_form"):
-        type_ = st.selectbox("Type de transformation", dimensions["types"])
-        structure = st.selectbox("Structure textuelle", dimensions["structures"])
-        ton = st.selectbox("Tonalité textuelle", dimensions["tons"])
-        format_ = st.selectbox("Format de sortie", dimensions["formats"])
-        public = st.selectbox("Public cible", dimensions["publics"])
-        input_text = st.text_area("Brouillon", height=120)
-        output_text = st.text_area("Texte généré", height=220)
-        statut = st.selectbox("Statut", dimensions["statuts"])
-        notes = st.text_input("Notes")
-        col1, col2, col3 = st.columns(3)
-        gen_out = col1.form_submit_button("Générer texte")
-        gen_in = col2.form_submit_button("Générer brouillon")
-        save = col3.form_submit_button("Enregistrer", type="primary")
+    # Legacy keys from the old form+generation split; drop to avoid stale reads.
+    st.session_state.pop("new_generated_output", None)
+    st.session_state.pop("new_generated_input", None)
+
+    keys = ensure_new_entry_widget_keys_initialized(st.session_state, project_id, dimensions)
+
+    type_ = st.selectbox(
+        "Type de transformation", dimensions["types"], key=keys["type"]
+    )
+    structure = st.selectbox(
+        "Structure textuelle", dimensions["structures"], key=keys["structure"]
+    )
+    ton = st.selectbox("Tonalité textuelle", dimensions["tons"], key=keys["ton"])
+    format_ = st.selectbox("Format de sortie", dimensions["formats"], key=keys["format"])
+    public = st.selectbox("Public cible", dimensions["publics"], key=keys["public"])
+
+    st.text_area("Brouillon", height=120, key=keys["input"])
+    st.text_area("Texte généré", height=220, key=keys["output"])
+
+    statut = st.selectbox("Statut", dimensions["statuts"], key=keys["statut"])
+    notes = st.text_input("Notes", key=keys["notes"])
+
+    col1, col2, col3 = st.columns(3)
+    gen_out = col1.button("Générer texte", key=f"{keys['input']}_btn_gen_out")
+    gen_in = col2.button("Générer brouillon", key=f"{keys['output']}_btn_gen_in")
+    save = col3.button("Enregistrer", type="primary", key=f"{keys['input']}_btn_save")
+
+    input_text = str(st.session_state.get(keys["input"], ""))
+    output_text = str(st.session_state.get(keys["output"], ""))
+
     if gen_out and input_text.strip():
         try:
             with st.spinner("Génération en cours..."):
@@ -897,7 +1004,7 @@ def render_tab_ajout(
                     model=project_settings.llm_model or None,
                 )
             if generated:
-                st.session_state["new_generated_output"] = generated
+                st.session_state[keys["output"]] = generated
                 st.toast("Texte généré.")
             else:
                 st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
@@ -918,7 +1025,7 @@ def render_tab_ajout(
                     model=project_settings.llm_model or None,
                 )
             if generated:
-                st.session_state["new_generated_input"] = generated
+                st.session_state[keys["input"]] = generated
                 st.toast("Brouillon généré.")
             else:
                 st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
@@ -926,24 +1033,34 @@ def render_tab_ajout(
             logger.exception("Erreur génération brouillon", exc_info=exc)
             st.error("Génération impossible: erreur inattendue côté service.")
     if save:
-        if not input_text.strip() or not output_text.strip():
-            st.error("Brouillon/Texte généré obligatoires.")
+        input_save = str(st.session_state.get(keys["input"], ""))
+        output_save = str(st.session_state.get(keys["output"], ""))
+        body_err = new_entry_missing_required_body_message(input_save, output_save)
+        if body_err:
+            st.error(body_err)
             return
+        type_save = str(st.session_state.get(keys["type"], type_))
+        structure_save = str(st.session_state.get(keys["structure"], structure))
+        ton_save = str(st.session_state.get(keys["ton"], ton))
+        format_save = str(st.session_state.get(keys["format"], format_))
+        public_save = str(st.session_state.get(keys["public"], public))
+        statut_save = str(st.session_state.get(keys["statut"], statut))
+        notes_save = str(st.session_state.get(keys["notes"], notes))
         new_row = pd.DataFrame(
             [
                 {
                     "id": str(uuid.uuid4())[:8],
                     "project_id": project_id,
                     "date": datetime.now().strftime("%Y-%m-%d"),
-                    "type": type_,
-                    "structure": structure,
-                    "ton": ton,
-                    "format": format_,
-                    "public": public,
-                    "input": input_text,
-                    "output": output_text,
-                    "statut": statut,
-                    "notes": notes,
+                    "type": type_save,
+                    "structure": structure_save,
+                    "ton": ton_save,
+                    "format": format_save,
+                    "public": public_save,
+                    "input": input_save,
+                    "output": output_save,
+                    "statut": statut_save,
+                    "notes": notes_save,
                     **{c: "" for c in CACHE_COLUMNS},
                 }
             ]
@@ -952,6 +1069,9 @@ def render_tab_ajout(
         update_project_entries(
             engine, project_id, pd.concat([df, new_row], ignore_index=True), user.user_id
         )
+        st.session_state[keys["input"]] = ""
+        st.session_state[keys["output"]] = ""
+        st.session_state[keys["notes"]] = ""
         st.success("Entrée enregistrée.")
         st.rerun()
 
