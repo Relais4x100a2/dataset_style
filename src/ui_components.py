@@ -8,9 +8,11 @@ import logging
 import math
 import os
 import uuid
+from collections.abc import MutableMapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 import requests
@@ -53,6 +55,36 @@ from src.presets import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SESSION_EDITION_LAST_ENTRY_ID = "edition_last_entry_id"
+
+
+def sync_edition_output_widget_state(
+    session: MutableMapping[str, Any],
+    entry_id: str,
+    row_output: str,
+) -> str:
+    """Keep the generated-output draft in session for the selected entry.
+
+    Resets from ``row_output`` when the user selects another entry; preserves
+    an in-session draft (for example after orthographic correction) when the
+    same entry remains selected.
+
+    Args:
+        session: Streamlit ``st.session_state`` or any mutable mapping (tests).
+        entry_id: Stable entry identifier (``id`` column).
+        row_output: Persisted output text for the row from the dataframe.
+
+    Returns:
+        Session state key for ``st.text_area(..., key=...)`` for generated text.
+    """
+    widget_key = f"edit_output_{entry_id}"
+    if session.get(_SESSION_EDITION_LAST_ENTRY_ID) != entry_id:
+        session[_SESSION_EDITION_LAST_ENTRY_ID] = entry_id
+        session[widget_key] = row_output
+    elif widget_key not in session:
+        session[widget_key] = row_output
+    return widget_key
 
 
 def _current_project_id() -> str:
@@ -923,6 +955,12 @@ def render_tab_edition(
     idx = st.selectbox("Entrée", list(range(len(options))), format_func=lambda i: options[i])
     row = df.iloc[int(idx)].copy()
     disabled = role == "viewer"
+    entry_id = str(row["id"])
+    output_widget_key = sync_edition_output_widget_state(
+        st.session_state,
+        entry_id,
+        str(row.get("output", "") or ""),
+    )
     legacy_fields: list[str] = []
     legacy_candidates = [
         ("Type de transformation", "type", "types"),
@@ -985,7 +1023,10 @@ def render_tab_edition(
         )
         row["input"] = st.text_area("Brouillon", value=row["input"], height=140, disabled=disabled)
         row["output"] = st.text_area(
-            "Texte généré", value=row["output"], height=240, disabled=disabled
+            "Texte généré",
+            height=240,
+            disabled=disabled,
+            key=output_widget_key,
         )
         row["statut"] = _select_with_legacy(
             "Statut",
@@ -1001,11 +1042,14 @@ def render_tab_edition(
         save = col2.form_submit_button("Sauvegarder", disabled=disabled, type="primary")
     if fix:
         try:
+            source_text = str(st.session_state.get(output_widget_key, "") or "")
             corrected = corriger_texte_fr(
-                str(row["output"]),
+                source_text,
                 languagetool_base_url=project_settings.languagetool_base_url or None,
             )
-            st.info(corrected[:1500] + ("..." if len(corrected) > 1500 else ""))
+            st.session_state[output_widget_key] = corrected
+            st.toast("Correction orthographique appliquée au texte généré.")
+            st.rerun()
         except requests.RequestException as exc:
             st.error(f"Correction impossible: {exc}")
     if save:
