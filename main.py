@@ -97,6 +97,8 @@ df = cached_load_project_entries(engine, project_id, user.user_id)
 project_settings = get_project_settings(engine, project_id)
 _, _, dimensions = load_active_dimensions(project_settings)
 
+# Issue-007: tab strip follows the curator workflow; titles are defined in
+# ``src.tab_layout`` (``EXPECTED_WORKFLOW_TAB_ORDER`` + account tab).
 tab_labels = main_tab_labels(include_super_admin=user.is_super_admin)
 tabs = st.tabs(tab_labels)
 tab1, tab2, tab3, tab4, tab5, tab6, *extra_tabs = tabs
