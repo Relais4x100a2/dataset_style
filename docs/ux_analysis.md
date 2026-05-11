@@ -107,7 +107,7 @@ Ces points ne sont pas des hypothèses ergonomiques : ce sont des dysfonctionnem
 
 **Historique (bug)** : un `st.form` regroupait `text_area` et trois `form_submit_button`. La génération écrivait dans `session_state["new_generated_output"]` / `["new_generated_input"]` sans lier ces clés aux widgets, donc le texte LLM n'apparaissait pas après rerun.
 
-**Comportement actuel** : plus de `st.form` sur cet onglet ; brouillon et texte généré utilisent des `text_area` avec `key=` stable par projet (`new_entry_{project_id}_input` / `_output`). Les boutons « Générer » mettent à jour les mêmes clés ; « Enregistrer » relit `session_state` au moment du save (alignement affichage / persistance). Les anciennes clés `new_generated_*` sont ignorées puis supprimées à l'entrée de l'onglet.
+**Comportement actuel** : plus de `st.form` sur cet onglet ; brouillon et texte généré utilisent des `text_area` avec `key=` stable par projet (`new_entry_{project_id}_input` / `_output`). Les boutons « Générer texte » / « Générer brouillon » utilisent `st.button(..., on_click=…)` pour appliquer le résultat LLM **avant** l’instanciation des widgets dans le run (exigence Streamlit ≥ 1.56 : pas d’écriture sur une clé de widget après son `text_area` dans le même script). « Enregistrer » relit `session_state` au clic ; après succès, un drapeau `new_entry_pending_clear_session_key` déclenche le vidage des buffers **au run suivant**, avant les `text_area`, pour la même raison. Les anciennes clés `new_generated_*` sont ignorées puis supprimées à l'entrée de l'onglet.
 
 ---
 

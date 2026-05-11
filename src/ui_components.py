@@ -8,11 +8,11 @@ import logging
 import math
 import os
 import uuid
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import requests
@@ -279,6 +279,43 @@ def new_entry_missing_required_body_message(input_text: str, output_text: str) -
     if not str(input_text).strip() or not str(output_text).strip():
         return "Brouillon/Texte généré obligatoires."
     return None
+
+
+def new_entry_pending_clear_session_key(project_id: str) -> str:
+    """Return the ``session_state`` flag used to clear buffers after a successful save.
+
+    Clearing must happen on the next run *before* ``text_area`` widgets are created,
+    because Streamlit forbids assigning to a widget key after that widget was
+    instantiated in the same script run.
+
+    Args:
+        project_id: Active project identifier.
+
+    Returns:
+        A session key scoped by ``project_id``.
+    """
+    return f"_pending_clear_new_entry_{project_id}"
+
+
+def commit_new_entry_llm_result(
+    session: MutableMapping[str, Any],
+    keys: Mapping[str, str],
+    *,
+    target: Literal["input", "output"],
+    text: str,
+) -> None:
+    """Write LLM output into the canonical new-entry body buffer.
+
+    Args:
+        session: Streamlit session state or any mutable mapping (tests).
+        keys: Mapping returned by :func:`new_entry_session_keys`.
+        target: Whether to update the draft (``input``) or generated (``output``) field.
+        text: Full text to store.
+    """
+    if target == "input":
+        session[keys["input"]] = text
+    else:
+        session[keys["output"]] = text
 
 
 def _current_project_id() -> str:
@@ -1048,6 +1085,79 @@ def _llm_env(settings: ProjectSettings) -> None:
             os.environ[key] = value
 
 
+def _new_entry_llm_generate_clicked(
+    project_id: str,
+    project_settings: ProjectSettings,
+    dimensions: dict[str, list[str]],
+    mode: Literal["draft_to_output", "output_to_draft"],
+) -> None:
+    """Run LLM generation during the pre-script callback phase (before widgets run).
+
+    Streamlit applies widget state from the client, then invokes ``on_click``
+    callbacks, then runs the script. Updating ``session_state`` here avoids
+    ``StreamlitAPIException`` when assigning to ``text_area`` keys after those
+    widgets were already instantiated.
+    """
+    _llm_env(project_settings)
+    keys = ensure_new_entry_widget_keys_initialized(st.session_state, project_id, dimensions)
+    type_ = str(st.session_state.get(keys["type"], ""))
+    structure = str(st.session_state.get(keys["structure"], ""))
+    ton = str(st.session_state.get(keys["ton"], ""))
+    format_ = str(st.session_state.get(keys["format"], ""))
+    public = str(st.session_state.get(keys["public"], ""))
+    if mode == "draft_to_output":
+        input_text = str(st.session_state.get(keys["input"], ""))
+        if not input_text.strip():
+            return
+        try:
+            with st.spinner("Génération en cours..."):
+                generated = generate_output_from_input(
+                    api_key=project_settings.llm_api_key,
+                    input_text=input_text,
+                    type_=type_,
+                    structure=structure,
+                    ton=ton,
+                    format_=format_,
+                    public=public,
+                    model=project_settings.llm_model or None,
+                )
+            if generated:
+                commit_new_entry_llm_result(
+                    st.session_state, keys, target="output", text=str(generated)
+                )
+                st.toast("Texte généré.")
+            else:
+                st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Erreur génération texte", exc_info=exc)
+            st.error("Génération impossible: erreur inattendue côté service.")
+        return
+
+    output_text = str(st.session_state.get(keys["output"], ""))
+    if not output_text.strip():
+        return
+    try:
+        with st.spinner("Génération en cours..."):
+            generated = generate_input_from_output(
+                api_key=project_settings.llm_api_key,
+                output=output_text,
+                type_=type_,
+                structure=structure,
+                ton=ton,
+                format_=format_,
+                public=public,
+                model=project_settings.llm_model or None,
+            )
+        if generated:
+            commit_new_entry_llm_result(st.session_state, keys, target="input", text=str(generated))
+            st.toast("Brouillon généré.")
+        else:
+            st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Erreur génération brouillon", exc_info=exc)
+        st.error("Génération impossible: erreur inattendue côté service.")
+
+
 def render_tab_ajout(
     user: CurrentUser,
     role: str,
@@ -1059,10 +1169,12 @@ def render_tab_ajout(
 ) -> None:
     """Ajout d'entrée (collaborator/admin).
 
-    Draft and generated text are bound to ``st.session_state`` (per project) so
-    LLM generation updates the same buffers that « Enregistrer » persists,
-    without the anti-pattern of mixing ``st.form`` submit with out-of-band
-    writes to unrelated session keys.
+    Draft and generated text use ``st.session_state`` (per project) as the single
+    source of truth. LLM actions use ``st.button(..., on_click=…)`` so buffers
+    are updated before ``text_area`` widgets run, which matches Streamlit's rule
+    forbidding writes to widget keys after those widgets were instantiated in
+    the same script run. « Enregistrer » reads the same keys from
+    ``session_state`` at click time.
     """
     st.subheader("Nouvelle entrée")
     _render_post_save_stylometric_feedback(project_id)
@@ -1075,6 +1187,10 @@ def render_tab_ajout(
     st.session_state.pop("new_generated_input", None)
 
     keys = ensure_new_entry_widget_keys_initialized(st.session_state, project_id, dimensions)
+    if st.session_state.pop(new_entry_pending_clear_session_key(project_id), None):
+        st.session_state[keys["input"]] = ""
+        st.session_state[keys["output"]] = ""
+        st.session_state[keys["notes"]] = ""
 
     type_ = st.selectbox("Type de transformation", dimensions["types"], key=keys["type"])
     structure = st.selectbox("Structure textuelle", dimensions["structures"], key=keys["structure"])
@@ -1089,59 +1205,30 @@ def render_tab_ajout(
     notes = st.text_input("Notes", key=keys["notes"])
 
     col1, col2, col3 = st.columns(3)
-    gen_out = col1.button("Générer texte", key=f"{keys['input']}_btn_gen_out")
-    gen_in = col2.button("Générer brouillon", key=f"{keys['output']}_btn_gen_in")
+    col1.button(
+        "Générer texte",
+        key=f"{keys['input']}_btn_gen_out",
+        on_click=_new_entry_llm_generate_clicked,
+        kwargs={
+            "project_id": project_id,
+            "project_settings": project_settings,
+            "dimensions": dimensions,
+            "mode": "draft_to_output",
+        },
+    )
+    col2.button(
+        "Générer brouillon",
+        key=f"{keys['output']}_btn_gen_in",
+        on_click=_new_entry_llm_generate_clicked,
+        kwargs={
+            "project_id": project_id,
+            "project_settings": project_settings,
+            "dimensions": dimensions,
+            "mode": "output_to_draft",
+        },
+    )
     save = col3.button("Enregistrer", type="primary", key=f"{keys['input']}_btn_save")
 
-    input_text = str(st.session_state.get(keys["input"], ""))
-    output_text = str(st.session_state.get(keys["output"], ""))
-
-    if gen_out and input_text.strip():
-        try:
-            with st.spinner("Génération en cours..."):
-                generated = generate_output_from_input(
-                    api_key=project_settings.llm_api_key,
-                    input_text=input_text,
-                    type_=type_,
-                    structure=structure,
-                    ton=ton,
-                    format_=format_,
-                    public=public,
-                    model=project_settings.llm_model or None,
-                )
-            if generated:
-                st.session_state[keys["output"]] = generated
-                st.toast("Texte généré.")
-                # Rerun so text widgets render after state update (same-run widget
-                # ordering would otherwise keep stale output on screen).
-                st.rerun()
-            else:
-                st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Erreur génération texte", exc_info=exc)
-            st.error("Génération impossible: erreur inattendue côté service.")
-    if gen_in and output_text.strip():
-        try:
-            with st.spinner("Génération en cours..."):
-                generated = generate_input_from_output(
-                    api_key=project_settings.llm_api_key,
-                    output=output_text,
-                    type_=type_,
-                    structure=structure,
-                    ton=ton,
-                    format_=format_,
-                    public=public,
-                    model=project_settings.llm_model or None,
-                )
-            if generated:
-                st.session_state[keys["input"]] = generated
-                st.toast("Brouillon généré.")
-                st.rerun()
-            else:
-                st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Erreur génération brouillon", exc_info=exc)
-            st.error("Génération impossible: erreur inattendue côté service.")
     if save:
         input_save = str(st.session_state.get(keys["input"], ""))
         output_save = str(st.session_state.get(keys["output"], ""))
@@ -1203,9 +1290,7 @@ def render_tab_ajout(
             _clear_post_save_stylometric_feedback(project_id)
             _show_action_error("Enregistrement impossible", exc)
             return
-        st.session_state[keys["input"]] = ""
-        st.session_state[keys["output"]] = ""
-        st.session_state[keys["notes"]] = ""
+        st.session_state[new_entry_pending_clear_session_key(project_id)] = True
         st.success("Entrée enregistrée.")
         st.rerun()
 
