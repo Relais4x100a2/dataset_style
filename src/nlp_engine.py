@@ -8,6 +8,8 @@ import logging
 import os
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -272,7 +274,9 @@ def compute_coherence_score(
     return final_score, deltas
 
 
-def prioritized_actions(stats: dict, deltas: dict[str, float], max_actions: int = 3) -> list[str]:
+def prioritized_actions(
+    stats: dict[str, Any], deltas: dict[str, float], max_actions: int = 3
+) -> list[str]:
     """Génère des conseils d'écriture concrets à partir des métriques courantes."""
     actions: list[str] = []
     if stats["ratio"] < 1.3:
@@ -323,6 +327,52 @@ def prioritized_actions(stats: dict, deltas: dict[str, float], max_actions: int 
 
     dedup = list(dict.fromkeys(actions))
     return dedup[:max_actions]
+
+
+def curator_advices_after_save(stats: dict[str, Any], deltas: dict[str, float]) -> list[str]:
+    """Conseils pour l'UI après sauvegarde ; message explicite si NLP ou stats indisponibles."""
+    if not stats:
+        return [
+            "Analyse stylométrique indisponible : modèle NLP absent ou textes insuffisants "
+            "pour calculer les indicateurs."
+        ]
+    adv = prioritized_actions(stats, deltas)
+    if adv:
+        return adv
+    return [
+        "Aucun conseil prioritaire : indicateurs dans une zone équilibrée, ou dataset "
+        "encore trop réduit pour comparer les axes stylistiques."
+    ]
+
+
+def avg_signature_from_cache(df: pd.DataFrame) -> dict[str, float] | None:
+    """Moyenne des signatures stylométriques persistées (_signature_json), lignes non vides."""
+    sigs: list[dict[str, float]] = []
+    if df is None or df.empty:
+        return None
+    for _, row in df.iterrows():
+        raw = str(row.get("_signature_json", "") or "").strip()
+        if not raw:
+            continue
+        try:
+            sigs.append(json.loads(raw))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    if not sigs:
+        return None
+    keys = list(sigs[0].keys())
+    n = len(sigs)
+    return {k: sum(s.get(k, 0.0) for s in sigs) / n for k in keys}
+
+
+@dataclass(frozen=True)
+class RowNlpCacheResult:
+    """Colonnes de cache NLP persistées + données pour le feedback curateur (post-sauvegarde)."""
+
+    cache: dict[str, str]
+    coherence_score: int | None
+    coherence_deltas: dict[str, float]
+    advice_stats: dict[str, Any]
 
 
 def translate_trigram(trigram: str) -> str:
@@ -429,25 +479,36 @@ def compute_row_cache(
     row_id: str,
     cache_columns: list[str],
     get_avg_signature: Callable[[pd.DataFrame], dict[str, float] | None],
-) -> dict[str, str]:
+) -> RowNlpCacheResult:
     """
     Calcule les valeurs de cache pour une seule ligne (sauvegarde).
-    N'appelle spaCy que sur cette ligne. Retourne un dict colonne -> valeur string.
+
+    N'appelle spaCy que sur cette ligne. Retourne les colonnes persistables ainsi que
+    score, deltas et stats alignés avec ``prioritized_actions`` (même passage NLP).
     """
+    empty = {c: "" for c in cache_columns}
     if nlp is None or not (edit_input and edit_output):
-        return {c: "" for c in cache_columns}
+        return RowNlpCacheResult(empty, None, {}, {})
     ins = get_linguistic_insights(edit_input, edit_output, nlp)
     sig_fiche = get_stylometric_signature(edit_output, nlp)
     tri = get_pos_trigrams(edit_output, nlp)
     if not ins or not sig_fiche:
-        return {c: "" for c in cache_columns}
+        return RowNlpCacheResult(empty, None, {}, {})
+
+    advice_stats: dict[str, Any] = {
+        "ratio": ins["ratio"],
+        "ttr": ins["ttr"],
+        "long_moy_phrases": ins["long_moy_phrases"],
+        "mots_repetes": ins.get("mots_repetes", []),
+    }
 
     others = df_valid[df_valid["id"].astype(str) != str(row_id)]
     sig_dataset = get_avg_signature(others)
+    deltas: dict[str, float]
     if sig_dataset:
-        score, _ = compute_coherence_score(sig_fiche, sig_dataset, ins.get("mots_repetes", []))
+        score, deltas = compute_coherence_score(sig_fiche, sig_dataset, ins.get("mots_repetes", []))
     else:
-        score = 100
+        score, deltas = 100, {}
 
     result = {
         "_ratio": str(round(ins["ratio"], 3)),
@@ -463,7 +524,111 @@ def compute_row_cache(
     for col in cache_columns:
         if col not in result:
             result[col] = ""
-    return result
+    return RowNlpCacheResult(result, score, deltas, advice_stats)
+
+
+def _parse_cache_float(value: object, default: float = 0.0) -> float:
+    """Parse une valeur numérique issue du cache persisté (chaîne SQL / CSV)."""
+    s = str(value or "").strip().replace(",", ".")
+    if not s:
+        return default
+    try:
+        return float(s)
+    except ValueError:
+        return default
+
+
+def _parse_cache_int_score(value: object) -> int | None:
+    """Parse ``_coherence_score`` persisté ; ``None`` si absent ou invalide."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    try:
+        return int(round(float(s.replace(",", "."))))
+    except ValueError:
+        return None
+
+
+def row_nlp_feedback_bundle_after_persist(
+    df_entries: pd.DataFrame,
+    row_id: str,
+    nlp,
+    cache_columns: list[str],
+) -> RowNlpCacheResult:
+    """Construit le bundle feedback à partir des entrées rechargées après commit SQL.
+
+    Le score de cohérence, le TTR et le contraste syntaxique affichés en UI doivent
+    refléter les colonnes de cache lues depuis la base (relecture ``load_project_entries``).
+    Les deltas pour ``prioritized_actions`` sont recalculés à partir des signatures
+    JSON persistées et de la moyenne des autres lignes ; ``mots_repetes`` repasse par
+    ``get_linguistic_insights`` lorsque spaCy est disponible, pour rester aligné avec
+    le même type d'analyse qu'à la sauvegarde.
+
+    Args:
+        df_entries: DataFrame projet tel que renvoyé après persistance (ex. SQL).
+        row_id: Identifiant stable de la ligne enregistrée.
+        nlp: Pipeline spaCy ou ``None``.
+        cache_columns: Liste des colonnes de cache attendues (ex. ``CACHE_COLUMNS``).
+
+    Returns:
+        Bundle prêt pour ``curator_advices_after_save`` / affichage métrique.
+    """
+    empty_cache = {c: "" for c in cache_columns}
+    rid = str(row_id)
+    if df_entries is None or df_entries.empty:
+        return RowNlpCacheResult(empty_cache, None, {}, {})
+
+    matches = df_entries[df_entries["id"].astype(str) == rid]
+    if matches.empty:
+        return RowNlpCacheResult(empty_cache, None, {}, {})
+
+    row = matches.iloc[0]
+    cache: dict[str, str] = {col: str(row.get(col, "") or "") for col in cache_columns}
+
+    persisted_score = _parse_cache_int_score(cache.get("_coherence_score", ""))
+
+    raw_sig = str(cache.get("_signature_json", "") or "").strip()
+    sig_fiche: dict[str, float] | None = None
+    if raw_sig:
+        try:
+            loaded = json.loads(raw_sig)
+            if isinstance(loaded, dict):
+                sig_fiche = {
+                    str(k): float(v) for k, v in loaded.items() if isinstance(v, (int, float))
+                }
+        except (json.JSONDecodeError, TypeError, ValueError):
+            sig_fiche = None
+
+    others = df_entries[df_entries["id"].astype(str) != rid]
+    sig_dataset = avg_signature_from_cache(others)
+
+    inp = str(row.get("input", "") or "")
+    out = str(row.get("output", "") or "")
+    mots_repetes: list[str] = []
+    if nlp is not None and inp.strip() and out.strip():
+        ins = get_linguistic_insights(inp, out, nlp)
+        if ins:
+            mots_repetes = list(ins.get("mots_repetes") or [])
+
+    deltas: dict[str, float] = {}
+    if sig_fiche and sig_dataset:
+        _, deltas = compute_coherence_score(sig_fiche, sig_dataset, mots_repetes)
+
+    ratio_s = str(cache.get("_ratio", "") or "").strip()
+    ttr_s = str(cache.get("_ttr", "") or "").strip()
+    long_s = str(cache.get("_long_phrases", "") or "").strip()
+    has_numeric_cache = bool(ratio_s and ttr_s and long_s)
+
+    advice_stats: dict[str, Any] = {}
+    if has_numeric_cache:
+        advice_stats = {
+            "ratio": _parse_cache_float(cache.get("_ratio")),
+            "ttr": _parse_cache_float(cache.get("_ttr")),
+            "long_moy_phrases": _parse_cache_float(cache.get("_long_phrases")),
+            "mots_repetes": mots_repetes,
+        }
+
+    return RowNlpCacheResult(cache, persisted_score, deltas, advice_stats)
 
 
 def recompute_cache_for_rows(
@@ -556,7 +721,7 @@ def recompute_cache_for_rows(
 def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:
     """Calcule l'écart-type de chaque axe stylistique depuis le cache _signature_json.
 
-    Complément orthogonal de avg_signature_from_cache (même données, autre statistique).
+    Complément orthogonal de ``avg_signature_from_cache`` (même données, autre statistique).
     Un écart élevé signale un dataset hétérogène sur cet axe.
 
     Args:
