@@ -4,7 +4,7 @@ import os
 import streamlit as st
 from src.auth import bootstrap_first_admin, render_auth_gate
 from src.config import initialize_runtime_config
-from src.database import create_db_engine, ensure_schema, get_project_settings, load_project_entries
+from src.database import create_db_engine, ensure_schema, get_project_settings
 from src.db_startup import (
     DbFailureCategory,
     classify_database_startup_error,
@@ -13,6 +13,7 @@ from src.db_startup import (
     user_facing_summary,
 )
 from src.presets import load_active_dimensions
+from src.project_entries_cache import cached_load_project_entries
 from src.tab_layout import main_tab_labels
 from src.ui_components import (
     render_sidebar,
@@ -91,7 +92,7 @@ if not project_id:
     st.info("Crée un projet pour commencer.")
     st.stop()
 
-df = load_project_entries(engine, project_id, user.user_id)
+df = cached_load_project_entries(engine, project_id, user.user_id)
 project_settings = get_project_settings(engine, project_id)
 _, _, dimensions = load_active_dimensions(project_settings)
 
