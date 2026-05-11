@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from src.ui_components import (
+    commit_new_entry_llm_result,
     ensure_new_entry_widget_keys_initialized,
     new_entry_missing_required_body_message,
+    new_entry_pending_clear_session_key,
     new_entry_session_keys,
 )
 
@@ -74,6 +76,25 @@ def test_ensure_new_entry_preserves_long_buffers_when_repairing_dimension() -> N
     assert session[keys["input"]] == long_in
     assert session[keys["output"]] == long_out
     assert session[keys["type"]] == "a"
+
+
+def test_new_entry_pending_clear_session_key_is_scoped_by_project() -> None:
+    """Pending-clear flag must not collide across projects."""
+    assert new_entry_pending_clear_session_key("a") != new_entry_pending_clear_session_key("b")
+
+
+def test_commit_new_entry_llm_result_writes_canonical_buffers() -> None:
+    """LLM results must land on the same keys used by the Streamlit widgets."""
+    keys = new_entry_session_keys("proj-z")
+    session: dict[str, object] = {
+        keys["input"]: "keep",
+        keys["output"]: "",
+    }
+    commit_new_entry_llm_result(session, keys, target="output", text="LLM out")
+    assert session[keys["output"]] == "LLM out"
+    assert session[keys["input"]] == "keep"
+    commit_new_entry_llm_result(session, keys, target="input", text="LLM in")
+    assert session[keys["input"]] == "LLM in"
 
 
 def test_new_entry_missing_required_body_message() -> None:
