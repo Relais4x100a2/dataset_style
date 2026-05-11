@@ -100,3 +100,32 @@ def test_signature_variance_ignores_non_dict_json() -> None:
     v = signature_variance(df)
     assert v is not None
     assert "Noms & adjectifs" in v
+
+
+def test_signature_variance_skips_axes_with_single_observation() -> None:
+    """Axes present in only one fiche must not appear with a spurious zero spread."""
+    s1 = {"A": 0.0, "B": 0.0}
+    s2 = {"B": 1.0, "C": 0.0}
+    df = pd.DataFrame(
+        [
+            {"_signature_json": json.dumps(s1), "statut": STATUT_VALIDE},
+            {"_signature_json": json.dumps(s2), "statut": STATUT_VALIDE},
+        ]
+    )
+    v = signature_variance(df)
+    assert v is not None
+    assert "B" in v
+    assert v["B"] > 0
+    assert "A" not in v
+    assert "C" not in v
+
+
+def test_signature_variance_none_when_no_axis_has_two_observations() -> None:
+    """Fully disjoint axis keys across two fiches yield no comparable axis."""
+    df = pd.DataFrame(
+        [
+            {"_signature_json": json.dumps({"axis_x": 0.1}), "statut": STATUT_VALIDE},
+            {"_signature_json": json.dumps({"axis_y": 0.2}), "statut": STATUT_VALIDE},
+        ]
+    )
+    assert signature_variance(df) is None
