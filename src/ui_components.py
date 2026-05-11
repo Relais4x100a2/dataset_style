@@ -35,7 +35,6 @@ from src.database import (
     list_projects_for_user,
     list_quarantined_deprovision_ops,
     list_recent_deprovision_ops,
-    load_project_entries,
     replay_quarantined_operation,
     require_role,
     update_project_entries,
@@ -68,6 +67,10 @@ from src.presets import (
     dumps_dimensions_override,
     load_active_dimensions,
     preset_dimensions,
+)
+from src.project_entries_cache import (
+    cached_load_project_entries,
+    invalidate_project_entries_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -1191,7 +1194,8 @@ def render_tab_ajout(
         to_persist = pd.concat([df_base, new_row], ignore_index=True)
         try:
             update_project_entries(engine, project_id, to_persist, user.user_id)
-            df_loaded = load_project_entries(engine, project_id, user.user_id)
+            invalidate_project_entries_cache()
+            df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
             fb = row_nlp_feedback_bundle_after_persist(df_loaded, row_id, nlp_model, CACHE_COLUMNS)
             _store_post_save_stylometric_feedback(project_id, fb)
         except Exception as exc:  # noqa: BLE001
@@ -1358,7 +1362,8 @@ def render_tab_edition(
         entry_id_save = str(row["id"])
         try:
             update_project_entries(engine, project_id, out, user.user_id)
-            df_loaded = load_project_entries(engine, project_id, user.user_id)
+            invalidate_project_entries_cache()
+            df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
             fb = row_nlp_feedback_bundle_after_persist(
                 df_loaded, entry_id_save, nlp_model, CACHE_COLUMNS
             )
