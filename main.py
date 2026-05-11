@@ -16,6 +16,7 @@ from src.presets import load_active_dimensions
 from src.project_entries_cache import cached_load_project_entries
 from src.tab_layout import main_tab_labels
 from src.ui_components import (
+    render_no_project_onboarding,
     render_sidebar,
     render_tab_account,
     render_tab_ajout,
@@ -89,7 +90,7 @@ with st.sidebar:
     project_id, role = render_sidebar(user, engine)
 
 if not project_id:
-    st.info("Crée un projet pour commencer.")
+    render_no_project_onboarding(user, engine)
     st.stop()
 
 df = cached_load_project_entries(engine, project_id, user.user_id)
