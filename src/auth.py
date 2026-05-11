@@ -27,6 +27,7 @@ from src.database import (
     transition_deprovision_operation,
     upsert_user_from_su,
 )
+from src.flash_messages import render_post_rerun_flash_once
 
 logger = logging.getLogger(__name__)
 
@@ -450,6 +451,7 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
     """
     Affiche login et retourne l'utilisateur courant si authentifié.
     """
+    render_post_rerun_flash_once(st.session_state)
     current = get_current_user()
     if current:
         return current
