@@ -41,6 +41,7 @@ from src.database import (
     update_project_settings_as_admin,
 )
 from src.export_utils import ExportScope, convert_to_jsonl, dataframe_for_export
+from src.flash_messages import schedule_post_rerun_flash
 from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.mailer import send_account_link_email
 from src.nlp_engine import (
@@ -639,7 +640,7 @@ def _render_project_delete_guarded_form(
         try:
             delete_project_as_admin(engine, project_id, user.user_id)
             st.session_state.pop("project_id", None)
-            st.success("Projet supprimé.")
+            schedule_post_rerun_flash(st.session_state, "Projet supprimé.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error("Suppression projet impossible", exc)
@@ -759,8 +760,8 @@ def render_tab_account(user: CurrentUser, engine: Engine) -> None:
                 max_retries=_saga_max_retries(),
                 detach_memberships=False,
             )
+            schedule_post_rerun_flash(st.session_state, "Compte supprimé.")
             logout()
-            st.success("Compte supprimé.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error("Suppression de compte impossible", exc)
@@ -871,7 +872,7 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
                 return
             try:
                 removed = detach_memberships_as_super_admin(engine, user.user_id, target.user_id)
-                st.success(f"Memberships détachées: {removed}")
+                schedule_post_rerun_flash(st.session_state, f"Memberships détachées: {removed}")
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
                 _show_action_error("Detach memberships impossible", exc)
@@ -896,7 +897,7 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
                 max_retries=_saga_max_retries(),
                 detach_memberships=False,
             )
-            st.success("Compte supprimé.")
+            schedule_post_rerun_flash(st.session_state, "Compte supprimé.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error("Suppression compte impossible", exc)
@@ -962,7 +963,7 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
     ):
         try:
             replay_quarantined_operation(engine, user.user_id, selected_op)
-            st.success("Opération remise en file d'attente.")
+            schedule_post_rerun_flash(st.session_state, "Opération remise en file d'attente.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error("Replay DLQ impossible", exc)
