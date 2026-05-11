@@ -17,7 +17,7 @@ Application Streamlit de curation de datasets littéraires, en mode multi-utilis
   - `publics` (Public cible)
   - `statuts`
 - Paramétrage LLM + LanguageTool par projet (`project_settings`).
-- Tableau de bord stylométrique : distribution des scores de cohérence, variance par axe sur fiches validées, outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
+- Tableau de bord stylométrique : distribution des scores de cohérence, variance par axe sur fiches validées (union des axes du cache ; écart-type seulement si l’axe a au moins deux valeurs sur des fiches distinctes), outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
 - Persistance PostgreSQL multi-tenant (`src/database.py`).
 - Accueil guidé (étapes + formulaire de création dans la zone principale) lorsque l’utilisateur n’a aucun projet, pour les petits écrans et la barre latérale repliée (`src/ui_components.py`, `src/project_session.py`).
 
@@ -98,7 +98,7 @@ make down
 pytest -q
 ```
 
-Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine.
+Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`).
 
 ## Déploiement CapRover (une commande)
 

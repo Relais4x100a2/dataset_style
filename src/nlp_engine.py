@@ -933,12 +933,16 @@ def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:
     Complément orthogonal de ``avg_signature_from_cache`` (même données, autre statistique).
     Un écart élevé signale un dataset hétérogène sur cet axe.
 
+    Les clés d'axes sont l'union de toutes les signatures exploitables (les JSON peuvent
+    diverger). Un axe n'est retenu que s'il possède au moins **deux** valeurs numériques
+    sur des fiches distinctes ; sinon il est omis (pas d'écart-type artificiel à zéro).
+
     Args:
         df_valid: Sous-ensemble du DataFrame filtré sur STATUT_VALIDE.
 
     Returns:
-        Dict {axe: écart-type} avec les mêmes clés que get_stylometric_signature,
-        ou None si moins de 2 signatures disponibles.
+        Dict ``{axe: écart-type}`` trié par nom d'axe, ou ``None`` si moins de deux
+        signatures exploitables ou si aucun axe n'a assez de points pour un écart-type.
     """
     sigs: list[dict[str, float]] = []
     for _, row in df_valid.iterrows():
@@ -957,14 +961,23 @@ def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:
         sigs.append(sig)
     if len(sigs) < 2:
         return None
-    keys = list(sigs[0].keys())
+    axis_keys: set[str] = set()
+    for s in sigs:
+        axis_keys.update(s.keys())
     result: dict[str, float] = {}
-    for k in keys:
-        values = [float(s[k]) for s in sigs if k in s and isinstance(s.get(k), (int, float))]
-        if not values:
-            result[k] = 0.0
+    for k in sorted(axis_keys):
+        values: list[float] = []
+        for s in sigs:
+            if k not in s:
+                continue
+            v = s.get(k)
+            if isinstance(v, (int, float)):
+                values.append(float(v))
+        if len(values) < 2:
             continue
         mean = sum(values) / len(values)
-        variance = sum((v - mean) ** 2 for v in values) / len(values)
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
         result[k] = round(variance**0.5, 4)
+    if not result:
+        return None
     return result
