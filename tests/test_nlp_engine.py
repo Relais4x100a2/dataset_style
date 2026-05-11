@@ -8,11 +8,15 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 from src.nlp_engine import (
+    avg_signature_from_cache,
     coherence_level,
     compute_coherence_score,
+    compute_row_cache,
     corriger_texte_fr,
+    curator_advices_after_save,
     languagetool_check_url,
     normalize_signature,
     palier_details,
@@ -58,6 +62,59 @@ def test_translate_trigram() -> None:
     s = translate_trigram("DET-NOUN-VERB")
     assert "Dét" in s
     assert "Verbe" in s
+
+
+def test_avg_signature_from_cache_averages_json_signatures() -> None:
+    """La moyenne par axe suit les signatures JSON persistées."""
+    sig_a = {"Noms & adjectifs": 0.4, "Verbes d'action": 0.2}
+    sig_b = {"Noms & adjectifs": 0.2, "Verbes d'action": 0.4}
+    df = pd.DataFrame(
+        [
+            {"id": "a", "_signature_json": json.dumps(sig_a)},
+            {"id": "b", "_signature_json": json.dumps(sig_b)},
+        ]
+    )
+    mean_sig = avg_signature_from_cache(df)
+    assert mean_sig is not None
+    assert abs(mean_sig["Noms & adjectifs"] - 0.3) < 1e-9
+    assert abs(mean_sig["Verbes d'action"] - 0.3) < 1e-9
+
+
+def test_avg_signature_from_cache_none_when_empty() -> None:
+    """Sans JSON exploitable, pas de moyenne (première entrée ou cache vide)."""
+    df = pd.DataFrame([{"id": "1", "_signature_json": ""}])
+    assert avg_signature_from_cache(df) is None
+
+
+def test_curator_advices_after_save_without_stats() -> None:
+    """Sans stats NLP, message explicite pour l'utilisateur."""
+    out = curator_advices_after_save({}, {})
+    assert len(out) == 1
+    assert "indisponible" in out[0].lower()
+
+
+def test_curator_advices_after_save_fallback_when_no_prioritized() -> None:
+    """Zone équilibrée → message dédié si ``prioritized_actions`` ne retourne rien."""
+    stats = {
+        "ratio": 2.0,
+        "ttr": 0.7,
+        "long_moy_phrases": 15.0,
+        "mots_repetes": [],
+    }
+    deltas = {"Noms & adjectifs": 0.1, "Verbes d'action": 0.05}
+    out = curator_advices_after_save(stats, deltas)
+    assert len(out) == 1
+    assert "Aucun conseil prioritaire" in out[0]
+
+
+def test_compute_row_cache_without_nlp_returns_empty_bundle() -> None:
+    """Sans spaCy, pas de score ni colonnes remplies (chemins dégradés)."""
+    df = pd.DataFrame([{"id": "1", "_signature_json": ""}])
+    cols = ["_coherence_score", "_ttr"]
+    r = compute_row_cache("in", "out", None, df, "1", cols, avg_signature_from_cache)
+    assert r.coherence_score is None
+    assert r.cache["_coherence_score"] == ""
+    assert r.cache["_ttr"] == ""
 
 
 def test_compute_coherence_score_penalizes_repetition() -> None:

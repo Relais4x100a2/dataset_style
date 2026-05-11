@@ -43,7 +43,14 @@ from src.database import (
 from src.export_utils import ExportScope, convert_to_jsonl, dataframe_for_export
 from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.mailer import send_account_link_email
-from src.nlp_engine import corriger_texte_fr
+from src.nlp_engine import (
+    RowNlpCacheResult,
+    avg_signature_from_cache,
+    coherence_level,
+    compute_row_cache,
+    corriger_texte_fr,
+    curator_advices_after_save,
+)
 from src.presets import (
     DIMENSION_KEYS,
     PRESETS,
@@ -57,6 +64,85 @@ from src.presets import (
 logger = logging.getLogger(__name__)
 
 _SESSION_EDITION_LAST_ENTRY_ID = "edition_last_entry_id"
+
+
+def _post_save_stylometric_session_key(project_id: str) -> str:
+    """Clé session pour afficher le feedback stylométrique après ``st.rerun()``."""
+    return f"post_save_stylometric_{project_id}"
+
+
+@st.cache_resource(show_spinner="Chargement du modèle linguistique (spaCy)…")
+def _load_fr_core_nlp():
+    """Charge ``fr_core_news_sm`` une fois par processus ; ``None`` si indisponible."""
+    try:
+        import spacy
+
+        return spacy.load("fr_core_news_sm")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Impossible de charger fr_core_news_sm: %s", exc)
+        return None
+
+
+def _ensure_cache_columns_on_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Garantit la présence des colonnes de cache NLP (DataFrame issu d'anciennes données)."""
+    out = df.copy()
+    for col in CACHE_COLUMNS:
+        if col not in out.columns:
+            out[col] = ""
+    return out
+
+
+def _store_post_save_stylometric_feedback(project_id: str, pkg: RowNlpCacheResult) -> None:
+    """Enregistre le feedback à afficher au prochain run (après ``st.rerun()``)."""
+    advices = curator_advices_after_save(pkg.advice_stats, pkg.coherence_deltas)
+    score = pkg.coherence_score
+    ttr = (pkg.cache.get("_ttr") or "").strip() or "—"
+    contrast = (pkg.cache.get("_syntax_contrast") or "").strip() or "—"
+    if score is not None:
+        level, tone = coherence_level(int(score))
+    else:
+        level, tone = ("Non calculé", "warning")
+    st.session_state[_post_save_stylometric_session_key(project_id)] = {
+        "score": score,
+        "ttr": ttr,
+        "contrast": contrast,
+        "level": level,
+        "tone": tone,
+        "advices": advices,
+    }
+
+
+def _render_post_save_stylometric_feedback(project_id: str) -> None:
+    """Affiche puis consomme le feedback stylométrique post-sauvegarde (session)."""
+    key = _post_save_stylometric_session_key(project_id)
+    payload = st.session_state.pop(key, None)
+    if not payload:
+        return
+    st.markdown("#### Retour stylistique (ligne enregistrée)")
+    m1, m2, m3 = st.columns(3)
+    score = payload.get("score")
+    with m1:
+        if score is None:
+            st.metric("Score de cohérence", "—")
+        else:
+            st.metric("Score de cohérence", f"{int(score)}/100")
+    with m2:
+        st.metric("TTR", str(payload.get("ttr", "—")))
+    with m3:
+        st.metric("Contraste syntaxique", str(payload.get("contrast", "—")))
+    tone = str(payload.get("tone", "info"))
+    level = str(payload.get("level", ""))
+    if tone == "success":
+        st.success(f"Qualité perçue : **{level}**")
+    elif tone == "warning":
+        st.warning(f"Qualité perçue : **{level}**")
+    elif tone == "error":
+        st.error(f"Qualité perçue : **{level}**")
+    else:
+        st.info(f"Qualité perçue : **{level}**")
+    advices = payload.get("advices") or []
+    if advices:
+        st.info("\n\n".join(str(a) for a in advices[:3]), icon="💡")
 
 
 def sync_edition_output_widget_state(
@@ -956,6 +1042,7 @@ def render_tab_ajout(
     writes to unrelated session keys.
     """
     st.subheader("Nouvelle entrée")
+    _render_post_save_stylometric_feedback(project_id)
     if role == "viewer":
         st.info("Lecture seule (viewer).")
         return
@@ -1066,8 +1153,25 @@ def render_tab_ajout(
             ]
         )
         require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
+        df_base = _ensure_cache_columns_on_df(df)
+        new_row = _ensure_cache_columns_on_df(new_row)
+        combined = pd.concat([df_base, new_row], ignore_index=True)
+        row_id = str(new_row.iloc[0]["id"])
+        nlp_model = _load_fr_core_nlp()
+        pkg = compute_row_cache(
+            input_save,
+            output_save,
+            nlp_model,
+            combined,
+            row_id,
+            CACHE_COLUMNS,
+            avg_signature_from_cache,
+        )
+        for col, val in pkg.cache.items():
+            new_row.at[0, col] = val
+        _store_post_save_stylometric_feedback(project_id, pkg)
         update_project_entries(
-            engine, project_id, pd.concat([df, new_row], ignore_index=True), user.user_id
+            engine, project_id, pd.concat([df_base, new_row], ignore_index=True), user.user_id
         )
         st.session_state[keys["input"]] = ""
         st.session_state[keys["output"]] = ""
@@ -1087,6 +1191,7 @@ def render_tab_edition(
 ) -> None:
     """Edition des entrées du projet."""
     st.subheader("Gestion & édition")
+    _render_post_save_stylometric_feedback(project_id)
     _llm_env(project_settings)
     if df.empty:
         st.info("Aucune entrée.")
@@ -1200,7 +1305,7 @@ def render_tab_edition(
             st.error(f"Correction impossible: {exc}")
     if save:
         require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
-        out = df.copy()
+        out = _ensure_cache_columns_on_df(df.copy())
         for col in [
             "type",
             "structure",
@@ -1213,6 +1318,19 @@ def render_tab_edition(
             "notes",
         ]:
             out.loc[out["id"] == row["id"], col] = str(row[col])
+        nlp_model = _load_fr_core_nlp()
+        pkg = compute_row_cache(
+            str(row["input"]),
+            str(row["output"]),
+            nlp_model,
+            out,
+            str(row["id"]),
+            CACHE_COLUMNS,
+            avg_signature_from_cache,
+        )
+        for col, val in pkg.cache.items():
+            out.loc[out["id"].astype(str) == str(row["id"]), col] = val
+        _store_post_save_stylometric_feedback(project_id, pkg)
         update_project_entries(engine, project_id, out, user.user_id)
         st.success("Entrée mise à jour.")
         st.rerun()
