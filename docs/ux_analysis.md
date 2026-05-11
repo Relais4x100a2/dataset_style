@@ -234,18 +234,16 @@ La sidebar (`render_sidebar`, l. 423-461) contient le sélecteur de projet et le
 
 ### 5.3 L'onglet Super Admin mélange deux profils d'usage
 
-`render_tab_super_admin` (l. 544-743) concentre ~200 lignes avec :
-- **profil opérationnel** : inviter un utilisateur, gérer les comptes (suppression, detach memberships)
-- **profil technique** : monitoring saga comptes (états pending/failed/quarantined), DLQ replay
+`render_tab_super_admin` concentrait invitation, gestion de comptes et monitoring technique sur une seule vue scrollable.
 
-Un super admin qui veut juste inviter un collaborateur se retrouve face à des tableaux de monitoring technique qui ne le concernent pas.
+**État actuel (issue 012)** : l’invitation et les actions sur les comptes restent en premier plan ; le suivi saga, la quarantaine et la relance manuelle sont regroupés dans un `st.expander` fermé par défaut, avec libellés orientés métier et constantes factorisées dans `src/super_admin_ui_texts.py`.
 
 ---
 
 ### 5.4 Libellés mélangent le technique et le métier
 
 - "LLM base URL", "LLM model", "LLM API key", "LanguageTool base URL" sont exposés directement dans l'onglet Réglages (`_render_project_settings_form`, l. 160-222).
-- "Detach memberships", "DLQ", "Quarantined", "Replay opération", "saga comptes" sont du vocabulaire d'infrastructure visible dans l'UI Super Admin.
+- Les libellés anglais type « Detach memberships » / « DLQ » ont été remplacés par des formulations françaises côté actions principales ; le vocabulaire technique reste visible dans les tableaux et l’expander avancé.
 - `operation_id`, `target_user_id` apparaissent directement dans les tableaux de l'interface Super Admin.
 
 ---
