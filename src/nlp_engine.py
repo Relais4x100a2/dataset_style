@@ -549,6 +549,144 @@ def _parse_cache_int_score(value: object) -> int | None:
         return None
 
 
+def parse_persisted_coherence_score(value: object) -> int | None:
+    """Parse une cellule ``_coherence_score`` persistée (mêmes règles que le cache SQL).
+
+    Exposé pour le tableau de bord et tout agrégat hors moteur de sauvegarde.
+
+    Args:
+        value: Valeur brute (souvent ``str``) lue depuis le DataFrame.
+
+    Returns:
+        Entier 0–100 arrondi, ou ``None`` si absent ou non numérique.
+    """
+    return _parse_cache_int_score(value)
+
+
+def parse_persisted_syntax_contrast(value: object) -> float | None:
+    """Parse une cellule ``_syntax_contrast`` ; ``None`` si vide ou invalide.
+
+    Contrairement à ``_parse_cache_float`` (défaut 0.0), les cellules vides sont
+    exclues des moyennes du tableau de bord.
+
+    Args:
+        value: Chaîne ou valeur SQL/CSV.
+
+    Returns:
+        Flottant typiquement dans ``[0, 1]``, ou ``None``.
+    """
+    s = str(value or "").strip().replace(",", ".")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def list_parsed_coherence_scores(
+    df: pd.DataFrame,
+    column: str = "_coherence_score",
+) -> list[int]:
+    """Liste les scores de cohérence numériques d'un sous-ensemble de lignes."""
+    if column not in df.columns or df.empty:
+        return []
+    out: list[int] = []
+    for v in df[column].tolist():
+        p = parse_persisted_coherence_score(v)
+        if p is not None:
+            out.append(p)
+    return out
+
+
+def mean_syntax_contrast_parsed(
+    df: pd.DataFrame,
+    column: str = "_syntax_contrast",
+) -> float | None:
+    """Moyenne du contraste syntaxique sur les cellules parseables uniquement."""
+    if column not in df.columns or df.empty:
+        return None
+    vals: list[float] = []
+    for v in df[column].tolist():
+        p = parse_persisted_syntax_contrast(v)
+        if p is not None:
+            vals.append(p)
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 4)
+
+
+def dataframe_for_dashboard_scope(
+    df: pd.DataFrame,
+    *,
+    validated_only: bool,
+    validated_label: str,
+    statut_column: str = "statut",
+) -> pd.DataFrame:
+    """Filtre le DataFrame selon le périmètre choisi en UI (validées ou tout)."""
+    if df.empty:
+        return df.copy()
+    if not validated_only:
+        return df.copy()
+    if statut_column not in df.columns:
+        return df.iloc[0:0].copy()
+    mask = df[statut_column].astype(str) == str(validated_label)
+    return df.loc[mask].copy()
+
+
+def coherence_score_bucket_table(scores: list[int]) -> pd.DataFrame:
+    """Comptages par tranches de 10 points pour histogramme (0–100)."""
+    labels = [
+        "0–9",
+        "10–19",
+        "20–29",
+        "30–39",
+        "40–49",
+        "50–59",
+        "60–69",
+        "70–79",
+        "80–89",
+        "90–100",
+    ]
+    rows: list[dict[str, object]] = []
+    for i, lab in enumerate(labels):
+        lo = i * 10
+        hi = lo + 9
+        if i == 9:
+            hi = 100
+        cnt = sum(1 for s in scores if lo <= s <= hi)
+        rows.append({"Tranche (score)": lab, "Nombre": int(cnt)})
+    out_of_range = sum(1 for s in scores if s < 0 or s > 100)
+    if out_of_range:
+        rows.append({"Tranche (score)": "Hors plage", "Nombre": int(out_of_range)})
+    return pd.DataFrame(rows)
+
+
+def outliers_low_coherence_table(
+    df: pd.DataFrame,
+    *,
+    limit: int = 15,
+    score_column: str = "_coherence_score",
+) -> pd.DataFrame:
+    """Sous-table triée : entrées au score de cohérence le plus bas (parseable)."""
+    if df.empty or score_column not in df.columns:
+        return pd.DataFrame()
+    parsed: list[tuple[int, int]] = []
+    for idx, v in enumerate(df[score_column].tolist()):
+        p = parse_persisted_coherence_score(v)
+        if p is not None:
+            parsed.append((idx, p))
+    if not parsed:
+        return pd.DataFrame()
+    parsed.sort(key=lambda t: (t[1], str(df.iloc[t[0]].get("id", ""))))
+    take = parsed[: max(1, min(limit, len(parsed)))]
+    idxs = [i for i, _ in take]
+    part = df.iloc[idxs].copy()
+    part["score_coherence"] = [sc for _, sc in take]
+    cols = [c for c in ("id", "statut", "type", "score_coherence") if c in part.columns]
+    return part[cols].reset_index(drop=True)
+
+
 def row_nlp_feedback_bundle_after_persist(
     df_entries: pd.DataFrame,
     row_id: str,
@@ -737,15 +875,21 @@ def signature_variance(df_valid: pd.DataFrame) -> dict[str, float] | None:
         if not raw:
             continue
         try:
-            sigs.append(json.loads(raw))
+            loaded = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             continue
+        if not isinstance(loaded, dict):
+            continue
+        sig = {str(k): float(v) for k, v in loaded.items() if isinstance(v, (int, float))}
+        if not sig:
+            continue
+        sigs.append(sig)
     if len(sigs) < 2:
         return None
     keys = list(sigs[0].keys())
     result: dict[str, float] = {}
     for k in keys:
-        values = [s[k] for s in sigs if k in s]
+        values = [float(s[k]) for s in sigs if k in s and isinstance(s.get(k), (int, float))]
         if not values:
             result[k] = 0.0
             continue

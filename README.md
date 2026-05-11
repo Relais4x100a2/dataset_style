@@ -17,6 +17,7 @@ Application Streamlit de curation de datasets littéraires, en mode multi-utilis
   - `publics` (Public cible)
   - `statuts`
 - Paramétrage LLM + LanguageTool par projet (`project_settings`).
+- Tableau de bord stylométrique : distribution des scores de cohérence, variance par axe sur fiches validées, outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
 - Persistance PostgreSQL multi-tenant (`src/database.py`).
 
 ## Schéma PostgreSQL
