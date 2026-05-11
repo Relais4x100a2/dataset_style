@@ -148,9 +148,9 @@ Les deux boutons sont côte à côte sans libellé expliquant la différence de 
 
 **Localisation** : `src/ui_components.py` — `render_tab_edition`, `render_tab_ajout`, helpers `_render_post_save_stylometric_feedback` / `_store_post_save_stylometric_feedback` ; `src/nlp_engine.py` — `compute_row_cache`, `row_nlp_feedback_bundle_after_persist`, `curator_advices_after_save`.
 
-Après une sauvegarde réussie (`update_project_entries` sans erreur), l’application relit le projet via `load_project_entries`, construit le bundle avec `row_nlp_feedback_bundle_after_persist` (métriques et cache alignés sur la ligne persistée) puis enregistre l’état d’affichage en `st.session_state` avant `st.rerun()`. Au run suivant, un bloc **« Retour stylistique (ligne enregistrée) »** affiche le score de cohérence, le TTR, le contraste syntaxique, un libellé qualitatif (`coherence_level`) et jusqu’à trois conseils issus de `prioritized_actions` / `curator_advices_after_save`. En cas d’échec de persistance, aucun feedback n’est stocké (pas de faux positif curateur).
+Après une sauvegarde réussie (`update_project_entries` sans erreur), l’application invalide le cache Streamlit des entrées, relit le projet via `cached_load_project_entries` (wrapper `@st.cache_data` autour de `load_project_entries`, voir issue S4 / `src/project_entries_cache.py`), construit le bundle avec `row_nlp_feedback_bundle_after_persist` (métriques et cache alignés sur la ligne persistée) puis enregistre l’état d’affichage en `st.session_state` avant `st.rerun()`. Au run suivant, un bloc **« Retour stylistique (ligne enregistrée) »** affiche le score de cohérence, le TTR, le contraste syntaxique, un libellé qualitatif (`coherence_level`) et jusqu’à trois conseils issus de `prioritized_actions` / `curator_advices_after_save`. En cas d’échec de persistance, aucun feedback n’est stocké (pas de faux positif curateur).
 
-**État** : comportement livré (issue M5 / PR associée). Pistes d’amélioration produit : raccourcir la latence sur très gros projets (coût d’un `load_project_entries` après chaque save) ou proposer un toast optionnel.
+**État** : comportement livré (issue M5 / PR associée). La navigation entre onglets réutilise les lignes en cache (TTL 30 s) ; après chaque écriture réussie sur les entrées, le cache est vidé pour éviter tout affichage périmé.
 
 ---
 
@@ -210,7 +210,9 @@ Le message suppose que l'utilisateur a vu la sidebar ouverte et sait où cliquer
 
 ### 4.5 "La charge de données est légère"
 
-**Ce que le code confirme** : `main.py` l. 58 exécute `load_project_entries(engine, project_id, user.user_id)` à chaque rerun Streamlit, sans `@st.cache_data`. Chaque interaction utilisateur déclenche une requête SQL qui rapatrie toutes les colonnes, dont les 12 colonnes de cache (`_signature_json`, `_trigrams_json`…) qui peuvent être volumineuses. Pour 300+ entrées, la latence perçue peut devenir significative.
+**Ce que le code confirmait (obsolète)** : l’application rechargeait tout le jeu d’entrées à chaque rerun.
+
+**État actuel (issue S4 / `src/project_entries_cache.py`)** : `main.py` appelle `cached_load_project_entries`, décoré avec `@st.cache_data(ttl=30)` et clé de partition basée sur l’URL SQLAlchemy (`hash_funcs` pour `Engine`). Les changements d’onglet dans une même session réutilisent le DataFrame tant que le TTL n’a pas expiré. Après toute mutation réussie via `update_project_entries` (création ou mise à jour d’entrées dans l’UI), `invalidate_project_entries_cache()` vide le cache avant la relecture utilisée pour le feedback stylométrique post-save — pas de données obsolètes après sauvegarde. Les 12 colonnes de cache NLP (`_signature_json`, `_trigrams_json`, …) restent volumineuses sur les très gros corpus ; le TTL limite les allers-retours SQL lors de la navigation entre onglets.
 
 ---
 
@@ -308,7 +310,7 @@ Reproduire cette boucle dans Label Studio via un ML Backend est techniquement po
 | S1 | Réordonner les onglets dans l'ordre du workflow réel | `main.py` l. 62-72 | Orientation naturelle dès la première session |
 | S2 | Remplacer `st.stop()` "Crée un projet" par un écran d'accueil guidé en 3 étapes | `main.py` l. 54-56 | Onboarding nouveau → abandon réduit |
 | S3 | Ajouter filtre par statut **et par score de cohérence** dans l'onglet édition | `ui_components.py` l. 922-924 | Pointer directement les entrées à réviser |
-| S4 | Ajouter `@st.cache_data(ttl=30)` sur `load_project_entries` avec invalidation après écriture | `main.py` l. 58 | Latence perçue réduite |
+| S4 | **Fait (issue-010)** : `cached_load_project_entries` — `@st.cache_data(ttl=30)` + `invalidate_project_entries_cache` après chaque `update_project_entries` réussi | `src/project_entries_cache.py`, `main.py`, `src/ui_components.py` | Moins de requêtes SQL au changement d’onglet ; pas de données périmées après sauvegarde |
 | S5 | Clarifier la responsabilité sidebar (contexte seul) vs onglet Projets (actions seules) | `render_sidebar` + `render_tab_projects` | Double-lieu éliminé |
 | S6 | Séparer Super Admin : "Gestion comptes" visible, "Monitoring technique" en `st.expander` fermé par défaut | `ui_components.py` l. 544-743 | Charge cognitive réduite |
 | S7 | Persister les messages de succès via `session_state` avant `st.rerun` | `ui_components.py` l. 415-418, 535-539 | Message de confirmation lisible |
