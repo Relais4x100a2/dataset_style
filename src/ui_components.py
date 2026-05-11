@@ -53,12 +53,15 @@ from src.llm_generate import generate_input_from_output, generate_output_from_in
 from src.mailer import send_account_link_email
 from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
+    EditionScoreFilterSpec,
     RowNlpCacheResult,
     avg_signature_from_cache,
     coherence_score_bucket_table,
     compute_row_cache,
     corriger_texte_fr,
     dataframe_for_dashboard_scope,
+    edition_statut_filter_options,
+    filter_edition_entries_dataframe,
     list_parsed_coherence_scores,
     mean_syntax_contrast_parsed,
     outliers_low_coherence_table,
@@ -1369,9 +1372,121 @@ def render_tab_edition(
         df["format"] = df["support"]
     if "public" not in df.columns:
         df["public"] = ""
-    options = [f"{row['id']} · {row['type']} · {row['statut']}" for _, row in df.iterrows()]
-    idx = st.selectbox("Entrée", list(range(len(options))), format_func=lambda i: options[i])
-    row = df.iloc[int(idx)].copy()
+    basis = _ensure_cache_columns_on_df(df)
+    st.markdown("##### Filtres de la liste d'entrées")
+    statut_labels = edition_statut_filter_options(dimensions["statuts"], basis)
+    statut_choice_key = f"edition_filter_statut_{project_id}"
+    statut_choices_ui = ["Tous"] + statut_labels
+    raw_stat_choice = st.selectbox(
+        "Filtrer par statut",
+        statut_choices_ui,
+        key=statut_choice_key,
+    )
+    statut_filter_val: str | None = None if raw_stat_choice == "Tous" else str(raw_stat_choice)
+
+    score_mode_key = f"edition_filter_score_mode_{project_id}"
+    score_mode_choice = st.selectbox(
+        "Filtrer par score de cohérence (_coherence_score)",
+        options=("all", "below", "bucket"),
+        format_func=lambda m: {
+            "all": "Tous les scores (aucun filtre)",
+            "below": "Strictement sous un seuil (score < seuil)",
+            "bucket": "Tranche de 10 points (comme le tableau de bord)",
+        }[m],
+        key=score_mode_key,
+    )
+    threshold_lt = 50
+    bucket_decile_pick = 0
+    if score_mode_choice == "below":
+        thr_key = f"edition_filter_score_threshold_{project_id}"
+        threshold_lt = int(
+            st.number_input(
+                "Seuil exclusif (conserver les fiches avec score < seuil, 0–100)",
+                min_value=0,
+                max_value=100,
+                value=50,
+                step=1,
+                key=thr_key,
+            )
+        )
+    elif score_mode_choice == "bucket":
+        b_key = f"edition_filter_score_bucket_{project_id}"
+
+        def _bucket_label(i: int) -> str:
+            lo = i * 10
+            hi = lo + 9 if i < 9 else 100
+            return f"{lo}–{hi}"
+
+        bucket_decile_pick = int(
+            st.selectbox(
+                "Tranche",
+                options=list(range(10)),
+                format_func=_bucket_label,
+                key=b_key,
+            )
+        )
+    include_na_key = f"edition_filter_include_na_score_{project_id}"
+    include_na_scores = False
+    if score_mode_choice != "all":
+        include_na_scores = st.checkbox(
+            "Inclure les fiches sans score exploitable (N/A)",
+            value=False,
+            key=include_na_key,
+            help=(
+                "N/A : cellule vide ou non numérique après lecture ; le score est dérivé "
+                "uniquement via parse_persisted_coherence_score (même règle que le tableau de bord)."
+            ),
+        )
+        st.caption(
+            "Règle N/A : si la case est décochée, les entrées sans score exploitable sont "
+            "exclues dès qu'un filtre sur le score (autre que « Tous les scores ») est actif."
+        )
+    if score_mode_choice == "all":
+        score_spec = EditionScoreFilterSpec()
+    elif score_mode_choice == "below":
+        score_spec = EditionScoreFilterSpec(
+            mode="below",
+            threshold_lt=threshold_lt,
+            include_na=include_na_scores,
+        )
+    else:
+        score_spec = EditionScoreFilterSpec(
+            mode="bucket",
+            bucket_decile=bucket_decile_pick,
+            include_na=include_na_scores,
+        )
+
+    df_pick = filter_edition_entries_dataframe(
+        basis,
+        statut_label=statut_filter_val,
+        score_spec=score_spec,
+    )
+    if df_pick.empty:
+        st.warning(
+            "Aucune entrée ne correspond aux filtres. Élargissez les critères "
+            "(statut, tranche ou seuil de score, ou incluez les N/A)."
+        )
+        return
+    if len(df_pick) < len(basis):
+        st.caption(f"{len(df_pick)} entrée(s) affichées sur {len(basis)} (filtres actifs).")
+
+    entry_ids = df_pick["id"].astype(str).tolist()
+    id_to_label: dict[str, str] = {}
+    for _, r in df_pick.iterrows():
+        eid = str(r["id"])
+        id_to_label[eid] = f"{eid} · {r['type']} · {r['statut']}"
+    entry_widget_key = f"edition_entry_select_{project_id}"
+    if entry_widget_key in st.session_state and st.session_state[entry_widget_key] not in entry_ids:
+        del st.session_state[entry_widget_key]
+    chosen_id = str(
+        st.selectbox(
+            "Entrée",
+            options=entry_ids,
+            format_func=lambda eid: id_to_label[str(eid)],
+            key=entry_widget_key,
+        )
+    )
+    row = df_pick.loc[df_pick["id"].astype(str) == chosen_id].iloc[0].copy()
     disabled = role == "viewer"
     entry_id = str(row["id"])
     output_widget_key = sync_edition_output_widget_state(

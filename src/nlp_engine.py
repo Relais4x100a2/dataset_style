@@ -9,7 +9,7 @@ import os
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -632,6 +632,136 @@ def parse_persisted_coherence_score(value: object) -> int | None:
         Entier 0–100 arrondi, ou ``None`` si absent ou non numérique.
     """
     return _parse_cache_int_score(value)
+
+
+@dataclass(frozen=True)
+class EditionScoreFilterSpec:
+    """Paramètres de filtre score pour l'onglet édition (logique pandas pure).
+
+    Les scores sont interprétés uniquement via :func:`parse_persisted_coherence_score`.
+    Une cellule non parseable est traitée comme N/A (``None``).
+
+    Attributes:
+        mode: ``all`` (aucun filtre score), ``below`` (score strictement inférieur
+            au seuil), ``bucket`` (tranche décennale alignée sur l'histogramme).
+        threshold_lt: Pour ``below`` : garder les lignes avec ``score < threshold_lt``.
+        bucket_decile: Pour ``bucket`` : entier ``0``..``9`` → tranches ``0–9`` … ``90–100``.
+        include_na: Si vrai, les lignes sans score exploitable (N/A) sont conservées
+            lorsque le filtre score est actif (``mode != all``).
+    """
+
+    mode: Literal["all", "below", "bucket"] = "all"
+    threshold_lt: int = 50
+    bucket_decile: int = 0
+    include_na: bool = False
+
+    def __post_init__(self) -> None:
+        if self.mode == "bucket" and (self.bucket_decile < 0 or self.bucket_decile > 9):
+            msg = "bucket_decile must be between 0 and 9"
+            raise ValueError(msg)
+        if self.mode == "below" and (self.threshold_lt < 0 or self.threshold_lt > 100):
+            msg = "threshold_lt must be between 0 and 100"
+            raise ValueError(msg)
+
+
+def edition_statut_filter_options(
+    preset_statuts: list[str],
+    df: pd.DataFrame,
+    *,
+    statut_column: str = "statut",
+) -> list[str]:
+    """Construit la liste des statuts proposés dans le filtre édition.
+
+    Combine l'ordre du preset avec les valeurs réellement présentes dans ``df``
+    (y compris obsolètes / legacy absentes du preset).
+
+    Args:
+        preset_statuts: Liste des statuts du preset actif (dimensions).
+        df: DataFrame des entrées (non vide côté appelant pour l'usage nominal).
+        statut_column: Nom de la colonne statut.
+
+    Returns:
+        Libellés uniques, d'abord dans l'ordre du preset puis les extras triés.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for raw in preset_statuts:
+        s = str(raw).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        ordered.append(s)
+    if statut_column not in df.columns:
+        return ordered
+    extras: list[str] = []
+    for v in df[statut_column].unique().tolist():
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        extras.append(s)
+    extras.sort()
+    ordered.extend(extras)
+    return ordered
+
+
+def _edition_coherence_bucket_bounds(decile: int) -> tuple[int, int]:
+    lo = decile * 10
+    hi = lo + 9 if decile < 9 else 100
+    return lo, hi
+
+
+def filter_edition_entries_dataframe(
+    df: pd.DataFrame,
+    *,
+    statut_label: str | None,
+    score_spec: EditionScoreFilterSpec,
+    score_column: str = "_coherence_score",
+    statut_column: str = "statut",
+) -> pd.DataFrame:
+    """Filtre ``df`` pour la liste d'entrées de l'onglet édition.
+
+    Args:
+        df: Entrées du projet (colonnes habituelles + cache NLP si présent).
+        statut_label: Statut exact à garder, ou ``None`` / chaîne vide pour tout.
+        score_spec: Règles de filtre sur ``_coherence_score`` (parseur unique).
+        score_column: Colonne score persistée.
+        statut_column: Colonne statut métier.
+
+    Returns:
+        Copie filtrée avec index réinitialisé (vide si aucune ligne ne correspond).
+    """
+    out = df.copy()
+    if statut_label and str(statut_label).strip():
+        token = str(statut_label).strip()
+        if statut_column not in out.columns:
+            return out.iloc[0:0].reset_index(drop=True)
+        mask_st = out[statut_column].astype(str).str.strip() == token
+        out = out.loc[mask_st]
+    if score_spec.mode == "all":
+        return out.reset_index(drop=True)
+    if score_column not in out.columns:
+        out = out.copy()
+        out[score_column] = ""
+    lo_hi: tuple[int, int] | None = None
+    if score_spec.mode == "bucket":
+        lo_hi = _edition_coherence_bucket_bounds(score_spec.bucket_decile)
+
+    def row_matches_score(cell: object) -> bool:
+        parsed = parse_persisted_coherence_score(cell)
+        if parsed is None:
+            return score_spec.include_na
+        if score_spec.mode == "below":
+            return parsed < score_spec.threshold_lt
+        if score_spec.mode == "bucket" and lo_hi is not None:
+            lo, hi = lo_hi
+            return lo <= parsed <= hi
+        return True
+
+    mask_sc = [row_matches_score(v) for v in out[score_column].tolist()]
+    return out.loc[mask_sc].reset_index(drop=True)
 
 
 def parse_persisted_syntax_contrast(value: object) -> float | None:
