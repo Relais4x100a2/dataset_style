@@ -48,10 +48,17 @@ from src.nlp_engine import (
     RowNlpCacheResult,
     avg_signature_from_cache,
     coherence_level,
+    coherence_score_bucket_table,
     compute_row_cache,
     corriger_texte_fr,
     curator_advices_after_save,
+    dataframe_for_dashboard_scope,
+    list_parsed_coherence_scores,
+    mean_syntax_contrast_parsed,
+    outliers_low_coherence_table,
+    parse_persisted_coherence_score,
     row_nlp_feedback_bundle_after_persist,
+    signature_variance,
 )
 from src.presets import (
     DIMENSION_KEYS,
@@ -1370,21 +1377,137 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
     if df.empty:
         st.info("Aucune donnée.")
         return
+    df_view = df.copy()
+    if "structure" not in df_view.columns and "forme" in df_view.columns:
+        df_view["structure"] = df_view["forme"]
+    if "format" not in df_view.columns and "support" in df_view.columns:
+        df_view["format"] = df_view["support"]
+    if "public" not in df_view.columns:
+        df_view["public"] = ""
+    for cache_col in ("_coherence_score", "_syntax_contrast", "_signature_json"):
+        if cache_col not in df_view.columns:
+            df_view[cache_col] = ""
+
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total", len(df))
-    c2.metric("Validées", int((df["statut"] == STATUT_VALIDE).sum()))
-    c3.metric("Types", int(df["type"].nunique()))
-    if "structure" not in df.columns and "forme" in df.columns:
-        df = df.copy()
-        df["structure"] = df["forme"]
-    if "format" not in df.columns and "support" in df.columns:
-        df = df.copy()
-        df["format"] = df["support"]
-    if "public" not in df.columns:
-        df = df.copy()
-        df["public"] = ""
+    c1.metric("Total", len(df_view))
+    c2.metric("Validées", int((df_view["statut"] == STATUT_VALIDE).sum()))
+    c3.metric("Types", int(df_view["type"].nunique()))
+
+    scope_key = "dashboard_stylometry_scope"
+    if scope_key not in st.session_state:
+        st.session_state[scope_key] = "validated"
+    scope_choice = st.radio(
+        "Périmètre des indicateurs (distribution, contraste syntaxique, outliers)",
+        options=("validated", "all"),
+        format_func=lambda x: (
+            "Fiches validées uniquement (aligné export JSONL)"
+            if x == "validated"
+            else "Tout le projet (tous statuts)"
+        ),
+        index=0 if st.session_state.get(scope_key, "validated") == "validated" else 1,
+        horizontal=True,
+        key=scope_key,
+    )
+    validated_only = scope_choice == "validated"
+    scope_df = dataframe_for_dashboard_scope(
+        df_view,
+        validated_only=validated_only,
+        validated_label=STATUT_VALIDE,
+    )
+
+    if validated_only:
+        st.caption(
+            "Les métriques ci-dessous (sauf la variance par axe) utilisent uniquement les "
+            "fiches au statut validé, comme le fichier JSONL exporté."
+        )
+    else:
+        st.caption(
+            "Vue « tout le projet » : les brouillons sont inclus — ne confondez pas cette "
+            "vue avec le périmètre exporté (validées seulement)."
+        )
+
+    st.markdown("#### Distribution des scores de cohérence")
+    scores = list_parsed_coherence_scores(scope_df)
+    n_scope = len(scope_df)
+    if "_coherence_score" in scope_df.columns:
+        missing_scores = sum(
+            1
+            for v in scope_df["_coherence_score"].tolist()
+            if parse_persisted_coherence_score(v) is None
+        )
+    else:
+        missing_scores = n_scope
+    if not scores:
+        st.info("Aucun score de cohérence numérique sur ce périmètre.")
+    else:
+        bucket_df = coherence_score_bucket_table(scores)
+        st.bar_chart(bucket_df.set_index("Tranche (score)"), width="stretch", horizontal=False)
+        if missing_scores:
+            st.caption(
+                f"{missing_scores} entrée(s) sans score de cohérence exploitable sur "
+                f"{n_scope} dans ce périmètre."
+            )
+
+    st.markdown("#### Écart-type par axe stylistique (fiches validées)")
+    df_valid = dataframe_for_dashboard_scope(
+        df_view,
+        validated_only=True,
+        validated_label=STATUT_VALIDE,
+    )
+    var_axes = signature_variance(df_valid)
+    if var_axes is None:
+        st.info(
+            "Variance par axe indisponible : il faut au moins deux signatures "
+            "stylométriques exploitables parmi les fiches validées."
+        )
+    else:
+        st.caption(
+            "Indicateur calculé exclusivement sur les fiches validées, conformément au "
+            "contrat analytique de signature_variance()."
+        )
+        var_frame = (
+            pd.DataFrame({"Axe": list(var_axes.keys()), "Écart-type": list(var_axes.values())})
+            .sort_values("Écart-type", ascending=False)
+            .reset_index(drop=True)
+        )
+        st.bar_chart(var_frame.set_index("Axe"), width="stretch", horizontal=False)
+
+    st.markdown("#### Entrées aux scores de cohérence les plus bas (outliers)")
+    out_tbl = outliers_low_coherence_table(scope_df, limit=15)
+    if out_tbl.empty:
+        st.info("Aucune entrée avec score de cohérence numérique sur ce périmètre.")
+    else:
+        disp = out_tbl.rename(
+            columns={
+                "id": "Identifiant",
+                "statut": "Statut",
+                "type": "Type",
+                "score_coherence": "Score cohérence (0–100)",
+            }
+        )
+        st.dataframe(disp, hide_index=True, width="stretch")
+        st.caption(
+            "Retrouvez une fiche via son identifiant dans l'onglet « Gestion & édition » "
+            "(liste déroulante ou navigation entre fiches)."
+        )
+
+    st.markdown("#### Moyenne du contraste syntaxique")
+    m_contrast = mean_syntax_contrast_parsed(scope_df)
+    if m_contrast is None:
+        st.info("Aucune valeur de contraste syntaxique exploitable sur ce périmètre.")
+    else:
+        st.metric(
+            "Moyenne (0–1, plus haut = plus de transformation)",
+            f"{m_contrast:.3f}",
+        )
+        st.caption(
+            "Moyenne des cellules `_syntax_contrast` parseables uniquement ; les entrées "
+            "sans valeur sont exclues du calcul."
+        )
+
+    st.markdown("#### Aperçu des entrées")
     st.dataframe(
-        df[["id", "date", "type", "structure", "ton", "format", "public", "statut"]],
+        df_view[["id", "date", "type", "structure", "ton", "format", "public", "statut"]],
         hide_index=True,
         width="stretch",
     )
