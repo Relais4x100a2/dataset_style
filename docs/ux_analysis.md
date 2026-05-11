@@ -158,20 +158,20 @@ Après une sauvegarde réussie (`update_project_entries` sans erreur), l’appli
 
 ### 4.1 "Un seul écran à onglets suffit pour tout le parcours curation"
 
-**Ce que le code confirme** : les 6 onglets (`main.py` l. 62-72) sont au même niveau hiérarchique sans fil conducteur. L'onglet "Nouvelle entrée" est en premier, mais l'utilisateur doit d'abord être passé par les onglets 4 (Projets) et 5 (Réglages & Export) pour que l'outil soit utilisable.
+**Historique (corrigé issue-007)** : l’ordre des onglets dans `main.py` suivait autrefois la saisie en premier, ce qui incitait à ouvrir « Nouvelle entrée » avant d’avoir structuré le projet et les réglages.
 
-L'ordre actuel des onglets contredit le workflow réel :
+**État actuel** : les onglets sont alignés sur le workflow métier (`src/tab_layout.py` + `main.py`) :
 
-| Position | Onglet actuel | Étape workflow réelle |
+| Position | Onglet | Étape workflow |
 |---|---|---|
-| 1 | Nouvelle entrée | **3e** étape (saisie) |
-| 2 | Gestion & édition | **4e** étape (révision) |
-| 3 | Tableau de bord | **5e** étape (monitoring cohérence) |
-| 4 | Projets | **1re** étape |
-| 5 | Réglages & Export | **2e** et **6e** étape |
-| 6 | Mon compte | hors workflow principal |
+| 1 | Projets | **1re** étape |
+| 2 | Réglages & Export | **2e** étape (et export en fin de parcours) |
+| 3 | Nouvelle entrée | **3e** étape (saisie) |
+| 4 | Gestion & édition | **4e** étape (révision) |
+| 5 | Tableau de bord | **5e** étape (monitoring / cohérence) |
+| 6 | Mon compte | hors workflow principal curation |
 
-Un utilisateur novice ouvre l'onglet 1 "Nouvelle entrée" avec des dimensions par défaut non configurées, sans avoir compris le modèle projet, et sans aucune introduction au concept de cohérence stylométrique qui est au cœur de l'outil.
+Le parcours gauche-droite correspond désormais à projet → réglages → saisie → révision → pilotage.
 
 ---
 
