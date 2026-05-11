@@ -20,6 +20,7 @@ from src.nlp_engine import (
     languagetool_check_url,
     normalize_signature,
     palier_details,
+    row_nlp_feedback_bundle_after_persist,
     translate_trigram,
 )
 
@@ -115,6 +116,60 @@ def test_compute_row_cache_without_nlp_returns_empty_bundle() -> None:
     assert r.coherence_score is None
     assert r.cache["_coherence_score"] == ""
     assert r.cache["_ttr"] == ""
+
+
+def test_row_nlp_feedback_bundle_uses_persisted_score_and_cache() -> None:
+    """Après relecture type SQL, le score et les colonnes cache viennent de la ligne persistée."""
+    sig = {"Noms & adjectifs": 0.35, "Verbes d'action": 0.25}
+    df = pd.DataFrame(
+        [
+            {
+                "id": "other",
+                "input": "a",
+                "output": "b " * 50,
+                "_signature_json": json.dumps(sig),
+                "_ratio": "1.2",
+                "_ttr": "0.60",
+                "_long_phrases": "14.0",
+                "_coherence_score": "81",
+                "_syntax_contrast": "0.33",
+            },
+            {
+                "id": "target",
+                "input": "in text",
+                "output": "out text " * 30,
+                "_signature_json": json.dumps(sig),
+                "_ratio": "2.0",
+                "_ttr": "0.70",
+                "_long_phrases": "15.0",
+                "_coherence_score": "77",
+                "_syntax_contrast": "0.40",
+            },
+        ]
+    )
+    cols = [
+        "_ratio",
+        "_ttr",
+        "_long_phrases",
+        "_signature_json",
+        "_coherence_score",
+        "_syntax_contrast",
+    ]
+    bundle = row_nlp_feedback_bundle_after_persist(df, "target", None, cols)
+    assert bundle.coherence_score == 77
+    assert bundle.cache["_ttr"] == "0.70"
+    assert bundle.cache["_syntax_contrast"] == "0.40"
+    adv = curator_advices_after_save(bundle.advice_stats, bundle.coherence_deltas)
+    assert isinstance(adv, list)
+    assert len(adv) >= 1
+
+
+def test_row_nlp_feedback_bundle_unknown_row_empty() -> None:
+    """Identifiant absent → bundle vide."""
+    df = pd.DataFrame([{"id": "x", "_coherence_score": "50"}])
+    b = row_nlp_feedback_bundle_after_persist(df, "missing", None, ["_coherence_score"])
+    assert b.coherence_score is None
+    assert b.cache["_coherence_score"] == ""
 
 
 def test_compute_coherence_score_penalizes_repetition() -> None:

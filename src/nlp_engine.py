@@ -527,6 +527,110 @@ def compute_row_cache(
     return RowNlpCacheResult(result, score, deltas, advice_stats)
 
 
+def _parse_cache_float(value: object, default: float = 0.0) -> float:
+    """Parse une valeur numérique issue du cache persisté (chaîne SQL / CSV)."""
+    s = str(value or "").strip().replace(",", ".")
+    if not s:
+        return default
+    try:
+        return float(s)
+    except ValueError:
+        return default
+
+
+def _parse_cache_int_score(value: object) -> int | None:
+    """Parse ``_coherence_score`` persisté ; ``None`` si absent ou invalide."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    try:
+        return int(round(float(s.replace(",", "."))))
+    except ValueError:
+        return None
+
+
+def row_nlp_feedback_bundle_after_persist(
+    df_entries: pd.DataFrame,
+    row_id: str,
+    nlp,
+    cache_columns: list[str],
+) -> RowNlpCacheResult:
+    """Construit le bundle feedback à partir des entrées rechargées après commit SQL.
+
+    Le score de cohérence, le TTR et le contraste syntaxique affichés en UI doivent
+    refléter les colonnes de cache lues depuis la base (relecture ``load_project_entries``).
+    Les deltas pour ``prioritized_actions`` sont recalculés à partir des signatures
+    JSON persistées et de la moyenne des autres lignes ; ``mots_repetes`` repasse par
+    ``get_linguistic_insights`` lorsque spaCy est disponible, pour rester aligné avec
+    le même type d'analyse qu'à la sauvegarde.
+
+    Args:
+        df_entries: DataFrame projet tel que renvoyé après persistance (ex. SQL).
+        row_id: Identifiant stable de la ligne enregistrée.
+        nlp: Pipeline spaCy ou ``None``.
+        cache_columns: Liste des colonnes de cache attendues (ex. ``CACHE_COLUMNS``).
+
+    Returns:
+        Bundle prêt pour ``curator_advices_after_save`` / affichage métrique.
+    """
+    empty_cache = {c: "" for c in cache_columns}
+    rid = str(row_id)
+    if df_entries is None or df_entries.empty:
+        return RowNlpCacheResult(empty_cache, None, {}, {})
+
+    matches = df_entries[df_entries["id"].astype(str) == rid]
+    if matches.empty:
+        return RowNlpCacheResult(empty_cache, None, {}, {})
+
+    row = matches.iloc[0]
+    cache: dict[str, str] = {col: str(row.get(col, "") or "") for col in cache_columns}
+
+    persisted_score = _parse_cache_int_score(cache.get("_coherence_score", ""))
+
+    raw_sig = str(cache.get("_signature_json", "") or "").strip()
+    sig_fiche: dict[str, float] | None = None
+    if raw_sig:
+        try:
+            loaded = json.loads(raw_sig)
+            if isinstance(loaded, dict):
+                sig_fiche = {
+                    str(k): float(v) for k, v in loaded.items() if isinstance(v, (int, float))
+                }
+        except (json.JSONDecodeError, TypeError, ValueError):
+            sig_fiche = None
+
+    others = df_entries[df_entries["id"].astype(str) != rid]
+    sig_dataset = avg_signature_from_cache(others)
+
+    inp = str(row.get("input", "") or "")
+    out = str(row.get("output", "") or "")
+    mots_repetes: list[str] = []
+    if nlp is not None and inp.strip() and out.strip():
+        ins = get_linguistic_insights(inp, out, nlp)
+        if ins:
+            mots_repetes = list(ins.get("mots_repetes") or [])
+
+    deltas: dict[str, float] = {}
+    if sig_fiche and sig_dataset:
+        _, deltas = compute_coherence_score(sig_fiche, sig_dataset, mots_repetes)
+
+    ratio_s = str(cache.get("_ratio", "") or "").strip()
+    ttr_s = str(cache.get("_ttr", "") or "").strip()
+    long_s = str(cache.get("_long_phrases", "") or "").strip()
+    has_numeric_cache = bool(ratio_s and ttr_s and long_s)
+
+    advice_stats: dict[str, Any] = {}
+    if has_numeric_cache:
+        advice_stats = {
+            "ratio": _parse_cache_float(cache.get("_ratio")),
+            "ttr": _parse_cache_float(cache.get("_ttr")),
+            "long_moy_phrases": _parse_cache_float(cache.get("_long_phrases")),
+            "mots_repetes": mots_repetes,
+        }
+
+    return RowNlpCacheResult(cache, persisted_score, deltas, advice_stats)
+
+
 def recompute_cache_for_rows(
     df_valid: pd.DataFrame,
     nlp,

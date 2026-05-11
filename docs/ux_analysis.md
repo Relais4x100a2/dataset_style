@@ -144,15 +144,13 @@ Les deux boutons sont côte à côte sans libellé expliquant la différence de 
 
 ---
 
-### 3.4 Feedback stylométrique absent après sauvegarde
+### 3.4 Feedback stylométrique après sauvegarde (parcours curateur)
 
-**Localisation** : `src/ui_components.py` — `render_tab_edition` et `render_tab_ajout`
+**Localisation** : `src/ui_components.py` — `render_tab_edition`, `render_tab_ajout`, helpers `_render_post_save_stylometric_feedback` / `_store_post_save_stylometric_feedback` ; `src/nlp_engine.py` — `compute_row_cache`, `row_nlp_feedback_bundle_after_persist`, `curator_advices_after_save`.
 
-Après chaque sauvegarde réussie, le code appelle `update_project_entries` puis `st.rerun()`. Les colonnes de cache `_coherence_score`, `_ttr`, `_syntax_contrast` sont bien calculées et persistées — mais rien n'est affiché à l'utilisateur.
+Après une sauvegarde réussie (`update_project_entries` sans erreur), l’application relit le projet via `load_project_entries`, construit le bundle avec `row_nlp_feedback_bundle_after_persist` (métriques et cache alignés sur la ligne persistée) puis enregistre l’état d’affichage en `st.session_state` avant `st.rerun()`. Au run suivant, un bloc **« Retour stylistique (ligne enregistrée) »** affiche le score de cohérence, le TTR, le contraste syntaxique, un libellé qualitatif (`coherence_level`) et jusqu’à trois conseils issus de `prioritized_actions` / `curator_advices_after_save`. En cas d’échec de persistance, aucun feedback n’est stocké (pas de faux positif curateur).
 
-**Conséquence** : la boucle de qualité stylométrique (sauvegarder → voir le score → décider de valider ou réviser) n'existe pas dans l'UI. C'est le dysfonctionnement le plus impactant sur la proposition de valeur de l'outil.
-
-**Correction** : après `update_project_entries`, relire la ligne sauvegardée et afficher le score de cohérence, le TTR et une ligne de conseil issu de `prioritized_actions()`.
+**État** : comportement livré (issue M5 / PR associée). Pistes d’amélioration produit : raccourcir la latence sur très gros projets (coût d’un `load_project_entries` après chaque save) ou proposer un toast optionnel.
 
 ---
 

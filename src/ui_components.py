@@ -35,6 +35,7 @@ from src.database import (
     list_projects_for_user,
     list_quarantined_deprovision_ops,
     list_recent_deprovision_ops,
+    load_project_entries,
     replay_quarantined_operation,
     require_role,
     update_project_entries,
@@ -50,6 +51,7 @@ from src.nlp_engine import (
     compute_row_cache,
     corriger_texte_fr,
     curator_advices_after_save,
+    row_nlp_feedback_bundle_after_persist,
 )
 from src.presets import (
     DIMENSION_KEYS,
@@ -73,7 +75,12 @@ def _post_save_stylometric_session_key(project_id: str) -> str:
 
 @st.cache_resource(show_spinner="Chargement du modèle linguistique (spaCy)…")
 def _load_fr_core_nlp():
-    """Charge ``fr_core_news_sm`` une fois par processus ; ``None`` si indisponible."""
+    """Charge ``fr_core_news_sm`` ; ``None`` si indisponible.
+
+    Grâce à ``@st.cache_resource``, un seul pipeline spaCy est conservé par processus
+    Streamlit : les appels depuis plusieurs onglets ou actions réutilisent la même
+    instance en mémoire.
+    """
     try:
         import spacy
 
@@ -90,6 +97,11 @@ def _ensure_cache_columns_on_df(df: pd.DataFrame) -> pd.DataFrame:
         if col not in out.columns:
             out[col] = ""
     return out
+
+
+def _clear_post_save_stylometric_feedback(project_id: str) -> None:
+    """Supprime le feedback stylométrique en session (échec de persistance ou reset)."""
+    st.session_state.pop(_post_save_stylometric_session_key(project_id), None)
 
 
 def _store_post_save_stylometric_feedback(project_id: str, pkg: RowNlpCacheResult) -> None:
@@ -1169,10 +1181,16 @@ def render_tab_ajout(
         )
         for col, val in pkg.cache.items():
             new_row.at[0, col] = val
-        _store_post_save_stylometric_feedback(project_id, pkg)
-        update_project_entries(
-            engine, project_id, pd.concat([df_base, new_row], ignore_index=True), user.user_id
-        )
+        to_persist = pd.concat([df_base, new_row], ignore_index=True)
+        try:
+            update_project_entries(engine, project_id, to_persist, user.user_id)
+            df_loaded = load_project_entries(engine, project_id, user.user_id)
+            fb = row_nlp_feedback_bundle_after_persist(df_loaded, row_id, nlp_model, CACHE_COLUMNS)
+            _store_post_save_stylometric_feedback(project_id, fb)
+        except Exception as exc:  # noqa: BLE001
+            _clear_post_save_stylometric_feedback(project_id)
+            _show_action_error("Enregistrement impossible", exc)
+            return
         st.session_state[keys["input"]] = ""
         st.session_state[keys["output"]] = ""
         st.session_state[keys["notes"]] = ""
@@ -1330,8 +1348,18 @@ def render_tab_edition(
         )
         for col, val in pkg.cache.items():
             out.loc[out["id"].astype(str) == str(row["id"]), col] = val
-        _store_post_save_stylometric_feedback(project_id, pkg)
-        update_project_entries(engine, project_id, out, user.user_id)
+        entry_id_save = str(row["id"])
+        try:
+            update_project_entries(engine, project_id, out, user.user_id)
+            df_loaded = load_project_entries(engine, project_id, user.user_id)
+            fb = row_nlp_feedback_bundle_after_persist(
+                df_loaded, entry_id_save, nlp_model, CACHE_COLUMNS
+            )
+            _store_post_save_stylometric_feedback(project_id, fb)
+        except Exception as exc:  # noqa: BLE001
+            _clear_post_save_stylometric_feedback(project_id)
+            _show_action_error("Sauvegarde impossible", exc)
+            return
         st.success("Entrée mise à jour.")
         st.rerun()
 
