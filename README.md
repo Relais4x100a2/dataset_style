@@ -19,7 +19,7 @@ Application Streamlit de curation de datasets littéraires, en mode multi-utilis
 - Paramétrage LLM + LanguageTool par projet (`project_settings`).
 - Tableau de bord stylométrique : distribution des scores de cohérence, variance par axe sur fiches validées (union des axes du cache ; écart-type seulement si l’axe a au moins deux valeurs sur des fiches distinctes), outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
 - Persistance PostgreSQL multi-tenant (`src/database.py`).
-- Accueil guidé (étapes + formulaire de création dans la zone principale) lorsque l’utilisateur n’a aucun projet, pour les petits écrans et la barre latérale repliée (`src/ui_components.py`, `src/project_session.py`).
+- Accueil guidé (étapes + formulaire de création dans la zone principale) lorsque l’utilisateur n’a aucun projet, pour les petits écrans et la barre latérale repliée (`src/ui_components.py`, `src/empty_project_onboarding.py`, `src/project_session.py`).
 - Mise en cache des lignes d’entrées du projet : `cached_load_project_entries` (`@st.cache_data`, TTL 30 s) pour accélérer le passage d’un onglet à l’autre ; invalidation systématique après toute persistance réussie des entrées (`src/project_entries_cache.py`, `invalidate_project_entries_cache`).
 
 ## Schéma PostgreSQL
@@ -60,6 +60,10 @@ Le chargeur (`src/config.py`) applique cet ordre:
 - `ACCOUNT_SAGA_MAX_RETRIES`: nombre maximum de retries pour les opérations de révocation/suppression compte.
 - `ACCOUNT_RETRY_BATCH_SIZE`: taille de lot du worker de reprise des opérations en échec.
 
+### Variables projets / onboarding
+
+- `DISABLE_SELF_SERVICE_PROJECT_CREATION` : si `1`, `true`, `yes` ou `on`, masque les formulaires de création de premier projet (parcours invitation / admin uniquement ; message utilisateur dans la zone principale et la barre latérale).
+
 ### Variables email
 
 - `MAIL_MODE`: `dev` (affiche un lien masqué en UI) ou `smtp`.
@@ -99,7 +103,7 @@ make down
 pytest -q
 ```
 
-Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`).
+Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`), onboarding sans projet (`tests/test_empty_project_onboarding.py`).
 
 ## Déploiement CapRover (une commande)
 
