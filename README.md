@@ -147,12 +147,13 @@ Les garde-fous sont appliqués dans `src/database.py` (`require_role`, `require_
   - projet courant
   - rôle
   - déconnexion
-- Onglets centraux:
+- Onglets centraux (ordre métier : projet → réglages → saisie → révision → tableau de bord) :
+  - `Projets`
+  - `Réglages & Export`
   - `Nouvelle entrée`
   - `Gestion & édition`
   - `Tableau de bord`
-  - `Projets`
-  - `Réglages & Export`
+  - `Mon compte` (et `Super Admin` si rôle adapté)
 
 Dans **Export** (même onglet), un contrôle unique définit le périmètre pour **CSV et JSONL** :
 « Validées seulement » (statut « Fait et validé ») ou « Tout le dataset » (tous les statuts, y compris brouillons).

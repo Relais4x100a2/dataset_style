@@ -13,6 +13,7 @@ from src.db_startup import (
     user_facing_summary,
 )
 from src.presets import load_active_dimensions
+from src.tab_layout import main_tab_labels
 from src.ui_components import (
     render_sidebar,
     render_tab_account,
@@ -94,28 +95,19 @@ df = load_project_entries(engine, project_id, user.user_id)
 project_settings = get_project_settings(engine, project_id)
 _, _, dimensions = load_active_dimensions(project_settings)
 
-tab_labels = [
-    "Nouvelle entrée",
-    "Gestion & édition",
-    "Tableau de bord",
-    "Projets",
-    "Réglages & Export",
-    "Mon compte",
-]
-if user.is_super_admin:
-    tab_labels.append("Super Admin")
+tab_labels = main_tab_labels(include_super_admin=user.is_super_admin)
 tabs = st.tabs(tab_labels)
 tab1, tab2, tab3, tab4, tab5, tab6, *extra_tabs = tabs
 with tab1:
-    render_tab_ajout(user, role, project_id, project_settings, df, engine, dimensions)
-with tab2:
-    render_tab_edition(user, role, project_id, project_settings, df, engine, dimensions)
-with tab3:
-    render_tab_dashboard(df, role)
-with tab4:
     render_tab_projects(user, role, project_id, engine)
-with tab5:
+with tab2:
     render_tab_settings_export(user, role, project_id, df, engine)
+with tab3:
+    render_tab_ajout(user, role, project_id, project_settings, df, engine, dimensions)
+with tab4:
+    render_tab_edition(user, role, project_id, project_settings, df, engine, dimensions)
+with tab5:
+    render_tab_dashboard(df, role)
 with tab6:
     render_tab_account(user, engine)
 if user.is_super_admin and extra_tabs:
