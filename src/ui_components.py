@@ -375,7 +375,7 @@ def _persist_settings(
 ) -> None:
     try:
         update_project_settings_as_admin(engine, project_id, user.user_id, settings)
-        st.success(success_message)
+        schedule_post_rerun_flash(st.session_state, success_message, level="success")
         st.rerun()
     except Exception as exc:  # noqa: BLE001
         _show_action_error("Mise à jour réglages impossible", exc)

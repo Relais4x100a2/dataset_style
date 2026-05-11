@@ -450,6 +450,9 @@ def revoke_account_with_saga(
 def render_auth_gate(engine: Engine) -> CurrentUser | None:
     """
     Affiche login et retourne l'utilisateur courant si authentifié.
+
+    Affiche d'abord un éventuel message ``post_rerun_flash`` (issue S7) pour
+    qu'il survive à ``st.rerun()`` après actions destructives ou persistance.
     """
     render_post_rerun_flash_once(st.session_state)
     current = get_current_user()
