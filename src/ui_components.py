@@ -45,18 +45,18 @@ from src.flash_messages import schedule_post_rerun_flash
 from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.mailer import send_account_link_email
 from src.nlp_engine import (
+    CURATOR_MESSAGE_ADVICE_BALANCED,
     RowNlpCacheResult,
     avg_signature_from_cache,
-    coherence_level,
     coherence_score_bucket_table,
     compute_row_cache,
     corriger_texte_fr,
-    curator_advices_after_save,
     dataframe_for_dashboard_scope,
     list_parsed_coherence_scores,
     mean_syntax_contrast_parsed,
     outliers_low_coherence_table,
     parse_persisted_coherence_score,
+    post_save_stylometric_session_payload,
     row_nlp_feedback_bundle_after_persist,
     signature_variance,
 )
@@ -118,22 +118,9 @@ def _clear_post_save_stylometric_feedback(project_id: str) -> None:
 
 def _store_post_save_stylometric_feedback(project_id: str, pkg: RowNlpCacheResult) -> None:
     """Enregistre le feedback à afficher au prochain run (après ``st.rerun()``)."""
-    advices = curator_advices_after_save(pkg.advice_stats, pkg.coherence_deltas)
-    score = pkg.coherence_score
-    ttr = (pkg.cache.get("_ttr") or "").strip() or "—"
-    contrast = (pkg.cache.get("_syntax_contrast") or "").strip() or "—"
-    if score is not None:
-        level, tone = coherence_level(int(score))
-    else:
-        level, tone = ("Non calculé", "warning")
-    st.session_state[_post_save_stylometric_session_key(project_id)] = {
-        "score": score,
-        "ttr": ttr,
-        "contrast": contrast,
-        "level": level,
-        "tone": tone,
-        "advices": advices,
-    }
+    st.session_state[_post_save_stylometric_session_key(project_id)] = (
+        post_save_stylometric_session_payload(pkg)
+    )
 
 
 def _render_post_save_stylometric_feedback(project_id: str) -> None:
@@ -167,6 +154,8 @@ def _render_post_save_stylometric_feedback(project_id: str) -> None:
     advices = payload.get("advices") or []
     if advices:
         st.info("\n\n".join(str(a) for a in advices[:3]), icon="💡")
+    else:
+        st.info(CURATOR_MESSAGE_ADVICE_BALANCED, icon="💡")
 
 
 def sync_edition_output_widget_state(

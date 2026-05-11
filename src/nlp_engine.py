@@ -258,6 +258,52 @@ def coherence_level(score: int) -> tuple[str, str]:
     return "Critique", "error"
 
 
+COHERENCE_SCORE_MIN: int = 0
+COHERENCE_SCORE_MAX: int = 100
+
+CURATOR_MESSAGE_STATS_UNAVAILABLE: str = (
+    "Analyse stylométrique indisponible : modèle NLP absent ou textes insuffisants "
+    "pour calculer les indicateurs."
+)
+
+CURATOR_MESSAGE_ADVICE_BALANCED: str = (
+    "Aucun conseil prioritaire : indicateurs dans une zone équilibrée, ou dataset "
+    "encore trop réduit pour comparer les axes stylistiques."
+)
+
+
+def qualitative_coherence_feedback(score: int | None) -> tuple[str, str]:
+    """Libellé qualitatif et tonalité UI pour le score persisté.
+
+    ``coherence_level`` n'est appelé que pour un entier dans la plage métier
+    ``[COHERENCE_SCORE_MIN, COHERENCE_SCORE_MAX]``. Valeur absente ou hors plage :
+    message explicite en français, sans palier inventé.
+
+    Args:
+        score: Score issu du cache persisté, ou ``None`` si absent / non numérique.
+
+    Returns:
+        Couple ``(libellé, tonalité)`` pour ``st.success`` / ``st.warning`` / etc.
+    """
+    if score is None:
+        return "Non calculé", "warning"
+    if score < COHERENCE_SCORE_MIN or score > COHERENCE_SCORE_MAX:
+        return (
+            "Score de cohérence absent, illisible ou hors plage (attendu 0–100).",
+            "warning",
+        )
+    return coherence_level(score)
+
+
+def normalized_coherence_metric_score(score: int | None) -> int | None:
+    """Score prêt pour ``st.metric`` : ``None`` si absent ou hors plage 0–100."""
+    if score is None:
+        return None
+    if score < COHERENCE_SCORE_MIN or score > COHERENCE_SCORE_MAX:
+        return None
+    return int(score)
+
+
 def compute_coherence_score(
     sig_fiche: dict[str, float], sig_dataset: dict[str, float], mots_repetes: list[str]
 ) -> tuple[int, dict[str, float]]:
@@ -332,17 +378,11 @@ def prioritized_actions(
 def curator_advices_after_save(stats: dict[str, Any], deltas: dict[str, float]) -> list[str]:
     """Conseils pour l'UI après sauvegarde ; message explicite si NLP ou stats indisponibles."""
     if not stats:
-        return [
-            "Analyse stylométrique indisponible : modèle NLP absent ou textes insuffisants "
-            "pour calculer les indicateurs."
-        ]
+        return [CURATOR_MESSAGE_STATS_UNAVAILABLE]
     adv = prioritized_actions(stats, deltas)
     if adv:
         return adv
-    return [
-        "Aucun conseil prioritaire : indicateurs dans une zone équilibrée, ou dataset "
-        "encore trop réduit pour comparer les axes stylistiques."
-    ]
+    return [CURATOR_MESSAGE_ADVICE_BALANCED]
 
 
 def avg_signature_from_cache(df: pd.DataFrame) -> dict[str, float] | None:
@@ -373,6 +413,37 @@ class RowNlpCacheResult:
     coherence_score: int | None
     coherence_deltas: dict[str, float]
     advice_stats: dict[str, Any]
+
+
+def post_save_stylometric_session_payload(pkg: RowNlpCacheResult) -> dict[str, Any]:
+    """Construit le dict de session Streamlit pour le bloc « retour stylistique » post-sauvegarde.
+
+    Les métriques TTR et contraste syntaxique proviennent des colonnes cache de ``pkg``
+    (ligne relue après persistance). Le score affiché en métrique n'est renseigné que
+    s'il est dans l'intervalle métier 0–100 ; le libellé qualitatif évite ``coherence_level``
+    hors plage. Les conseils passent par :func:`curator_advices_after_save` (liste jamais vide).
+
+    Args:
+        pkg: Bundle produit par :func:`row_nlp_feedback_bundle_after_persist`.
+
+    Returns:
+        Dictionnaire sérialisable (``score``, ``ttr``, ``contrast``, ``level``, ``tone``,
+        ``advices``) pour ``st.session_state``.
+    """
+    advices = curator_advices_after_save(pkg.advice_stats, pkg.coherence_deltas)
+    raw_score = pkg.coherence_score
+    ttr = (pkg.cache.get("_ttr") or "").strip() or "—"
+    contrast = (pkg.cache.get("_syntax_contrast") or "").strip() or "—"
+    level, tone = qualitative_coherence_feedback(raw_score)
+    metric_score = normalized_coherence_metric_score(raw_score)
+    return {
+        "score": metric_score,
+        "ttr": ttr,
+        "contrast": contrast,
+        "level": level,
+        "tone": tone,
+        "advices": advices,
+    }
 
 
 def translate_trigram(trigram: str) -> str:
