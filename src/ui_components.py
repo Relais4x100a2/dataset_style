@@ -73,6 +73,7 @@ from src.project_entries_cache import (
     cached_load_project_entries,
     invalidate_project_entries_cache,
 )
+from src.project_session import MembershipProject, resolve_active_project
 
 logger = logging.getLogger(__name__)
 
@@ -646,6 +647,51 @@ def _render_project_delete_guarded_form(
             _show_action_error("Suppression projet impossible", exc)
 
 
+def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
+    """Guided empty-state in the main column when the user has zero projects.
+
+    Ensures a visible creation path on narrow viewports without relying on the
+    collapsed sidebar alone. Reuses ``_render_project_create_form`` with
+    ``key_prefix="onboarding_main"`` so widget keys stay distinct from the
+    sidebar form (``sb_first``).
+
+    Args:
+        user: Authenticated user.
+        engine: SQLAlchemy engine.
+    """
+    st.markdown("### Bienvenue dans Dataset Style Studio")
+    st.info(
+        "Tu n’as pas encore de projet. Suis les étapes ci-dessous, puis crée ton "
+        "premier projet — la page se mettra à jour automatiquement.",
+        icon="👋",
+    )
+    st.markdown(
+        "**Étape 1** — Ouvre le menu **☰** en haut à gauche pour afficher la barre "
+        "latérale (compte et zone « Projet courant »)."
+    )
+    st.markdown(
+        "**Étape 2** — Saisis le nom de ton projet dans le formulaire ci-dessous "
+        "(tu peux aussi utiliser le même type de formulaire dans la barre latérale "
+        "une fois ouverte)."
+    )
+    st.markdown(
+        "**Étape 3** — Clique sur **Créer**. Les onglets du studio (projets, "
+        "dataset, export, etc.) s’affichent tout de suite après rechargement."
+    )
+    st.divider()
+    st.markdown("#### Créer ton premier projet")
+    st.caption(
+        "Sur écran étroit, privilégie ce bloc : tu n’as pas besoin d’ouvrir "
+        "uniquement la barre latérale pour agir."
+    )
+    _render_project_create_form(
+        user,
+        engine,
+        key_prefix="onboarding_main",
+        label="Nom du projet",
+    )
+
+
 def render_sidebar(
     user: CurrentUser,
     engine: Engine,
@@ -662,6 +708,8 @@ def render_sidebar(
     st.subheader("Projet courant")
     projects = list_projects_for_user(engine, user.user_id)
     if not projects:
+        st.session_state.pop("project_id", None)
+        st.session_state.pop("project_role", None)
         st.warning("Aucun projet. Crée le premier projet.")
         _render_project_create_form(
             user,
@@ -670,6 +718,11 @@ def render_sidebar(
             label="Nom du projet",
         )
         return "", ""
+
+    summaries = [MembershipProject(p.project_id, p.role) for p in projects]
+    pid, role = resolve_active_project(_current_project_id(), summaries)
+    st.session_state["project_id"] = pid
+    st.session_state["project_role"] = role
 
     options = {f"{p.name} ({p.role})": p for p in projects}
     labels = list(options.keys())
