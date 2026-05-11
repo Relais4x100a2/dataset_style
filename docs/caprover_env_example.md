@@ -14,9 +14,12 @@ Exemple:
   "LLM_MODEL": "mistral",
   "LLM_API_KEY": "",
   "LLM_TIMEOUT_SECONDS": "300",
-  "LANGUAGETOOL_BASE_URL": "http://srv-captain--languagetool:8010"
+  "LANGUAGETOOL_BASE_URL": "http://srv-captain--languagetool:8010",
+  "DISABLE_SELF_SERVICE_PROJECT_CREATION": ""
 }
 ```
+
+`DISABLE_SELF_SERVICE_PROJECT_CREATION` : laisser vide pour autoriser la création du premier projet depuis l’UI ; mettre `"true"` (ou `"1"`) pour un parcours **invitation uniquement** (message sans formulaire pour les utilisateurs sans projet).
 
 Ensuite, déploiement en une commande:
 

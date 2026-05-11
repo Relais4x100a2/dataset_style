@@ -40,6 +40,13 @@ from src.database import (
     update_project_entries,
     update_project_settings_as_admin,
 )
+from src.empty_project_onboarding import (
+    NO_PROJECT_CREATION_DISABLED_MESSAGE,
+    ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX,
+    SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX,
+    is_self_service_project_creation_allowed,
+    onboarding_steps_when_creation_allowed,
+)
 from src.export_utils import ExportScope, convert_to_jsonl, dataframe_for_export
 from src.flash_messages import schedule_post_rerun_flash
 from src.llm_generate import generate_input_from_output, generate_output_from_input
@@ -678,32 +685,32 @@ def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
 
     Ensures a visible creation path on narrow viewports without relying on the
     collapsed sidebar alone. Reuses ``_render_project_create_form`` with
-    ``key_prefix="onboarding_main"`` so widget keys stay distinct from the
-    sidebar form (``sb_first``).
+    ``ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX`` so widget keys stay distinct from the
+    sidebar form (``SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX``).
+
+    When ``DISABLE_SELF_SERVICE_PROJECT_CREATION`` is set, shows guidance without
+    a creation form (invitation-only deployments).
 
     Args:
         user: Authenticated user.
         engine: SQLAlchemy engine.
     """
     st.markdown("### Bienvenue dans Dataset Style Studio")
+    if not is_self_service_project_creation_allowed():
+        st.warning(NO_PROJECT_CREATION_DISABLED_MESSAGE, icon="🔒")
+        st.info(
+            "Tu peux ouvrir le menu **☰** en haut à gauche pour te déconnecter ou "
+            "consulter ton compte.",
+            icon="ℹ️",
+        )
+        return
     st.info(
         "Tu n’as pas encore de projet. Suis les étapes ci-dessous, puis crée ton "
         "premier projet — la page se mettra à jour automatiquement.",
         icon="👋",
     )
-    st.markdown(
-        "**Étape 1** — Ouvre le menu **☰** en haut à gauche pour afficher la barre "
-        "latérale (compte et zone « Projet courant »)."
-    )
-    st.markdown(
-        "**Étape 2** — Saisis le nom de ton projet dans le formulaire ci-dessous "
-        "(tu peux aussi utiliser le même type de formulaire dans la barre latérale "
-        "une fois ouverte)."
-    )
-    st.markdown(
-        "**Étape 3** — Clique sur **Créer**. Les onglets du studio (projets, "
-        "dataset, export, etc.) s’affichent tout de suite après rechargement."
-    )
+    for step in onboarding_steps_when_creation_allowed():
+        st.markdown(step.body_markdown)
     st.divider()
     st.markdown("#### Créer ton premier projet")
     st.caption(
@@ -713,7 +720,7 @@ def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
     _render_project_create_form(
         user,
         engine,
-        key_prefix="onboarding_main",
+        key_prefix=ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX,
         label="Nom du projet",
     )
 
@@ -736,11 +743,14 @@ def render_sidebar(
     if not projects:
         st.session_state.pop("project_id", None)
         st.session_state.pop("project_role", None)
+        if not is_self_service_project_creation_allowed():
+            st.warning(NO_PROJECT_CREATION_DISABLED_MESSAGE)
+            return "", ""
         st.warning("Aucun projet. Crée le premier projet.")
         _render_project_create_form(
             user,
             engine,
-            key_prefix="sb_first",
+            key_prefix=SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX,
             label="Nom du projet",
         )
         return "", ""
