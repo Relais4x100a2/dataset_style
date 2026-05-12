@@ -87,8 +87,8 @@ def test_ensure_new_entry_preserves_long_buffers_when_repairing_dimension() -> N
     assert session[keys["type"]] == "a"
 
 
-def test_ensure_new_entry_migrates_legacy_project_only_buffers() -> None:
-    """Upgrades from project-only keys copy once into user-scoped keys."""
+def test_ensure_new_entry_discards_legacy_project_only_buffers() -> None:
+    """Legacy project-only keys must not be copied into the current user's buffers."""
     session: dict[str, object] = {}
     session["new_entry_p9_input"] = "legacy draft"
     session["new_entry_p9_output"] = "legacy output"
@@ -101,10 +101,28 @@ def test_ensure_new_entry_migrates_legacy_project_only_buffers() -> None:
         "statuts": ["st"],
     }
     keys = ensure_new_entry_widget_keys_initialized(session, "p9", "curator-1", dims)
-    assert session[keys["input"]] == "legacy draft"
-    assert session[keys["output"]] == "legacy output"
+    assert session[keys["input"]] == ""
+    assert session[keys["output"]] == ""
     assert "new_entry_p9_input" not in session
     assert "new_entry_p9_output" not in session
+
+
+def test_ensure_new_entry_second_user_does_not_inherit_legacy_text() -> None:
+    """Regression (QA): another account must not receive legacy buffers on same session."""
+    session: dict[str, object] = {}
+    session["new_entry_p9_input"] = "written under unknown account"
+    dims = {
+        "types": ["t"],
+        "structures": ["s"],
+        "tons": ["n"],
+        "formats": ["f"],
+        "publics": ["p"],
+        "statuts": ["st"],
+    }
+    keys_b = ensure_new_entry_widget_keys_initialized(session, "p9", "user-b", dims)
+    assert session[keys_b["input"]] == ""
+    assert session[keys_b["output"]] == ""
+    assert "new_entry_p9_input" not in session
 
 
 def test_new_entry_pending_clear_session_key_is_scoped_by_project_and_user() -> None:

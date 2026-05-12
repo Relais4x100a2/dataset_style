@@ -259,44 +259,40 @@ def _legacy_new_entry_storage_keys(project_id: str) -> dict[str, str]:
     }
 
 
-def _migrate_legacy_new_entry_buffers_if_empty(
+def _discard_legacy_new_entry_keys_for_project(
     session: MutableMapping[str, Any],
-    keys: dict[str, str],
     legacy: dict[str, str],
 ) -> None:
-    """Copy legacy project-only text buffers into user-scoped keys when upgrading.
+    """Remove pre-user-scope keys for this project without copying them anywhere.
 
-    If the new keys already hold draft/output content, legacy values are left
-    untouched so we never overwrite active work.
+    Legacy keys did not record which account produced the text. Copying them into
+    the current user's scoped buffers would be unsafe when another account signs
+    in on the same browser session without a full session reset.
+
+    The legacy pending-clear flag ``_pending_clear_new_entry_{project_id}`` is
+    left intact so ``render_tab_ajout`` can still consume it once.
 
     Args:
         session: Streamlit ``st.session_state`` or any mutable mapping (tests).
-        keys: Keys from :func:`new_entry_session_keys` (user-scoped).
         legacy: Keys from :func:`_legacy_new_entry_storage_keys`.
     """
-    if str(session.get(keys["input"], "")).strip() or str(session.get(keys["output"], "")).strip():
-        return
-    leg_in, leg_out, leg_notes = legacy["input"], legacy["output"], legacy["notes"]
-    if leg_in not in session and leg_out not in session and leg_notes not in session:
-        return
-    in_val = str(session.get(leg_in, "")) if leg_in in session else ""
-    out_val = str(session.get(leg_out, "")) if leg_out in session else ""
-    notes_val = str(session.get(leg_notes, "")) if leg_notes in session else ""
-    if not in_val.strip() and not out_val.strip() and not notes_val.strip():
-        return
-    session[keys["input"]] = in_val
-    session[keys["output"]] = out_val
-    session[keys["notes"]] = notes_val
-    session.pop(leg_in, None)
-    session.pop(leg_out, None)
-    session.pop(leg_notes, None)
+    for key in legacy.values():
+        session.pop(key, None)
 
 
 def new_entry_session_keys(project_id: str, user_id: str) -> dict[str, str]:
     """Build stable ``session_state`` keys for the « Nouvelle entrée » tab.
 
-    Keys are scoped by ``project_id`` and ``user_id`` so drafts never leak
-    across projects or concurrent browser sessions for different accounts.
+    Keys are scoped by ``project_id`` and ``user_id`` so drafts do not collide
+    across projects or between accounts **when each account uses a clean session
+    or goes through normal logout / login**.
+
+    Streamlit ``session_state`` is per browser tab/session: pre-user-scope legacy
+    keys are discarded instead of being reassigned to the current user (see
+    :func:`_discard_legacy_new_entry_keys_for_project`). On logout or when the
+    authenticated user id changes, ``src.auth`` (``logout`` / ``_set_user``) purges
+    all ``new_entry_*`` / ``_pending_clear_new_entry_*`` keys via
+    ``purge_all_new_entry_session_state`` (see ``src.new_entry_session_state``).
 
     Args:
         project_id: Active project identifier.
@@ -364,7 +360,7 @@ def ensure_new_entry_widget_keys_initialized(
         session[keys["output"]] = ""
     if keys["notes"] not in session:
         session[keys["notes"]] = ""
-    _migrate_legacy_new_entry_buffers_if_empty(session, keys, legacy)
+    _discard_legacy_new_entry_keys_for_project(session, legacy)
     return keys
 
 

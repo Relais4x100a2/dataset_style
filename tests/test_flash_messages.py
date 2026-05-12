@@ -78,7 +78,7 @@ def test_render_post_rerun_flash_routes_level(level: str, attr: str) -> None:
 
 
 def test_logout_preserves_scheduled_flash_payload() -> None:
-    """Self-delete schedules flash before ``logout()``; only auth user key is cleared."""
+    """Self-delete schedules flash before ``logout()``; auth and new-entry drafts cleared."""
     from unittest.mock import patch
 
     from src import auth
@@ -90,12 +90,16 @@ def test_logout_preserves_scheduled_flash_payload() -> None:
             "display_name": "a",
             "access_token": "tok",
             "is_super_admin": False,
-        }
+        },
+        "new_entry_p1_u_u1_input": "draft",
+        "_pending_clear_new_entry_p1_u_u1": True,
     }
     schedule_post_rerun_flash(session, "Compte supprimé.")
     with patch.object(auth.st, "session_state", session):
         auth.logout()
     assert "current_user" not in session
+    assert "new_entry_p1_u_u1_input" not in session
+    assert "_pending_clear_new_entry_p1_u_u1" not in session
     assert POST_RERUN_FLASH_KEY in session
     assert session[POST_RERUN_FLASH_KEY]["message"] == "Compte supprimé."
 

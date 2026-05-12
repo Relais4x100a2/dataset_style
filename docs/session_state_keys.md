@@ -31,6 +31,8 @@ Fonction utilitaire : `new_entry_session_keys(project_id, user_id)`.
   `_pending_clear_new_entry_{project_id}_u_{user_id_sanitisé}`  
   pour vider les tampons au run suivant (avant instanciation des `text_area`).
 
-## Migration (déploiement)
+## Migration / héritage (clés sans `user_id`)
 
-Les anciennes clés **sans** segment utilisateur (`new_entry_{project_id}_input`, etc.) sont copiées une fois vers le nouveau préfixe si les tampons user-scopés sont encore vides, puis supprimées. L’ancien drapeau `_pending_clear_new_entry_{project_id}` est encore reconnu une fois pour déclencher le vidage.
+Les anciennes clés **sans** segment utilisateur (`new_entry_{project_id}_input`, etc.) ne sont **plus** recopiées vers le compte courant : elles ne portaient pas d’auteur, ce qui permettait à un second compte sur la même session navigateur d’hériter par erreur d’un brouillon. À l’initialisation de l’onglet pour un projet, ces clés sont **supprimées** (tampons vides côté préfixe user-scopé). L’ancien drapeau `_pending_clear_new_entry_{project_id}` reste reconnu dans `render_tab_ajout` pour le vidage (consommé au même titre que le drapeau user-scopé).
+
+**Déconnexion / changement de compte** : `logout` et le chemin `_set_user` lorsque l’`user_id` change appellent `purge_all_new_entry_session_state` (`src/new_entry_session_state.py`) pour effacer **toutes** les clés `new_entry_*` et `_pending_clear_new_entry_*` restées dans `session_state`.

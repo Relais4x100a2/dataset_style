@@ -296,10 +296,20 @@ def get_current_user() -> CurrentUser | None:
 
 
 def logout() -> None:
+    """Clear auth and drop in-browser new-entry drafts (see issue-017 QA)."""
+    from src.new_entry_session_state import purge_all_new_entry_session_state
+
+    purge_all_new_entry_session_state(st.session_state)
     st.session_state.pop(_state_key(), None)
 
 
 def _set_user(record: UserRecord, access_token: str) -> None:
+    """Persist the authenticated user; clears new-entry state if the account changed."""
+    from src.new_entry_session_state import purge_all_new_entry_session_state
+
+    prior = get_current_user()
+    if prior is not None and prior.user_id != record.user_id:
+        purge_all_new_entry_session_state(st.session_state)
     st.session_state[_state_key()] = {
         "user_id": record.user_id,
         "email": record.email,
