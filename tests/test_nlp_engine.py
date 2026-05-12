@@ -13,6 +13,7 @@ import pytest
 from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
     CURATOR_MESSAGE_STATS_UNAVAILABLE,
+    SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
     RowNlpCacheResult,
     avg_signature_from_cache,
     coherence_level,
@@ -120,6 +121,7 @@ def test_post_save_stylometric_session_payload_from_bundle() -> None:
     assert payload["score"] == 77
     assert payload["ttr"] == "0.70"
     assert payload["contrast"] == "0.40"
+    assert payload["syntax_contrast_trivially_low"] is False
     assert payload["level"] == coherence_level(77)[0]
     assert len(payload["advices"]) >= 1
 
@@ -138,6 +140,8 @@ def test_post_save_stylometric_payload_invalid_score_no_false_excellent() -> Non
     pkg = RowNlpCacheResult(cache, 150, {}, stats)
     payload = post_save_stylometric_session_payload(pkg)
     assert payload["score"] is None
+    assert payload["syntax_contrast_trivially_low"] is True
+    assert float(payload["contrast"]) < SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT
     assert coherence_level(150)[0] == "Excellent"
     assert payload["level"] != "Excellent"
     assert "hors plage" in payload["level"].lower()

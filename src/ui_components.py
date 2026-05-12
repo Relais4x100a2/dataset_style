@@ -53,22 +53,27 @@ from src.llm_generate import generate_input_from_output, generate_output_from_in
 from src.mailer import send_account_link_email
 from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
+    SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
     EditionScoreFilterSpec,
     RowNlpCacheResult,
     avg_signature_from_cache,
     coherence_score_bucket_table,
     compute_row_cache,
     corriger_texte_fr,
+    count_trivial_syntax_contrast_entries,
     dataframe_for_dashboard_scope,
     edition_statut_filter_options,
     filter_edition_entries_dataframe,
+    is_persisted_syntax_contrast_trivially_low,
     list_parsed_coherence_scores,
     mean_syntax_contrast_parsed,
     outliers_low_coherence_table,
     parse_persisted_coherence_score,
+    parse_persisted_syntax_contrast,
     post_save_stylometric_session_payload,
     row_nlp_feedback_bundle_after_persist,
     signature_variance,
+    trivial_syntax_contrast_entries_table,
 )
 from src.presets import (
     DIMENSION_KEYS,
@@ -166,6 +171,14 @@ def _render_post_save_stylometric_feedback(project_id: str) -> None:
         st.metric("TTR", str(payload.get("ttr", "—")))
     with m3:
         st.metric("Contraste syntaxique", str(payload.get("contrast", "—")))
+    if payload.get("syntax_contrast_trivially_low"):
+        st.warning(
+            "Paire trop proche sur le plan syntaxique : le texte généré ressemble fortement "
+            "au brouillon au niveau des motifs grammaticaux (pas le sens ni le plagiat). "
+            "Pour le fine-tuning, cet exemple risque d'apporter peu d'information nouvelle — "
+            "envisagez de le réviser ou de l'exclure.",
+            icon="⚠️",
+        )
     tone = str(payload.get("tone", "info"))
     level = str(payload.get("level", ""))
     if tone == "success":
@@ -1557,6 +1570,21 @@ def render_tab_edition(
             "Cette valeur existe dans vos données mais plus dans le preset actif.",
             icon="⚠️",
         )
+    sc_cell = row.get("_syntax_contrast")
+    if is_persisted_syntax_contrast_trivially_low(sc_cell):
+        st.warning(
+            "Paire trop proche sur le plan syntaxique : le texte généré ressemble fortement "
+            "au brouillon au niveau des motifs grammaticaux (pas le sens ni le plagiat). "
+            "Pour le fine-tuning, cet exemple risque d'apporter peu d'information nouvelle — "
+            "envisagez de le réviser ou de l'exclure.",
+            icon="⚠️",
+        )
+    elif parse_persisted_syntax_contrast(sc_cell) is None:
+        st.caption(
+            "Contraste syntaxique non disponible pour cette fiche (cache vide ou invalide). "
+            "La signalisation « paire trop proche » ne s'affiche pas tant qu'une mesure "
+            "exploitable n'est pas présente."
+        )
     with st.form("edit_entry_form"):
         row["type"] = _select_with_legacy(
             "Type de transformation",
@@ -1791,6 +1819,35 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
         st.caption(
             "Retrouvez une fiche via son identifiant dans l'onglet « Gestion & édition » "
             "(liste déroulante ou navigation entre fiches)."
+        )
+
+    st.markdown("#### Paires trop proches sur le plan syntaxique (fine-tuning)")
+    n_trivial = count_trivial_syntax_contrast_entries(scope_df)
+    st.metric(
+        f"Nombre (contraste syntaxique mesuré < {SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT})",
+        int(n_trivial),
+    )
+    st.caption(
+        "Comptage basé uniquement sur les cellules `_syntax_contrast` déjà persistées et "
+        "parseables ; seuil strict (valeur = "
+        f"{SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT} non incluse). "
+        "Indicateur syntaxique (motifs grammaticaux), pas une mesure sémantique ni de similarité textuelle."
+    )
+    trivial_tbl = trivial_syntax_contrast_entries_table(scope_df, limit=15)
+    if trivial_tbl.empty:
+        st.info("Aucune entrée avec contraste syntaxique mesuré sous le seuil sur ce périmètre.")
+    else:
+        disp_trivial = trivial_tbl.rename(
+            columns={
+                "id": "Identifiant",
+                "statut": "Statut",
+                "type": "Type",
+                "syntax_contrast": "Contraste syntaxique (0–1)",
+            }
+        )
+        st.dataframe(disp_trivial, hide_index=True, width="stretch")
+        st.caption(
+            "Les lignes sans mesure exploitable n'apparaissent pas ici (distinct d'un score bas mesuré)."
         )
 
     st.markdown("#### Moyenne du contraste syntaxique")

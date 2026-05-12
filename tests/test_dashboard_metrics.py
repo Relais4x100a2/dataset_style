@@ -8,13 +8,17 @@ import pandas as pd
 import pytest
 from src.database import STATUT_VALIDE
 from src.nlp_engine import (
+    SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
     coherence_score_bucket_table,
+    count_trivial_syntax_contrast_entries,
     dataframe_for_dashboard_scope,
+    is_persisted_syntax_contrast_trivially_low,
     list_parsed_coherence_scores,
     mean_syntax_contrast_parsed,
     outliers_low_coherence_table,
     parse_persisted_syntax_contrast,
     signature_variance,
+    trivial_syntax_contrast_entries_table,
 )
 
 
@@ -31,6 +35,43 @@ def test_parse_persisted_syntax_contrast_decimal_comma() -> None:
 
 def test_parse_persisted_syntax_contrast_invalid() -> None:
     assert parse_persisted_syntax_contrast("n/a") is None
+
+
+def test_is_persisted_syntax_contrast_trivially_low_boundary() -> None:
+    """Issue 014 : strictement sous le seuil ; vide ou invalide → jamais « trivial »."""
+    thr = SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT
+    assert is_persisted_syntax_contrast_trivially_low("0.19") is True
+    assert is_persisted_syntax_contrast_trivially_low("0,19") is True
+    assert is_persisted_syntax_contrast_trivially_low(str(thr)) is False
+    assert is_persisted_syntax_contrast_trivially_low("0.21") is False
+    assert is_persisted_syntax_contrast_trivially_low("") is False
+    assert is_persisted_syntax_contrast_trivially_low(None) is False
+    assert is_persisted_syntax_contrast_trivially_low("n/a") is False
+
+
+def test_count_trivial_syntax_contrast_entries_skips_unparseable() -> None:
+    """Sans valeur parseable, aucune ligne ne doit gonfler le compteur (issue 014)."""
+    df = pd.DataFrame(
+        {
+            "id": ["a", "b", "c", "d"],
+            "_syntax_contrast": ["0.1", "", "0.5", "bad"],
+        }
+    )
+    assert count_trivial_syntax_contrast_entries(df) == 1
+
+
+def test_trivial_syntax_contrast_entries_table_sorted_limited() -> None:
+    df = pd.DataFrame(
+        [
+            {"id": "x", "statut": "s", "type": "T", "_syntax_contrast": "0.18"},
+            {"id": "y", "statut": "s", "type": "T", "_syntax_contrast": "0.05"},
+            {"id": "z", "statut": "s", "type": "T", "_syntax_contrast": "0.50"},
+            {"id": "na", "statut": "s", "type": "T", "_syntax_contrast": ""},
+        ]
+    )
+    out = trivial_syntax_contrast_entries_table(df, limit=2)
+    assert list(out["id"]) == ["y", "x"]
+    assert list(out["syntax_contrast"]) == [pytest.approx(0.05), pytest.approx(0.18)]
 
 
 def test_list_parsed_coherence_scores_skips_invalid() -> None:
