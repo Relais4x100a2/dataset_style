@@ -241,3 +241,23 @@ def test_signature_variance_none_when_no_axis_has_two_observations() -> None:
         ]
     )
     assert signature_variance(df) is None
+
+
+def test_outliers_and_trivial_tables_share_default_limit_with_constant() -> None:
+    """Single UI limit for low-coherence outliers and trivial-contrast tables (issue-023)."""
+    import inspect
+
+    from src.nlp_engine import (
+        DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
+        outliers_low_coherence_table,
+        trivial_syntax_contrast_entries_table,
+    )
+
+    assert (
+        inspect.signature(outliers_low_coherence_table).parameters["limit"].default
+        == DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT
+    )
+    assert (
+        inspect.signature(trivial_syntax_contrast_entries_table).parameters["limit"].default
+        == DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT
+    )
