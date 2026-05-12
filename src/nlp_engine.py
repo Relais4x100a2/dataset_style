@@ -815,6 +815,93 @@ def filter_edition_entries_dataframe(
     return _sort_edition_pick_by_stable_string_id(out.loc[mask_sc])
 
 
+# Issue 016 — position et compteurs révision (liste filtrée édition, sans BDD).
+EDITION_STATUTS_NEEDS_REVIEW: frozenset[str] = frozenset({"A faire", "En cours"})
+EDITION_STATUT_VALIDATED: str = "Fait et validé"
+
+
+@dataclass(frozen=True)
+class EditionPickRevisionStats:
+    """Totaux dérivés uniquement du frame d'entrées filtré (``df_pick``)."""
+
+    total: int
+    needing_review: int
+    validated: int
+    other: int
+
+
+def edition_entry_k_of_n(
+    ordered_entry_ids: Sequence[str],
+    current_id: str,
+) -> tuple[int, int]:
+    """Position 1-based ``k`` et effectif ``n`` alignés sur ``ordered_entry_ids``.
+
+    L'ordre doit être le même que ``df_pick["id"].astype(str).tolist()`` après
+    ``filter_edition_entries_dataframe`` (tri stable sur ``id`` en chaîne), le
+    ``selectbox`` d'édition et ``edition_nav_neighbor_entry_id``.
+
+    Args:
+        ordered_entry_ids: Identifiants dans l'ordre d'affichage.
+        current_id: Fiche courante (doit figurer dans la liste si ``n > 0``).
+
+    Returns:
+        Couple ``(k, n)``. Si ``n == 0``, retourne ``(0, 0)``.
+
+    Raises:
+        ValueError: si la liste est non vide et ``current_id`` est absent.
+    """
+    ids = [str(x) for x in ordered_entry_ids]
+    n = len(ids)
+    if n == 0:
+        return (0, 0)
+    cur = str(current_id)
+    if cur not in ids:
+        msg = "current_id must appear in ordered_entry_ids"
+        raise ValueError(msg)
+    return (ids.index(cur) + 1, n)
+
+
+def edition_pick_revision_stats(
+    df_pick: pd.DataFrame,
+    *,
+    statut_column: str = "statut",
+) -> EditionPickRevisionStats:
+    """Compte les statuts dans la sélection filtrée (même source que la liste d'édition).
+
+    « À réviser » : libellés exacts ``A faire`` ou ``En cours`` (après strip).
+    « Validées » : ``Fait et validé``. Tout autre libellé (ou statut vide / NaN)
+    est compté dans ``other``.
+
+    Args:
+        df_pick: Données déjà filtrées ; aucune persistance ni requête SQL.
+        statut_column: Colonne statut métier.
+
+    Returns:
+        Totaux avec ``total == needing_review + validated + other``.
+    """
+    total = len(df_pick)
+    if total == 0:
+        return EditionPickRevisionStats(0, 0, 0, 0)
+    if statut_column not in df_pick.columns:
+        return EditionPickRevisionStats(total=total, needing_review=0, validated=0, other=total)
+
+    needing = 0
+    validated = 0
+    for raw in df_pick[statut_column].tolist():
+        if pd.isna(raw):
+            label = ""
+        else:
+            label = str(raw).strip()
+        if label in EDITION_STATUTS_NEEDS_REVIEW:
+            needing += 1
+        elif label == EDITION_STATUT_VALIDATED:
+            validated += 1
+    other = total - needing - validated
+    return EditionPickRevisionStats(
+        total=total, needing_review=needing, validated=validated, other=other
+    )
+
+
 # Issue 014 (S8) : seuil unique pour « paire trop proche » au sens syntaxique
 # (motifs POS / trigrammes, comme ``syntax_contrast_score`` → ``compute_row_cache``).
 # Une entrée est signalée seulement si une valeur persistée est parseable et
