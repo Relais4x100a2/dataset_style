@@ -58,6 +58,7 @@ from src.llm_generate import generate_input_from_output, generate_output_from_in
 from src.mailer import send_account_link_email
 from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
+    DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
     SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
     EditionScoreFilterSpec,
     RowNlpCacheResult,
@@ -66,6 +67,7 @@ from src.nlp_engine import (
     compute_row_cache,
     corriger_texte_fr,
     count_trivial_syntax_contrast_entries,
+    dataframe_for_coherence_distribution_scan,
     dataframe_for_dashboard_scope,
     edition_entry_k_of_n,
     edition_nav_neighbor_entry_id,
@@ -81,6 +83,7 @@ from src.nlp_engine import (
     post_save_stylometric_session_payload,
     row_nlp_feedback_bundle_after_persist,
     signature_variance,
+    summarize_parsed_coherence_scores,
     trivial_syntax_contrast_entries_table,
 )
 from src.post_save_feedback_display import (
@@ -1983,25 +1986,44 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
         )
 
     st.markdown("#### Distribution des scores de cohérence")
-    scores = list_parsed_coherence_scores(scope_df)
-    n_scope = len(scope_df)
-    if "_coherence_score" in scope_df.columns:
+    work_df, used_sample, n_scope = dataframe_for_coherence_distribution_scan(
+        scope_df,
+        max_rows_without_sampling=DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
+    )
+    if used_sample and n_scope > 0:
+        st.caption(
+            f"Performance : ce périmètre compte {n_scope} entrées ; la distribution et la "
+            f"synthèse ci-dessous sont calculées sur un échantillon aléatoire de {len(work_df)} "
+            "lignes (scores lus via le même parseur que l'export et les filtres)."
+        )
+    scores = list_parsed_coherence_scores(work_df)
+    if "_coherence_score" in work_df.columns:
         missing_scores = sum(
             1
-            for v in scope_df["_coherence_score"].tolist()
+            for v in work_df["_coherence_score"].tolist()
             if parse_persisted_coherence_score(v) is None
         )
     else:
-        missing_scores = n_scope
+        missing_scores = len(work_df)
     if not scores:
         st.info("Aucun score de cohérence numérique sur ce périmètre.")
     else:
+        summary = summarize_parsed_coherence_scores(scores)
+        if summary is not None:
+            sm1, sm2, sm3 = st.columns(3)
+            sm1.metric("Moyenne", f"{summary.mean:.2f}")
+            sm2.metric("Médiane", f"{summary.median:.2f}")
+            sm3.metric("Minimum", str(summary.minimum))
         bucket_df = coherence_score_bucket_table(scores)
         st.bar_chart(bucket_df.set_index("Tranche (score)"), width="stretch", horizontal=False)
         if missing_scores:
+            scope_label = (
+                f"{len(work_df)} lignes de l'échantillon"
+                if used_sample
+                else f"{n_scope} dans ce périmètre"
+            )
             st.caption(
-                f"{missing_scores} entrée(s) sans score de cohérence exploitable sur "
-                f"{n_scope} dans ce périmètre."
+                f"{missing_scores} entrée(s) sans score de cohérence exploitable sur {scope_label}."
             )
 
     st.markdown("#### Écart-type par axe stylistique (fiches validées)")

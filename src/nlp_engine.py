@@ -6,6 +6,7 @@ Sans dépendance Streamlit — testable indépendamment.
 import json
 import logging
 import os
+import statistics
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -908,6 +909,10 @@ def edition_pick_revision_stats(
 # strictement inférieure à ce flottant (pas les cellules vides ou invalides).
 SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT: float = 0.2
 
+# Au-delà : ``dataframe_for_coherence_distribution_scan`` échantillonne pour l'histogramme
+# et la synthèse (même parseur Python, pas d'agrégat SQL divergent).
+DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN: int = 25_000
+
 
 def parse_persisted_syntax_contrast(value: object) -> float | None:
     """Parse une cellule ``_syntax_contrast`` ; ``None`` si vide ou invalide.
@@ -1009,6 +1014,70 @@ def list_parsed_coherence_scores(
         if p is not None:
             out.append(p)
     return out
+
+
+@dataclass(frozen=True)
+class ParsedCoherenceScoreSummary:
+    """Synthèse sur des scores déjà issus de :func:`parse_persisted_coherence_score`."""
+
+    mean: float
+    median: float
+    minimum: int
+    count: int
+
+
+def summarize_parsed_coherence_scores(
+    scores: list[int],
+) -> ParsedCoherenceScoreSummary | None:
+    """Moyenne, médiane et minimum sur une liste d'entiers parseés (0–100 typiquement).
+
+    La médiane suit :func:`statistics.median` : pour un nombre pair d'éléments,
+    c'est la moyenne arithmétique des deux valeurs centrales après tri.
+
+    Args:
+        scores: Liste telle que produite par :func:`list_parsed_coherence_scores`.
+
+    Returns:
+        ``None`` si ``scores`` est vide.
+    """
+    if not scores:
+        return None
+    ordered = sorted(scores)
+    n = len(ordered)
+    mean_val = round(sum(ordered) / n, 4)
+    med = float(statistics.median(ordered))
+    return ParsedCoherenceScoreSummary(
+        mean=mean_val,
+        median=med,
+        minimum=int(ordered[0]),
+        count=n,
+    )
+
+
+def dataframe_for_coherence_distribution_scan(
+    df: pd.DataFrame,
+    *,
+    max_rows_without_sampling: int,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, bool, int]:
+    """Sous-ensemble de ``df`` pour distribution / synthèse (échantillon si trop volumineux).
+
+    Args:
+        df: Périmètre tableau de bord (ex. via :func:`dataframe_for_dashboard_scope`).
+        max_rows_without_sampling: Seuil de lignes au-delà duquel un échantillon fixe
+            de cette taille est tiré avec ``DataFrame.sample``.
+        random_state: Graine pour reproductibilité de l'échantillon.
+
+    Returns:
+        ``(work_df, used_sample, n_perimeter)`` avec ``n_perimeter = len(df)``.
+    """
+    n = len(df)
+    if n == 0:
+        return df.iloc[0:0].copy(), False, 0
+    if n <= max_rows_without_sampling:
+        return df, False, n
+    part = df.sample(n=max_rows_without_sampling, random_state=random_state, replace=False)
+    return part, True, n
 
 
 def mean_syntax_contrast_parsed(

@@ -17,7 +17,7 @@ Application Streamlit de curation de datasets littéraires, en mode multi-utilis
   - `publics` (Public cible)
   - `statuts`
 - Paramétrage LLM + LanguageTool par projet (`project_settings`).
-- Tableau de bord stylométrique : distribution des scores de cohérence, variance par axe sur fiches validées (union des axes du cache ; écart-type seulement si l’axe a au moins deux valeurs sur des fiches distinctes), outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
+- Tableau de bord stylométrique : distribution des scores de cohérence avec synthèse numérique (moyenne, médiane, minimum) sur le même périmètre et le même parseur que l’export ; au-delà de 25 000 entrées dans le périmètre, échantillon aléatoire documenté dans l’UI pour l’histogramme et la synthèse. Variance par axe sur fiches validées (union des axes du cache ; écart-type seulement si l’axe a au moins deux valeurs sur des fiches distinctes), outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
 - Persistance PostgreSQL multi-tenant (`src/database.py`).
 - Accueil guidé (étapes + formulaire de création dans la zone principale) lorsque l’utilisateur n’a aucun projet, pour les petits écrans et la barre latérale repliée (`src/ui_components.py`, `src/empty_project_onboarding.py`, `src/project_session.py`).
 - Mise en cache des lignes d’entrées du projet : `cached_load_project_entries` (`@st.cache_data`, TTL 30 s) pour accélérer le passage d’un onglet à l’autre ; invalidation systématique après toute persistance réussie des entrées (`src/project_entries_cache.py`, `invalidate_project_entries_cache`).

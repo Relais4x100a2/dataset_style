@@ -1,4 +1,4 @@
-"""Tests for stylometric dashboard aggregations (issue-006)."""
+"""Tests for stylometric dashboard aggregations (issue-006, issue-022)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ import pandas as pd
 import pytest
 from src.database import STATUT_VALIDE
 from src.nlp_engine import (
+    DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
     SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
     coherence_score_bucket_table,
     count_trivial_syntax_contrast_entries,
+    dataframe_for_coherence_distribution_scan,
     dataframe_for_dashboard_scope,
     is_persisted_syntax_contrast_trivially_low,
     list_parsed_coherence_scores,
@@ -18,6 +20,7 @@ from src.nlp_engine import (
     outliers_low_coherence_table,
     parse_persisted_syntax_contrast,
     signature_variance,
+    summarize_parsed_coherence_scores,
     trivial_syntax_contrast_entries_table,
 )
 
@@ -82,6 +85,74 @@ def test_list_parsed_coherence_scores_skips_invalid() -> None:
     )
     scores = list_parsed_coherence_scores(df)
     assert scores == [80, 75]
+
+
+def test_summarize_parsed_coherence_scores_empty() -> None:
+    assert summarize_parsed_coherence_scores([]) is None
+
+
+def test_summarize_parsed_coherence_scores_single_value() -> None:
+    s = summarize_parsed_coherence_scores([42])
+    assert s is not None
+    assert s.mean == pytest.approx(42.0)
+    assert s.median == pytest.approx(42.0)
+    assert s.minimum == 42
+    assert s.count == 1
+
+
+def test_summarize_parsed_coherence_scores_even_median_is_mean_of_middles() -> None:
+    """Médiane paire : moyenne des deux valeurs centrales (``statistics.median``)."""
+    s = summarize_parsed_coherence_scores([10, 20, 30, 40])
+    assert s is not None
+    assert s.median == pytest.approx(25.0)
+    assert s.mean == pytest.approx(25.0)
+    assert s.minimum == 10
+
+
+def test_summarize_parsed_coherence_scores_odd_median() -> None:
+    s = summarize_parsed_coherence_scores([1, 9, 2])
+    assert s is not None
+    assert s.median == pytest.approx(2.0)
+    assert s.minimum == 1
+
+
+def test_dataframe_for_coherence_distribution_scan_no_sample_when_under_cap() -> None:
+    df = pd.DataFrame({"_coherence_score": ["10", "20"], "id": ["a", "b"]})
+    work, sampled, n = dataframe_for_coherence_distribution_scan(
+        df,
+        max_rows_without_sampling=10,
+        random_state=0,
+    )
+    assert sampled is False
+    assert n == 2
+    assert len(work) == 2
+    assert list_parsed_coherence_scores(work) == [10, 20]
+
+
+def test_dataframe_for_coherence_distribution_scan_samples_when_over_cap() -> None:
+    df = pd.DataFrame(
+        {"_coherence_score": [str(i) for i in range(6)], "id": [str(i) for i in range(6)]}
+    )
+    work, sampled, n = dataframe_for_coherence_distribution_scan(
+        df,
+        max_rows_without_sampling=3,
+        random_state=42,
+    )
+    assert sampled is True
+    assert n == 6
+    assert len(work) == 3
+    assert set(list_parsed_coherence_scores(work)).issubset(set(range(6)))
+
+
+def test_dataframe_for_coherence_distribution_scan_empty() -> None:
+    df = pd.DataFrame()
+    work, sampled, n = dataframe_for_coherence_distribution_scan(
+        df,
+        max_rows_without_sampling=DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
+    )
+    assert work.empty
+    assert sampled is False
+    assert n == 0
 
 
 def test_mean_syntax_contrast_parsed_excludes_empty() -> None:
