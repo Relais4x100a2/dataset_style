@@ -434,12 +434,16 @@ def post_save_stylometric_session_payload(pkg: RowNlpCacheResult) -> dict[str, A
     raw_score = pkg.coherence_score
     ttr = (pkg.cache.get("_ttr") or "").strip() or "—"
     contrast = (pkg.cache.get("_syntax_contrast") or "").strip() or "—"
+    syntax_contrast_trivially_low = is_persisted_syntax_contrast_trivially_low(
+        pkg.cache.get("_syntax_contrast"),
+    )
     level, tone = qualitative_coherence_feedback(raw_score)
     metric_score = normalized_coherence_metric_score(raw_score)
     return {
         "score": metric_score,
         "ttr": ttr,
         "contrast": contrast,
+        "syntax_contrast_trivially_low": syntax_contrast_trivially_low,
         "level": level,
         "tone": tone,
         "advices": advices,
@@ -764,6 +768,13 @@ def filter_edition_entries_dataframe(
     return out.loc[mask_sc].reset_index(drop=True)
 
 
+# Issue 014 (S8) : seuil unique pour « paire trop proche » au sens syntaxique
+# (motifs POS / trigrammes, comme ``syntax_contrast_score`` → ``compute_row_cache``).
+# Une entrée est signalée seulement si une valeur persistée est parseable et
+# strictement inférieure à ce flottant (pas les cellules vides ou invalides).
+SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT: float = 0.2
+
+
 def parse_persisted_syntax_contrast(value: object) -> float | None:
     """Parse une cellule ``_syntax_contrast`` ; ``None`` si vide ou invalide.
 
@@ -783,6 +794,72 @@ def parse_persisted_syntax_contrast(value: object) -> float | None:
         return float(s)
     except ValueError:
         return None
+
+
+def is_persisted_syntax_contrast_trivially_low(
+    value: object,
+    *,
+    threshold_lt: float = SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
+) -> bool:
+    """Indique si le contraste syntaxique persisté est « trop faible » pour le fine-tuning.
+
+    Renvoie ``True`` uniquement lorsqu'une mesure numérique exploitable existe et
+    qu'elle est strictement sous ``threshold_lt``. Les cellules vides ou non
+    numériques renvoient ``False`` afin de ne pas confondre « non mesuré » et
+    « mesure basse » (issue 014).
+
+    Args:
+        value: Contenu brut de la colonne ``_syntax_contrast``.
+        threshold_lt: Borne exclusive (défaut : constante métier documentée).
+
+    Returns:
+        ``True`` si parseable et ``parsed < threshold_lt``.
+    """
+    parsed = parse_persisted_syntax_contrast(value)
+    return parsed is not None and parsed < threshold_lt
+
+
+def count_trivial_syntax_contrast_entries(
+    df: pd.DataFrame,
+    *,
+    threshold_lt: float = SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
+    column: str = "_syntax_contrast",
+) -> int:
+    """Compte les lignes avec contraste syntaxique parseable strictement sous le seuil."""
+    if df.empty or column not in df.columns:
+        return 0
+    return sum(
+        1
+        for v in df[column].tolist()
+        if is_persisted_syntax_contrast_trivially_low(v, threshold_lt=threshold_lt)
+    )
+
+
+def trivial_syntax_contrast_entries_table(
+    df: pd.DataFrame,
+    *,
+    limit: int = 15,
+    threshold_lt: float = SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
+    column: str = "_syntax_contrast",
+) -> pd.DataFrame:
+    """Sous-table : entrées au contraste syntaxique le plus bas parmi celles sous seuil."""
+    if df.empty or column not in df.columns:
+        return pd.DataFrame()
+    parsed_rows: list[tuple[int, float]] = []
+    for idx, v in enumerate(df[column].tolist()):
+        if is_persisted_syntax_contrast_trivially_low(v, threshold_lt=threshold_lt):
+            p = parse_persisted_syntax_contrast(v)
+            if p is not None:
+                parsed_rows.append((idx, p))
+    if not parsed_rows:
+        return pd.DataFrame()
+    parsed_rows.sort(key=lambda t: (t[1], str(df.iloc[t[0]].get("id", ""))))
+    take = parsed_rows[: max(1, min(limit, len(parsed_rows)))]
+    idxs = [i for i, _ in take]
+    part = df.iloc[idxs].copy()
+    part["syntax_contrast"] = [sc for _, sc in take]
+    cols = [c for c in ("id", "statut", "type", "syntax_contrast") if c in part.columns]
+    return part[cols].reset_index(drop=True)
 
 
 def list_parsed_coherence_scores(
