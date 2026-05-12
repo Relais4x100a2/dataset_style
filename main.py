@@ -18,6 +18,7 @@ from src.project_entries_cache import cached_load_project_entries
 from src.tab_layout import main_tab_labels
 from src.ui_components import (
     render_no_project_onboarding,
+    render_post_save_stylometric_feedback_banner,
     render_sidebar,
     render_tab_account,
     render_tab_ajout,
@@ -102,6 +103,10 @@ if not project_id:
 df = cached_load_project_entries(engine, project_id, user.user_id)
 project_settings = get_project_settings(engine, project_id)
 _, _, dimensions = load_active_dimensions(project_settings)
+
+# Issue-021: single render site — each ``st.tabs`` body runs every rerun, so a
+# per-tab renderer would pop session feedback before the curator's active tab runs.
+render_post_save_stylometric_feedback_banner(project_id)
 
 # Issue-007: tab strip follows the curator workflow; titles are defined in
 # ``src.tab_layout`` (``EXPECTED_WORKFLOW_TAB_ORDER`` + account tab).

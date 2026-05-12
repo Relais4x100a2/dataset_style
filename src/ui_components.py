@@ -83,6 +83,10 @@ from src.nlp_engine import (
     signature_variance,
     trivial_syntax_contrast_entries_table,
 )
+from src.post_save_feedback_display import (
+    post_save_freshness_caption_fr,
+    post_save_stylistic_metric_labels_fr,
+)
 from src.presets import (
     DIMENSION_KEYS,
     PRESETS,
@@ -167,18 +171,20 @@ def _render_post_save_stylometric_feedback(project_id: str) -> None:
     payload = st.session_state.pop(key, None)
     if not payload:
         return
+    labels = post_save_stylistic_metric_labels_fr()
     st.markdown("#### Retour stylistique (ligne enregistrée)")
+    st.caption(post_save_freshness_caption_fr(synchronous_before_commit=True))
     m1, m2, m3 = st.columns(3)
     score = payload.get("score")
     with m1:
         if score is None:
-            st.metric("Score de cohérence", "—")
+            st.metric(labels["coherence_score"], "—")
         else:
-            st.metric("Score de cohérence", f"{int(score)}/100")
+            st.metric(labels["coherence_score"], f"{int(score)}/100")
     with m2:
-        st.metric("TTR", str(payload.get("ttr", "—")))
+        st.metric(labels["ttr"], str(payload.get("ttr", "—")))
     with m3:
-        st.metric("Contraste syntaxique", str(payload.get("contrast", "—")))
+        st.metric(labels["syntax_contrast"], str(payload.get("contrast", "—")))
     if payload.get("syntax_contrast_trivially_low"):
         st.warning(
             "Paire trop proche sur le plan syntaxique : le texte généré ressemble fortement "
@@ -197,11 +203,22 @@ def _render_post_save_stylometric_feedback(project_id: str) -> None:
         st.error(f"Qualité perçue : **{level}**")
     else:
         st.info(f"Qualité perçue : **{level}**")
+    st.markdown("##### Conseils prioritaires")
     advices = payload.get("advices") or []
     if advices:
         st.info("\n\n".join(str(a) for a in advices[:3]), icon="💡")
     else:
         st.info(CURATOR_MESSAGE_ADVICE_BALANCED, icon="💡")
+
+
+def render_post_save_stylometric_feedback_banner(project_id: str) -> None:
+    """Affiche le bloc post-sauvegarde une seule fois par exécution (évite multi-onglets).
+
+    ``st.tabs`` exécute chaque corps d'onglet à chaque rerun : appeler ce rendu depuis
+    un seul point (``main``) garantit que le payload session n'est pas consommé par
+    l'onglet « Nouvelle entrée » avant l'onglet « Édition ».
+    """
+    _render_post_save_stylometric_feedback(project_id)
 
 
 def sync_edition_output_widget_state(
@@ -1424,7 +1441,6 @@ def render_tab_ajout(
     time.
     """
     st.subheader("Nouvelle entrée")
-    _render_post_save_stylometric_feedback(project_id)
     if role == "viewer":
         st.info("Lecture seule (viewer).")
         return
@@ -1520,25 +1536,29 @@ def render_tab_ajout(
         new_row = _ensure_cache_columns_on_df(new_row)
         combined = pd.concat([df_base, new_row], ignore_index=True)
         row_id = str(new_row.iloc[0]["id"])
-        nlp_model = _load_fr_core_nlp()
-        pkg = compute_row_cache(
-            input_save,
-            output_save,
-            nlp_model,
-            combined,
-            row_id,
-            CACHE_COLUMNS,
-            avg_signature_from_cache,
-        )
-        for col, val in pkg.cache.items():
-            new_row.at[0, col] = val
-        to_persist = pd.concat([df_base, new_row], ignore_index=True)
+        to_persist: pd.DataFrame
         try:
-            update_project_entries(engine, project_id, to_persist, user.user_id)
-            invalidate_project_entries_cache()
-            df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
-            fb = row_nlp_feedback_bundle_after_persist(df_loaded, row_id, nlp_model, CACHE_COLUMNS)
-            _store_post_save_stylometric_feedback(project_id, fb)
+            with st.spinner("Analyse linguistique et enregistrement en base…"):
+                nlp_model = _load_fr_core_nlp()
+                pkg = compute_row_cache(
+                    input_save,
+                    output_save,
+                    nlp_model,
+                    combined,
+                    row_id,
+                    CACHE_COLUMNS,
+                    avg_signature_from_cache,
+                )
+                for col, val in pkg.cache.items():
+                    new_row.at[0, col] = val
+                to_persist = pd.concat([df_base, new_row], ignore_index=True)
+                update_project_entries(engine, project_id, to_persist, user.user_id)
+                invalidate_project_entries_cache()
+                df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
+                fb = row_nlp_feedback_bundle_after_persist(
+                    df_loaded, row_id, nlp_model, CACHE_COLUMNS
+                )
+                _store_post_save_stylometric_feedback(project_id, fb)
         except Exception as exc:  # noqa: BLE001
             _clear_post_save_stylometric_feedback(project_id)
             _show_action_error("Enregistrement impossible", exc)
@@ -1559,7 +1579,6 @@ def render_tab_edition(
 ) -> None:
     """Edition des entrées du projet."""
     st.subheader("Gestion & édition")
-    _render_post_save_stylometric_feedback(project_id)
     _llm_env(project_settings)
     if df.empty:
         st.info("Aucune entrée.")
@@ -1878,27 +1897,28 @@ def render_tab_edition(
             "notes",
         ]:
             out.loc[out["id"] == row["id"], col] = str(row[col])
-        nlp_model = _load_fr_core_nlp()
-        pkg = compute_row_cache(
-            str(row["input"]),
-            str(row["output"]),
-            nlp_model,
-            out,
-            str(row["id"]),
-            CACHE_COLUMNS,
-            avg_signature_from_cache,
-        )
-        for col, val in pkg.cache.items():
-            out.loc[out["id"].astype(str) == str(row["id"]), col] = val
         entry_id_save = str(row["id"])
         try:
-            update_project_entries(engine, project_id, out, user.user_id)
-            invalidate_project_entries_cache()
-            df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
-            fb = row_nlp_feedback_bundle_after_persist(
-                df_loaded, entry_id_save, nlp_model, CACHE_COLUMNS
-            )
-            _store_post_save_stylometric_feedback(project_id, fb)
+            with st.spinner("Analyse linguistique et enregistrement en base…"):
+                nlp_model = _load_fr_core_nlp()
+                pkg = compute_row_cache(
+                    str(row["input"]),
+                    str(row["output"]),
+                    nlp_model,
+                    out,
+                    str(row["id"]),
+                    CACHE_COLUMNS,
+                    avg_signature_from_cache,
+                )
+                for col, val in pkg.cache.items():
+                    out.loc[out["id"].astype(str) == str(row["id"]), col] = val
+                update_project_entries(engine, project_id, out, user.user_id)
+                invalidate_project_entries_cache()
+                df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
+                fb = row_nlp_feedback_bundle_after_persist(
+                    df_loaded, entry_id_save, nlp_model, CACHE_COLUMNS
+                )
+                _store_post_save_stylometric_feedback(project_id, fb)
         except Exception as exc:  # noqa: BLE001
             _clear_post_save_stylometric_feedback(project_id)
             _show_action_error("Sauvegarde impossible", exc)
