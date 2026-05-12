@@ -9,7 +9,11 @@ import json
 import pandas as pd
 import pytest
 from src.database import STATUT_VALIDE
-from src.export_utils import convert_to_jsonl, dataframe_for_export
+from src.export_utils import (
+    convert_to_jsonl,
+    dataframe_for_export,
+    export_perimeter_ui_recap_fr,
+)
 
 
 def _minimal_valid_row() -> dict[str, str]:
@@ -109,6 +113,44 @@ def test_convert_to_jsonl_baguettotron_h_token() -> None:
     t_exp = json.loads(convert_to_jsonl(df_exp, "baguettotron").strip().split("\n")[0])["text"]
     assert "<H≈0.3>" in t_norm
     assert "<H≈1.5>" in t_exp
+
+
+def test_export_perimeter_ui_recap_fr_positive_count() -> None:
+    """Issue 019 : récap minimal quand le périmètre contient des fiches."""
+    caption, warning = export_perimeter_ui_recap_fr(3, "validated_only")
+    assert warning is None
+    assert "3" in caption
+    assert "csv" in caption.lower()
+    assert "jsonl" in caption.lower()
+
+
+def test_export_perimeter_ui_recap_fr_singular() -> None:
+    """Une seule fiche : libellé au singulier."""
+    caption, warning = export_perimeter_ui_recap_fr(1, "full_dataset")
+    assert warning is None
+    assert "1" in caption
+    assert "fiche sera" in caption.lower()
+
+
+def test_export_perimeter_ui_recap_fr_zero_validated_scope() -> None:
+    """Périmètre validées vide : message explicite + conseil d'action."""
+    caption, warning = export_perimeter_ui_recap_fr(0, "validated_only")
+    assert "0" in caption
+    assert warning is not None
+    assert "fait et validé" in warning.lower()
+
+
+def test_export_perimeter_ui_recap_fr_zero_full_dataset() -> None:
+    """Cas limite : dataset complet mais 0 ligne (ex. df vide côté service)."""
+    caption, warning = export_perimeter_ui_recap_fr(0, "full_dataset")
+    assert warning is not None
+    assert "0" in caption
+
+
+def test_export_perimeter_ui_recap_fr_rejects_negative_count() -> None:
+    """Le récap refuse un compte incohérent."""
+    with pytest.raises(ValueError, match="non-negative"):
+        export_perimeter_ui_recap_fr(-1, "validated_only")
 
 
 def test_convert_to_jsonl_unknown_format_raises() -> None:
