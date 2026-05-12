@@ -227,6 +227,43 @@ def sync_edition_output_widget_state(
     return widget_key
 
 
+def edition_output_correction_notice_session_key(project_id: str) -> str:
+    """Return ``session_state`` key for a one-shot post-correction UI notice.
+
+    Args:
+        project_id: Active project identifier (scopes the flag per project).
+
+    Returns:
+        A stable key whose value is the ``entry_id`` last orthographically corrected.
+    """
+    return f"_edition_output_corrected_notice_{project_id}"
+
+
+def read_edition_output_text_for_persist(
+    session: MutableMapping[str, Any],
+    output_widget_key: str,
+    fallback_row_output: str,
+) -> str:
+    """Resolve « texte généré » for persistence from the live widget buffer.
+
+    Keyed ``st.text_area`` values live under ``output_widget_key``; after an
+    in-session correction, the dataframe row snapshot can lag behind that buffer.
+    Callers should prefer this helper when saving or recomputing NLP cache.
+
+    Args:
+        session: Streamlit ``st.session_state`` or any mutable mapping (tests).
+        output_widget_key: Same key passed to ``st.text_area(..., key=...)``.
+        fallback_row_output: Persisted output from the loaded row if the buffer
+            is absent (defensive).
+
+    Returns:
+        Full generated text string to treat as authoritative for save/cache.
+    """
+    if output_widget_key in session:
+        return str(session[output_widget_key] or "")
+    return str(fallback_row_output or "")
+
+
 def _sanitize_new_entry_session_user_id(raw_user_id: str) -> str:
     """Normalize a user id for use inside Streamlit session-state key strings.
 
@@ -1696,6 +1733,13 @@ def render_tab_edition(
         entry_id,
         str(row.get("output", "") or ""),
     )
+    notice_key = edition_output_correction_notice_session_key(project_id)
+    if st.session_state.pop(notice_key, None) == entry_id:
+        st.info(
+            "Le champ « Texte généré » affiche la correction : vous pouvez l'ajuster "
+            "ou l'annuler manuellement avant enregistrement.",
+            icon="✏️",
+        )
     legacy_fields: list[str] = []
     legacy_candidates = [
         ("Type de transformation", "type", "types"),
@@ -1798,12 +1842,17 @@ def render_tab_edition(
                 languagetool_base_url=project_settings.languagetool_base_url or None,
             )
             st.session_state[output_widget_key] = corrected
-            st.toast("Correction orthographique appliquée au texte généré.")
+            st.session_state[notice_key] = entry_id
             st.rerun()
         except requests.RequestException as exc:
             st.error(f"Correction impossible: {exc}")
     if save:
         require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
+        row["output"] = read_edition_output_text_for_persist(
+            st.session_state,
+            output_widget_key,
+            str(row.get("output", "") or ""),
+        )
         out = _ensure_cache_columns_on_df(df.copy())
         for col in [
             "type",
