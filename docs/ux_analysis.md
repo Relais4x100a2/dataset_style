@@ -236,7 +236,7 @@ La sidebar (`render_sidebar`, l. 423-461) contient le sélecteur de projet et le
 
 `render_tab_super_admin` concentrait invitation, gestion de comptes et monitoring technique sur une seule vue scrollable.
 
-**État actuel (issue 012)** : l’invitation et les actions sur les comptes restent en premier plan ; le suivi saga, la quarantaine et la relance manuelle sont regroupés dans un `st.expander` fermé par défaut, avec libellés orientés métier et constantes factorisées dans `src/super_admin_ui_texts.py`.
+**État actuel (issue 012)** : l’invitation et les actions sur les comptes sont dans le premier onglet d’une paire `st.tabs` ; le suivi saga, la quarantaine et la relance manuelle sont dans un second onglet « Suivi technique », non sélectionné par défaut. Les libellés métier et les chaînes factorisées vivent dans `src/super_admin_ui_texts.py` (les deux corps d’onglets s’exécutent toujours à chaque rerun Streamlit — pas de lazy-load BDD).
 
 ---
 

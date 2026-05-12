@@ -26,6 +26,19 @@ SUPER_ADMIN_SAGA_SECTION_TITLE = "État du traitement automatique"
 SUPER_ADMIN_DLQ_SECTION_TITLE = "Comptes bloqués — traitement manuel"
 
 
+def super_admin_tab_labels() -> tuple[str, str]:
+    """Labels for the Super Admin inner tab strip (accounts first, technical second).
+
+    Returns:
+        A pair ``(primary tab, technical tab)``. Both bodies still run each script
+        execution (Streamlit); this only affects default visibility in the UI.
+    """
+    return (
+        "Invitations et gestion des comptes",
+        "Suivi technique — saga, blocages et relances",
+    )
+
+
 def selectbox_target_account() -> str:
     """Label for choosing which account to act on (business wording)."""
     return "Compte à gérer"

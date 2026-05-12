@@ -14,6 +14,7 @@ from src.super_admin_ui_texts import (
     saga_metric_label,
     selectbox_dlq_operation,
     selectbox_target_account,
+    super_admin_tab_labels,
 )
 
 
@@ -57,6 +58,14 @@ def test_secondary_subsection_titles_are_french() -> None:
 
 def test_target_account_selectbox_uses_business_language() -> None:
     assert "Compte" in selectbox_target_account()
+
+
+def test_super_admin_tab_labels_accounts_tab_first_and_distinct() -> None:
+    accounts_tab, tech_tab = super_admin_tab_labels()
+    lowered_accounts = accounts_tab.lower()
+    assert "invitation" in lowered_accounts or "compte" in lowered_accounts
+    assert "technique" in tech_tab.lower() or "suivi" in tech_tab.lower()
+    assert accounts_tab != tech_tab
 
 
 def test_saga_metric_label_fallback_returns_raw_state() -> None:
