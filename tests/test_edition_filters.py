@@ -133,3 +133,20 @@ def test_edition_score_filter_spec_bucket_decile_invalid() -> None:
     """bucket_decile hors 0..9 lève ValueError."""
     with pytest.raises(ValueError):
         EditionScoreFilterSpec(mode="bucket", bucket_decile=10)
+
+
+def test_filter_edition_entries_stable_sort_by_id_string() -> None:
+    """Ordre des lignes filtrées : tri stable sur ``id`` en chaîne (navigation déterministe)."""
+    df = pd.DataFrame(
+        {
+            "id": ["10", "2", "1"],
+            "statut": ["S", "S", "S"],
+            "_coherence_score": ["50", "50", "50"],
+        }
+    )
+    out = filter_edition_entries_dataframe(
+        df,
+        statut_label=None,
+        score_spec=EditionScoreFilterSpec(),
+    )
+    assert out["id"].tolist() == ["1", "10", "2"]

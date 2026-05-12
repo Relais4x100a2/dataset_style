@@ -62,6 +62,7 @@ from src.nlp_engine import (
     corriger_texte_fr,
     count_trivial_syntax_contrast_entries,
     dataframe_for_dashboard_scope,
+    edition_nav_neighbor_entry_id,
     edition_statut_filter_options,
     filter_edition_entries_dataframe,
     is_persisted_syntax_contrast_trivially_low,
@@ -1535,13 +1536,49 @@ def render_tab_edition(
     entry_widget_key = f"edition_entry_select_{project_id}"
     if entry_widget_key in st.session_state and st.session_state[entry_widget_key] not in entry_ids:
         del st.session_state[entry_widget_key]
-    chosen_id = str(
-        st.selectbox(
-            "Entrée",
-            options=entry_ids,
-            format_func=lambda eid: id_to_label[str(eid)],
-            key=entry_widget_key,
+    peek_raw = st.session_state.get(entry_widget_key)
+    peek_id = str(peek_raw) if peek_raw is not None and str(peek_raw) in entry_ids else entry_ids[0]
+    nav_prev_key = f"edition_nav_prev_{project_id}"
+    nav_next_key = f"edition_nav_next_{project_id}"
+    can_prev = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="prev") is not None
+    can_next = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="next") is not None
+    c_prev, c_sel, c_next = st.columns([1, 8, 1])
+    with c_prev:
+        if st.button(
+            "◀",
+            key=nav_prev_key,
+            disabled=not can_prev,
+            help="Fiche précédente (filtre actuel)",
+            width="content",
+        ):
+            nid = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="prev")
+            if nid is not None:
+                st.session_state[entry_widget_key] = nid
+                st.rerun()
+    with c_sel:
+        chosen_id = str(
+            st.selectbox(
+                "Entrée",
+                options=entry_ids,
+                format_func=lambda eid: id_to_label[str(eid)],
+                key=entry_widget_key,
+            )
         )
+    with c_next:
+        if st.button(
+            "▶",
+            key=nav_next_key,
+            disabled=not can_next,
+            help="Fiche suivante (filtre actuel)",
+            width="content",
+        ):
+            nid = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="next")
+            if nid is not None:
+                st.session_state[entry_widget_key] = nid
+                st.rerun()
+    st.caption(
+        "Changer de fiche (liste déroulante ou flèches) recharge le formulaire : "
+        "les modifications non enregistrées sur la fiche courante sont perdues."
     )
     row = df_pick.loc[df_pick["id"].astype(str) == chosen_id].iloc[0].copy()
     disabled = role == "viewer"
