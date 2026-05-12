@@ -62,7 +62,9 @@ from src.nlp_engine import (
     corriger_texte_fr,
     count_trivial_syntax_contrast_entries,
     dataframe_for_dashboard_scope,
+    edition_entry_k_of_n,
     edition_nav_neighbor_entry_id,
+    edition_pick_revision_stats,
     edition_statut_filter_options,
     filter_edition_entries_dataframe,
     is_persisted_syntax_contrast_trivially_low,
@@ -1576,6 +1578,23 @@ def render_tab_edition(
             if nid is not None:
                 st.session_state[entry_widget_key] = nid
                 st.rerun()
+    k_pos, n_filtered = edition_entry_k_of_n(entry_ids, chosen_id)
+    rev_pick = edition_pick_revision_stats(df_pick)
+    m_pos, m_rev, m_ok, m_other = st.columns(4)
+    with m_pos:
+        st.metric("Entrée (liste filtrée)", f"{k_pos} / {n_filtered}")
+    with m_rev:
+        st.metric("À réviser", rev_pick.needing_review)
+    with m_ok:
+        st.metric("Validées (liste filtrée)", rev_pick.validated)
+    with m_other:
+        st.metric("Autres statuts", rev_pick.other)
+    st.caption(
+        "Compteurs ci-dessus : périmètre **liste filtrée** uniquement. "
+        "« À réviser » : fiches en statut « A faire » ou « En cours ». "
+        "Pour le volume **projet entier**, se référer au libellé « entrée(s) affichée(s) sur … » "
+        "lorsque des filtres sont actifs."
+    )
     st.caption(
         "Changer de fiche (liste déroulante ou flèches) recharge le formulaire : "
         "les modifications non enregistrées sur la fiche courante sont perdues."
