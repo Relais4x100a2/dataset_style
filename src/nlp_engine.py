@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urljoin
@@ -717,6 +717,53 @@ def _edition_coherence_bucket_bounds(decile: int) -> tuple[int, int]:
     return lo, hi
 
 
+def _sort_edition_pick_by_stable_string_id(df: pd.DataFrame) -> pd.DataFrame:
+    """Trie les lignes par ``id`` en chaîne (ordre déterministe pour navigation édition)."""
+    out = df.reset_index(drop=True)
+    if out.empty or "id" not in out.columns:
+        return out
+    return out.sort_values(
+        by="id",
+        key=lambda col: col.astype(str),
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
+def edition_nav_neighbor_entry_id(
+    ordered_entry_ids: Sequence[str],
+    current_id: str,
+    *,
+    direction: Literal["prev", "next"],
+) -> str | None:
+    """Return the previous or next entry id in the filtered ordered list.
+
+    Used by the edition tab prev/next controls. Order must match the pick
+    dataframe (stable sort on ``id``).
+
+    Args:
+        ordered_entry_ids: Entry ids in display order.
+        current_id: Currently selected entry id.
+        direction: ``prev`` or ``next``.
+
+    Returns:
+        Adjacent id, or ``None`` if at the boundary or if ``current_id`` is
+        not in the list.
+    """
+    ids = [str(x) for x in ordered_entry_ids]
+    if not ids:
+        return None
+    cur = str(current_id)
+    if cur not in ids:
+        return None
+    idx = ids.index(cur)
+    if direction == "prev":
+        return ids[idx - 1] if idx > 0 else None
+    if direction == "next":
+        return ids[idx + 1] if idx < len(ids) - 1 else None
+    msg = "direction must be 'prev' or 'next'"
+    raise ValueError(msg)
+
+
 def filter_edition_entries_dataframe(
     df: pd.DataFrame,
     *,
@@ -741,11 +788,11 @@ def filter_edition_entries_dataframe(
     if statut_label and str(statut_label).strip():
         token = str(statut_label).strip()
         if statut_column not in out.columns:
-            return out.iloc[0:0].reset_index(drop=True)
+            return _sort_edition_pick_by_stable_string_id(out.iloc[0:0])
         mask_st = out[statut_column].astype(str).str.strip() == token
         out = out.loc[mask_st]
     if score_spec.mode == "all":
-        return out.reset_index(drop=True)
+        return _sort_edition_pick_by_stable_string_id(out)
     if score_column not in out.columns:
         out = out.copy()
         out[score_column] = ""
@@ -765,7 +812,7 @@ def filter_edition_entries_dataframe(
         return True
 
     mask_sc = [row_matches_score(v) for v in out[score_column].tolist()]
-    return out.loc[mask_sc].reset_index(drop=True)
+    return _sort_edition_pick_by_stable_string_id(out.loc[mask_sc])
 
 
 # Issue 014 (S8) : seuil unique pour « paire trop proche » au sens syntaxique
