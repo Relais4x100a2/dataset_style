@@ -227,20 +227,87 @@ def sync_edition_output_widget_state(
     return widget_key
 
 
-def new_entry_session_keys(project_id: str) -> dict[str, str]:
+def _sanitize_new_entry_session_user_id(raw_user_id: str) -> str:
+    """Normalize a user id for use inside Streamlit session-state key strings.
+
+    Args:
+        raw_user_id: Authenticated user identifier (may contain punctuation).
+
+    Returns:
+        A non-empty ASCII-ish token safe for ``session_state`` keys.
+    """
+    s = (raw_user_id or "").strip()
+    if not s:
+        return "anonymous"
+    out = "".join(c if c.isalnum() or c in "-_" else "_" for c in s)
+    return out[:80] if out else "anonymous"
+
+
+def _legacy_new_entry_storage_keys(project_id: str) -> dict[str, str]:
+    """Return pre-user-scope keys (``new_entry_{project}_*``) for one-off migration."""
+    prefix = f"new_entry_{project_id}"
+    return {
+        "input": f"{prefix}_input",
+        "output": f"{prefix}_output",
+        "type": f"{prefix}_type",
+        "structure": f"{prefix}_structure",
+        "ton": f"{prefix}_ton",
+        "format": f"{prefix}_format",
+        "public": f"{prefix}_public",
+        "statut": f"{prefix}_statut",
+        "notes": f"{prefix}_notes",
+    }
+
+
+def _migrate_legacy_new_entry_buffers_if_empty(
+    session: MutableMapping[str, Any],
+    keys: dict[str, str],
+    legacy: dict[str, str],
+) -> None:
+    """Copy legacy project-only text buffers into user-scoped keys when upgrading.
+
+    If the new keys already hold draft/output content, legacy values are left
+    untouched so we never overwrite active work.
+
+    Args:
+        session: Streamlit ``st.session_state`` or any mutable mapping (tests).
+        keys: Keys from :func:`new_entry_session_keys` (user-scoped).
+        legacy: Keys from :func:`_legacy_new_entry_storage_keys`.
+    """
+    if str(session.get(keys["input"], "")).strip() or str(session.get(keys["output"], "")).strip():
+        return
+    leg_in, leg_out, leg_notes = legacy["input"], legacy["output"], legacy["notes"]
+    if leg_in not in session and leg_out not in session and leg_notes not in session:
+        return
+    in_val = str(session.get(leg_in, "")) if leg_in in session else ""
+    out_val = str(session.get(leg_out, "")) if leg_out in session else ""
+    notes_val = str(session.get(leg_notes, "")) if leg_notes in session else ""
+    if not in_val.strip() and not out_val.strip() and not notes_val.strip():
+        return
+    session[keys["input"]] = in_val
+    session[keys["output"]] = out_val
+    session[keys["notes"]] = notes_val
+    session.pop(leg_in, None)
+    session.pop(leg_out, None)
+    session.pop(leg_notes, None)
+
+
+def new_entry_session_keys(project_id: str, user_id: str) -> dict[str, str]:
     """Build stable ``session_state`` keys for the « Nouvelle entrée » tab.
 
-    Keys are scoped by ``project_id`` so drafts from one project never leak
-    into another when the user switches context.
+    Keys are scoped by ``project_id`` and ``user_id`` so drafts never leak
+    across projects or concurrent browser sessions for different accounts.
 
     Args:
         project_id: Active project identifier.
+        user_id: Authenticated user identifier (stable primary key).
 
     Returns:
         Mapping of logical field names to session keys (``input``, ``output``,
         dimension keys, ``statut``, ``notes``).
     """
-    prefix = f"new_entry_{project_id}"
+    uid = _sanitize_new_entry_session_user_id(user_id)
+    prefix = f"new_entry_{project_id}_u_{uid}"
     return {
         "input": f"{prefix}_input",
         "output": f"{prefix}_output",
@@ -257,6 +324,7 @@ def new_entry_session_keys(project_id: str) -> dict[str, str]:
 def ensure_new_entry_widget_keys_initialized(
     session: MutableMapping[str, Any],
     project_id: str,
+    user_id: str,
     dimensions: dict[str, list[str]],
 ) -> dict[str, str]:
     """Ensure new-entry widget keys exist with safe defaults.
@@ -267,12 +335,14 @@ def ensure_new_entry_widget_keys_initialized(
     Args:
         session: Streamlit ``st.session_state`` or any mutable mapping (tests).
         project_id: Active project identifier.
+        user_id: Authenticated user identifier (stable primary key).
         dimensions: Preset dimension lists (``types``, ``structures``, …).
 
     Returns:
         The same mapping as :func:`new_entry_session_keys`.
     """
-    keys = new_entry_session_keys(project_id)
+    keys = new_entry_session_keys(project_id, user_id)
+    legacy = _legacy_new_entry_storage_keys(project_id)
     dim_pairs: tuple[tuple[str, str], ...] = (
         ("type", "types"),
         ("structure", "structures"),
@@ -294,6 +364,7 @@ def ensure_new_entry_widget_keys_initialized(
         session[keys["output"]] = ""
     if keys["notes"] not in session:
         session[keys["notes"]] = ""
+    _migrate_legacy_new_entry_buffers_if_empty(session, keys, legacy)
     return keys
 
 
@@ -312,7 +383,7 @@ def new_entry_missing_required_body_message(input_text: str, output_text: str) -
     return None
 
 
-def new_entry_pending_clear_session_key(project_id: str) -> str:
+def new_entry_pending_clear_session_key(project_id: str, user_id: str) -> str:
     """Return the ``session_state`` flag used to clear buffers after a successful save.
 
     Clearing must happen on the next run *before* ``text_area`` widgets are created,
@@ -321,10 +392,17 @@ def new_entry_pending_clear_session_key(project_id: str) -> str:
 
     Args:
         project_id: Active project identifier.
+        user_id: Authenticated user identifier (stable primary key).
 
     Returns:
-        A session key scoped by ``project_id``.
+        A session key scoped by ``project_id`` and ``user_id``.
     """
+    uid = _sanitize_new_entry_session_user_id(user_id)
+    return f"_pending_clear_new_entry_{project_id}_u_{uid}"
+
+
+def _legacy_new_entry_pending_clear_session_key(project_id: str) -> str:
+    """Session flag used before user id was included in key names (migration only)."""
     return f"_pending_clear_new_entry_{project_id}"
 
 
@@ -1202,6 +1280,7 @@ def _llm_env(settings: ProjectSettings) -> None:
 
 def _new_entry_llm_generate_clicked(
     project_id: str,
+    user_id: str,
     project_settings: ProjectSettings,
     dimensions: dict[str, list[str]],
     mode: Literal["draft_to_output", "output_to_draft"],
@@ -1211,10 +1290,14 @@ def _new_entry_llm_generate_clicked(
     Streamlit applies widget state from the client, then invokes ``on_click``
     callbacks, then runs the script. Updating ``session_state`` here avoids
     ``StreamlitAPIException`` when assigning to ``text_area`` keys after those
-    widgets were already instantiated.
+    widgets were already instantiated. After a successful write, ``st.rerun()``
+    forces a fresh pass so the text areas immediately show the committed LLM
+    text (avoids stale widget state masking the new value).
     """
     _llm_env(project_settings)
-    keys = ensure_new_entry_widget_keys_initialized(st.session_state, project_id, dimensions)
+    keys = ensure_new_entry_widget_keys_initialized(
+        st.session_state, project_id, user_id, dimensions
+    )
     type_ = str(st.session_state.get(keys["type"], ""))
     structure = str(st.session_state.get(keys["structure"], ""))
     ton = str(st.session_state.get(keys["ton"], ""))
@@ -1241,6 +1324,7 @@ def _new_entry_llm_generate_clicked(
                     st.session_state, keys, target="output", text=str(generated)
                 )
                 st.toast("Texte généré.")
+                st.rerun()
             else:
                 st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
         except Exception as exc:  # noqa: BLE001
@@ -1266,6 +1350,7 @@ def _new_entry_llm_generate_clicked(
         if generated:
             commit_new_entry_llm_result(st.session_state, keys, target="input", text=str(generated))
             st.toast("Brouillon généré.")
+            st.rerun()
         else:
             st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
     except Exception as exc:  # noqa: BLE001
@@ -1284,12 +1369,14 @@ def render_tab_ajout(
 ) -> None:
     """Ajout d'entrée (collaborator/admin).
 
-    Draft and generated text use ``st.session_state`` (per project) as the single
-    source of truth. LLM actions use ``st.button(..., on_click=…)`` so buffers
-    are updated before ``text_area`` widgets run, which matches Streamlit's rule
-    forbidding writes to widget keys after those widgets were instantiated in
-    the same script run. « Enregistrer » reads the same keys from
-    ``session_state`` at click time.
+    Draft and generated text use ``st.session_state`` (per project and user) as
+    the single source of truth. LLM actions use ``st.button(..., on_click=…)``
+    so buffers are updated before ``text_area`` widgets run, which matches
+    Streamlit's rule forbidding writes to widget keys after those widgets were
+    instantiated in the same script run. A successful generation triggers
+    ``st.rerun()`` so the refreshed text areas always reflect the committed LLM
+    text. « Enregistrer » reads the same keys from ``session_state`` at click
+    time.
     """
     st.subheader("Nouvelle entrée")
     _render_post_save_stylometric_feedback(project_id)
@@ -1301,8 +1388,12 @@ def render_tab_ajout(
     st.session_state.pop("new_generated_output", None)
     st.session_state.pop("new_generated_input", None)
 
-    keys = ensure_new_entry_widget_keys_initialized(st.session_state, project_id, dimensions)
-    if st.session_state.pop(new_entry_pending_clear_session_key(project_id), None):
+    keys = ensure_new_entry_widget_keys_initialized(
+        st.session_state, project_id, user.user_id, dimensions
+    )
+    if st.session_state.pop(
+        new_entry_pending_clear_session_key(project_id, user.user_id), None
+    ) or st.session_state.pop(_legacy_new_entry_pending_clear_session_key(project_id), None):
         st.session_state[keys["input"]] = ""
         st.session_state[keys["output"]] = ""
         st.session_state[keys["notes"]] = ""
@@ -1326,6 +1417,7 @@ def render_tab_ajout(
         on_click=_new_entry_llm_generate_clicked,
         kwargs={
             "project_id": project_id,
+            "user_id": user.user_id,
             "project_settings": project_settings,
             "dimensions": dimensions,
             "mode": "draft_to_output",
@@ -1337,6 +1429,7 @@ def render_tab_ajout(
         on_click=_new_entry_llm_generate_clicked,
         kwargs={
             "project_id": project_id,
+            "user_id": user.user_id,
             "project_settings": project_settings,
             "dimensions": dimensions,
             "mode": "output_to_draft",
@@ -1405,7 +1498,7 @@ def render_tab_ajout(
             _clear_post_save_stylometric_feedback(project_id)
             _show_action_error("Enregistrement impossible", exc)
             return
-        st.session_state[new_entry_pending_clear_session_key(project_id)] = True
+        st.session_state[new_entry_pending_clear_session_key(project_id, user.user_id)] = True
         st.success("Entrée enregistrée.")
         st.rerun()
 
