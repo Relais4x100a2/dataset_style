@@ -14,6 +14,41 @@ ExportFormat = Literal["lfm2", "baguettotron", "mistral"]
 ExportScope = Literal["validated_only", "full_dataset"]
 
 
+def export_perimeter_ui_recap_fr(row_count: int, scope: ExportScope) -> tuple[str, str | None]:
+    """
+    French UI strings for the minimal export perimeter recap (issue 019).
+
+    Args:
+        row_count: Number of rows returned by :func:`dataframe_for_export`.
+        scope: Active export scope (used only when ``row_count`` is zero).
+
+    Returns:
+        ``(summary_line, optional_warning)`` — ``optional_warning`` is set when
+        there is nothing to export so the curator understands why downloads
+        would be empty.
+    """
+    if row_count < 0:
+        raise ValueError("row_count must be non-negative")
+    if row_count == 0:
+        summary = "Nombre de fiches dans ce périmètre : 0."
+        if scope == "validated_only":
+            warning = (
+                "Aucune fiche n'a le statut « Fait et validé ». Choisissez "
+                "« Tout le dataset » ou validez des fiches pour remplir ce périmètre."
+            )
+        else:
+            warning = "Aucune ligne à exporter : le dataset chargé est vide pour ce projet."
+        return summary, warning
+    if row_count == 1:
+        summary = "1 fiche sera exportée au format CSV et JSONL (même périmètre pour les deux)."
+    else:
+        summary = (
+            f"{row_count} fiches seront exportées au format CSV et JSONL "
+            "(même périmètre pour les deux)."
+        )
+    return summary, None
+
+
 def dataframe_for_export(df: pd.DataFrame, scope: ExportScope) -> pd.DataFrame:
     """
     Rows included in CSV and JSONL for a given export perimeter.

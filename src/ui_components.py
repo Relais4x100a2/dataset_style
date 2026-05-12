@@ -47,7 +47,12 @@ from src.empty_project_onboarding import (
     is_self_service_project_creation_allowed,
     onboarding_steps_when_creation_allowed,
 )
-from src.export_utils import ExportScope, convert_to_jsonl, dataframe_for_export
+from src.export_utils import (
+    ExportScope,
+    convert_to_jsonl,
+    dataframe_for_export,
+    export_perimeter_ui_recap_fr,
+)
 from src.flash_messages import schedule_post_rerun_flash
 from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.mailer import send_account_link_email
@@ -1270,12 +1275,19 @@ def render_tab_settings_export(
     )
 
     df_export = dataframe_for_export(df, export_scope)
-    csv = df_export.to_csv(index=False).encode("utf-8")
+    row_n = len(df_export)
+    st.metric("Fiches dans le périmètre", row_n)
+    recap_line, recap_warning = export_perimeter_ui_recap_fr(row_n, export_scope)
+    st.caption(recap_line)
+    if recap_warning:
+        st.warning(recap_warning)
+
     export_format = st.selectbox(
         "Format JSONL",
         ["lfm2", "baguettotron", "mistral"],
         key="export_format_select",
     )
+    csv = df_export.to_csv(index=False).encode("utf-8")
     jsonl_data = convert_to_jsonl(
         df,
         export_format,
