@@ -6,7 +6,8 @@ draft keys on logout without circular imports with ``src.ui_components``.
 
 from __future__ import annotations
 
-from typing import Any, MutableMapping
+from collections.abc import MutableMapping
+from typing import Any
 
 _NEW_ENTRY_PREFIX = "new_entry_"
 _PENDING_CLEAR_PREFIX = "_pending_clear_new_entry_"
