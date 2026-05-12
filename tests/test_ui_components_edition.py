@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from src.ui_components import sync_edition_output_widget_state
+from src.ui_components import (
+    read_edition_output_text_for_persist,
+    sync_edition_output_widget_state,
+)
 
 
 def test_sync_edition_output_initializes_from_row() -> None:
@@ -30,3 +33,26 @@ def test_sync_edition_output_preserves_draft_same_entry() -> None:
     session[key] = "user_or_api_corrected"
     sync_edition_output_widget_state(session, "x", "from_db")
     assert session[key] == "user_or_api_corrected"
+
+
+def test_read_edition_output_prefers_session_widget_buffer() -> None:
+    """Persistence must read the keyed text_area buffer (e.g. after LT correction)."""
+    key = "edit_output_e1"
+    session: dict[str, object] = {key: "corrected_full_text" * 50}
+    out = read_edition_output_text_for_persist(session, key, "from_database_row")
+    assert out == session[key]
+    assert out != "from_database_row"
+
+
+def test_read_edition_output_falls_back_when_widget_key_absent() -> None:
+    """If the widget key is missing, use the row snapshot (defensive)."""
+    session: dict[str, object] = {}
+    key = "edit_output_missing"
+    assert read_edition_output_text_for_persist(session, key, "row_only") == "row_only"
+
+
+def test_read_edition_output_empty_string_in_session() -> None:
+    """Explicit empty buffer in session must not fall back to stale row text."""
+    key = "edit_output_e2"
+    session: dict[str, object] = {key: ""}
+    assert read_edition_output_text_for_persist(session, key, "non_empty_row") == ""
