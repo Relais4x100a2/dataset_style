@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src import auth
+from src.database import UserRecord
 
 
 class AuthSecurityTests(unittest.TestCase):
@@ -95,6 +96,48 @@ class AuthSecurityTests(unittest.TestCase):
                         operation_id="op_2",
                         max_retries=5,
                     )
+
+    def test_set_user_clears_new_entry_state_when_account_changes(self) -> None:
+        """Switching the logged-in user must not keep another account's tab drafts."""
+        state: dict[str, object] = {
+            "current_user": {
+                "user_id": "u_a",
+                "email": "a@example.com",
+                "display_name": "A",
+                "access_token": "tok-a",
+                "is_super_admin": False,
+            },
+            "new_entry_p1_u_u_a_input": "draft-a",
+            "new_entry_legacy_only_input": "orphan",
+        }
+        with patch.object(auth.st, "session_state", state):
+            auth._set_user(
+                UserRecord(user_id="u_b", email="b@example.com", display_name="B"),
+                "tok-b",
+            )
+        assert state["current_user"]["user_id"] == "u_b"
+        assert "new_entry_p1_u_u_a_input" not in state
+        assert "new_entry_legacy_only_input" not in state
+
+    def test_set_user_preserves_new_entry_state_for_same_account(self) -> None:
+        """Re-authenticating the same user should keep in-tab buffers."""
+        state: dict[str, object] = {
+            "current_user": {
+                "user_id": "u_a",
+                "email": "a@example.com",
+                "display_name": "A",
+                "access_token": "tok-old",
+                "is_super_admin": False,
+            },
+            "new_entry_p1_u_u_a_input": "keep-me",
+        }
+        with patch.object(auth.st, "session_state", state):
+            auth._set_user(
+                UserRecord(user_id="u_a", email="a@example.com", display_name="A"),
+                "tok-new",
+            )
+        assert state["new_entry_p1_u_u_a_input"] == "keep-me"
+        assert state["current_user"]["access_token"] == "tok-new"
 
 
 if __name__ == "__main__":
