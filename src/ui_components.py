@@ -97,6 +97,7 @@ from src.super_admin_ui_texts import (
     saga_metric_label,
     selectbox_dlq_operation,
     selectbox_target_account,
+    super_admin_tab_labels,
 )
 
 logger = logging.getLogger(__name__)
@@ -873,6 +874,83 @@ def render_tab_account(user: CurrentUser, engine: Engine) -> None:
             _show_action_error("Suppression de compte impossible", exc)
 
 
+def _render_super_admin_technical_panel(user: CurrentUser, engine: Engine) -> None:
+    """Saga, quarantaine et relance manuelle (onglet secondaire, issue-012)."""
+    st.markdown(f"### {SUPER_ADMIN_TECH_EXPANDER_TITLE}")
+    st.caption(SUPER_ADMIN_TECH_EXPANDER_CAPTION)
+    st.markdown(f"#### {SUPER_ADMIN_SAGA_SECTION_TITLE}")
+    monitor_rows = list_recent_deprovision_ops(engine, user.user_id, limit=100)
+    if monitor_rows:
+        monitor_df = pd.DataFrame(
+            [
+                {
+                    "operation_id": row.operation_id,
+                    "target_user_id": row.target_user_id,
+                    "state": row.state,
+                    "retry_count": row.retry_count,
+                    "next_retry_at": row.next_retry_at or "—",
+                    "quarantined_at": row.quarantined_at or "—",
+                    "last_error": row.last_error[:120],
+                }
+                for row in monitor_rows
+            ]
+        )
+        state_counts = monitor_df["state"].value_counts().to_dict()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(saga_metric_label("pending"), int(state_counts.get("pending", 0)))
+        c2.metric(
+            saga_metric_label("provider_done"),
+            int(state_counts.get("provider_done", 0)),
+        )
+        c3.metric(saga_metric_label("failed"), int(state_counts.get("failed", 0)))
+        c4.metric(
+            saga_metric_label("quarantined"),
+            int(state_counts.get("quarantined", 0)),
+        )
+        st.dataframe(monitor_df, hide_index=True, width="stretch")
+    else:
+        st.info("Aucune opération de suppression récente à afficher.")
+
+    st.markdown(f"#### {SUPER_ADMIN_DLQ_SECTION_TITLE}")
+    dlq_rows = list_quarantined_deprovision_ops(engine, user.user_id, limit=50)
+    if not dlq_rows:
+        st.info("Aucune opération en quarantaine.")
+    else:
+        dlq_df = pd.DataFrame(
+            [
+                {
+                    "operation_id": row.operation_id,
+                    "target_user_id": row.target_user_id,
+                    "retry_count": row.retry_count,
+                    "quarantined_at": row.quarantined_at or "—",
+                    "last_error": row.last_error[:180],
+                }
+                for row in dlq_rows
+            ]
+        )
+        st.dataframe(dlq_df, hide_index=True, width="stretch")
+        selected_op = st.selectbox(
+            selectbox_dlq_operation(),
+            [row.operation_id for row in dlq_rows],
+            key="sa_dlq_operation_select",
+        )
+        replay_confirm = st.checkbox(
+            "Je confirme la relance du traitement bloqué",
+            key="sa_dlq_replay_confirm_checkbox",
+        )
+        if st.button(
+            button_replay_quarantined(),
+            key="sa_dlq_replay_btn",
+            disabled=not replay_confirm,
+        ):
+            try:
+                replay_quarantined_operation(engine, user.user_id, selected_op)
+                schedule_post_rerun_flash(st.session_state, "Opération remise en file d'attente.")
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                _show_action_error("Relance du traitement impossible", exc)
+
+
 def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
     """Administration globale des comptes."""
     st.subheader("Super Admin")
@@ -880,9 +958,21 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
         st.info("Accès réservé aux super admins.")
         return
 
+    tab_accounts, tab_tech = st.tabs(super_admin_tab_labels())
+    with tab_accounts:
+        _render_super_admin_accounts_panel(user, engine)
+    with tab_tech:
+        _render_super_admin_technical_panel(user, engine)
+
+
+def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> None:
+    """Invitation, liste des comptes et actions courantes (issue-012)."""
     st.markdown(f"### {SUPER_ADMIN_INVITE_SECTION_TITLE}")
     with st.form("super_admin_invite_form"):
-        invite_email = st.text_input("Email utilisateur", key="sa_invite_email_input")
+        invite_email = st.text_input(
+            "E-mail du collaborateur à inviter",
+            key="sa_invite_email_input",
+        )
         invite_submit = st.form_submit_button("Envoyer l'invitation")
     if invite_submit:
         try:
@@ -954,7 +1044,11 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
     target = choices[selected_label]
     owner_count = count_owned_projects(engine, target.user_id)
     membership_count = count_active_memberships(engine, target.user_id)
-    st.caption(f"Bloquants suppression: projets={owner_count}, memberships={membership_count}")
+    st.caption(
+        "Freins avant suppression du compte : "
+        f"projets dont ce compte est propriétaire = **{owner_count}**, "
+        f"accès à des projets d'autrui (collaboration) = **{membership_count}**."
+    )
 
     if membership_count > 0:
         st.warning(
@@ -962,7 +1056,7 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
             icon="⚠️",
         )
         detach_confirm = st.checkbox(
-            "Je confirme le detach complet des memberships",
+            "Je confirme le retrait complet des accès aux projets partagés",
             key="sa_detach_confirm_checkbox",
         )
         detach_typed_email = st.text_input(
@@ -1009,82 +1103,6 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
             st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error("Suppression compte impossible", exc)
-
-    with st.expander(SUPER_ADMIN_TECH_EXPANDER_TITLE, expanded=False):
-        st.caption(SUPER_ADMIN_TECH_EXPANDER_CAPTION)
-        st.markdown(f"#### {SUPER_ADMIN_SAGA_SECTION_TITLE}")
-        monitor_rows = list_recent_deprovision_ops(engine, user.user_id, limit=100)
-        if monitor_rows:
-            monitor_df = pd.DataFrame(
-                [
-                    {
-                        "operation_id": row.operation_id,
-                        "target_user_id": row.target_user_id,
-                        "state": row.state,
-                        "retry_count": row.retry_count,
-                        "next_retry_at": row.next_retry_at or "—",
-                        "quarantined_at": row.quarantined_at or "—",
-                        "last_error": row.last_error[:120],
-                    }
-                    for row in monitor_rows
-                ]
-            )
-            state_counts = monitor_df["state"].value_counts().to_dict()
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(saga_metric_label("pending"), int(state_counts.get("pending", 0)))
-            c2.metric(
-                saga_metric_label("provider_done"),
-                int(state_counts.get("provider_done", 0)),
-            )
-            c3.metric(saga_metric_label("failed"), int(state_counts.get("failed", 0)))
-            c4.metric(
-                saga_metric_label("quarantined"),
-                int(state_counts.get("quarantined", 0)),
-            )
-            st.dataframe(monitor_df, hide_index=True, width="stretch")
-        else:
-            st.info("Aucune opération de suppression récente à afficher.")
-
-        st.markdown(f"#### {SUPER_ADMIN_DLQ_SECTION_TITLE}")
-        dlq_rows = list_quarantined_deprovision_ops(engine, user.user_id, limit=50)
-        if not dlq_rows:
-            st.info("Aucune opération en quarantaine.")
-        else:
-            dlq_df = pd.DataFrame(
-                [
-                    {
-                        "operation_id": row.operation_id,
-                        "target_user_id": row.target_user_id,
-                        "retry_count": row.retry_count,
-                        "quarantined_at": row.quarantined_at or "—",
-                        "last_error": row.last_error[:180],
-                    }
-                    for row in dlq_rows
-                ]
-            )
-            st.dataframe(dlq_df, hide_index=True, width="stretch")
-            selected_op = st.selectbox(
-                selectbox_dlq_operation(),
-                [row.operation_id for row in dlq_rows],
-                key="sa_dlq_operation_select",
-            )
-            replay_confirm = st.checkbox(
-                "Je confirme la relance du traitement bloqué",
-                key="sa_dlq_replay_confirm_checkbox",
-            )
-            if st.button(
-                button_replay_quarantined(),
-                key="sa_dlq_replay_btn",
-                disabled=not replay_confirm,
-            ):
-                try:
-                    replay_quarantined_operation(engine, user.user_id, selected_op)
-                    schedule_post_rerun_flash(
-                        st.session_state, "Opération remise en file d'attente."
-                    )
-                    st.rerun()
-                except Exception as exc:  # noqa: BLE001
-                    _show_action_error("Relance du traitement impossible", exc)
 
 
 def render_tab_settings_export(
