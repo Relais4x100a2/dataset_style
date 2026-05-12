@@ -7,10 +7,39 @@ from sqlalchemy.exc import OperationalError
 from src.db_startup import (
     DbFailureCategory,
     classify_database_startup_error,
+    effective_database_url,
     is_development_ui,
     technical_hint_for_dev,
     user_facing_summary,
 )
+
+
+def test_effective_database_url_prefers_environment_over_streamlit() -> None:
+    """La valeur issue de la configuration runtime (env) prime sur les secrets Streamlit."""
+    env = {"DATABASE_URL": "postgresql://from-env"}
+    assert effective_database_url(env, "postgresql://from-streamlit") == "postgresql://from-env"
+
+
+def test_effective_database_url_falls_back_to_streamlit_secret() -> None:
+    assert (
+        effective_database_url({}, "postgresql://from-streamlit") == "postgresql://from-streamlit"
+    )
+
+
+def test_effective_database_url_empty_when_unconfigured() -> None:
+    assert effective_database_url({}, None) == ""
+    assert effective_database_url({"DATABASE_URL": ""}, None) == ""
+
+
+def test_effective_database_url_strips_whitespace() -> None:
+    assert effective_database_url({"DATABASE_URL": "  trimmed  "}, None) == "trimmed"
+
+
+def test_user_facing_summary_mentions_instance_administrator() -> None:
+    """Critère produit : consigne explicite pour l'invité non technique."""
+    for category in ("missing_url", "invalid_config", "connection", "other"):
+        text = user_facing_summary(category)
+        assert "administrateur de l'instance" in text.lower()
 
 
 def test_user_facing_summary_never_exposes_raw_env_name() -> None:
