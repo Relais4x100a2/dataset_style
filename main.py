@@ -8,6 +8,7 @@ from src.database import create_db_engine, ensure_schema, get_project_settings
 from src.db_startup import (
     DbFailureCategory,
     classify_database_startup_error,
+    effective_database_url,
     is_development_ui,
     technical_hint_for_dev,
     user_facing_summary,
@@ -29,20 +30,16 @@ from src.ui_components import (
 
 logger = logging.getLogger(__name__)
 
-initialize_runtime_config()
 
-
-def _database_url() -> str:
-    url = (os.environ.get("DATABASE_URL") or "").strip()
-    if url:
-        return url
+def _read_streamlit_database_url() -> str | None:
+    """Return database URL from Streamlit secrets when the process env has none."""
     try:
         sec = st.secrets.get("DATABASE_URL")
         if sec:
             return str(sec).strip()
     except Exception:  # noqa: BLE001
         pass
-    return ""
+    return None
 
 
 def _render_database_unavailable(
@@ -59,13 +56,22 @@ def _render_database_unavailable(
             st.code(hint)
 
 
+try:
+    initialize_runtime_config()
+except ValueError as exc:
+    logger.exception("Runtime configuration failed (APP_CONFIG_JSON or derived settings)")
+    st.set_page_config(page_title="Dataset Style Studio", layout="wide")
+    _render_database_unavailable("invalid_config", exc=exc)
+    st.stop()
+
 st.set_page_config(page_title="Dataset Style Studio", layout="wide")
 
-db_url = _database_url()
+db_url = effective_database_url(os.environ, _read_streamlit_database_url())
 if not db_url:
     logger.error(
-        "Database URL missing after runtime config "
-        "(set DATABASE_URL, APP_CONFIG_JSON, POSTGRES_*-derived URL, or Streamlit secrets)."
+        "No database URL resolved after runtime configuration was applied "
+        "(process environment after JSON merge and PostgreSQL derivation, "
+        "plus optional Streamlit secrets)."
     )
     _render_database_unavailable("missing_url", exc=None)
     st.stop()

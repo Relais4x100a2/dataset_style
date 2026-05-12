@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from typing import Literal
 
 from sqlalchemy.exc import ArgumentError, OperationalError
@@ -15,6 +16,31 @@ from sqlalchemy.exc import ArgumentError, OperationalError
 DbFailureCategory = Literal["missing_url", "invalid_config", "connection", "other"]
 
 _DEV_ENV_VALUES = frozenset({"development", "dev", "local", "debug"})
+
+
+def effective_database_url(
+    environ: Mapping[str, str],
+    streamlit_database_url: str | None,
+) -> str:
+    """Resolve the effective PostgreSQL URL after ``initialize_runtime_config``.
+
+    Prefers ``environ`` (including ``DATABASE_URL`` after ``POSTGRES_*`` /
+    ``APP_CONFIG_JSON`` handling), then the Streamlit secret value when the
+    process environment does not define a usable URL.
+
+    Args:
+        environ: Environment mapping (typically ``os.environ``).
+        streamlit_database_url: Optional value read from ``st.secrets`` outside this module.
+
+    Returns:
+        A non-empty connection string when configured, otherwise ``""``.
+    """
+    primary = (environ.get("DATABASE_URL") or "").strip()
+    if primary:
+        return primary
+    if streamlit_database_url is None:
+        return ""
+    return str(streamlit_database_url).strip()
 
 
 def is_development_ui() -> bool:
@@ -67,24 +93,25 @@ def user_facing_summary(category: DbFailureCategory) -> str:
         return (
             "L'application n'est pas correctement configurée côté serveur. "
             "Ce n'est pas un problème lié à votre compte. "
-            "Veuillez contacter l'administrateur ou le support."
+            "Veuillez contacter l'administrateur de l'instance."
         )
     if category == "invalid_config":
         return (
             "La connexion à la base de données est invalide côté serveur. "
             "Ce n'est pas un problème lié à votre compte. "
-            "Veuillez contacter l'administrateur ou le support."
+            "Veuillez contacter l'administrateur de l'instance."
         )
     if category == "connection":
         return (
             "Le service de données est momentanément indisponible ou inaccessible. "
             "Ce n'est généralement pas lié à votre compte. "
-            "Réessayez plus tard ; si le problème persiste, contactez l'administrateur ou le support."
+            "Réessayez plus tard ; si le problème persiste, veuillez contacter "
+            "l'administrateur de l'instance."
         )
     return (
         "Une erreur technique empêche l'accès aux données. "
         "Les équipes techniques peuvent consulter les journaux du serveur pour le diagnostic. "
-        "Si vous avez besoin d'aide, contactez l'administrateur ou le support."
+        "Si vous avez besoin d'aide, veuillez contacter l'administrateur de l'instance."
     )
 
 
