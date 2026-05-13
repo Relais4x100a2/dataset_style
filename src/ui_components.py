@@ -117,6 +117,7 @@ from src.project_entries_cache import (
 )
 from src.project_session import MembershipProject, resolve_active_project
 from src.super_admin_ui_texts import (
+    SUPER_ADMIN_ACCOUNT_MANAGEMENT_HUB_TITLE,
     SUPER_ADMIN_ACCOUNTS_SECTION_TITLE,
     SUPER_ADMIN_ACTIONS_SECTION_TITLE,
     SUPER_ADMIN_DLQ_SECTION_TITLE,
@@ -124,12 +125,18 @@ from src.super_admin_ui_texts import (
     SUPER_ADMIN_SAGA_SECTION_TITLE,
     SUPER_ADMIN_TECH_EXPANDER_CAPTION,
     SUPER_ADMIN_TECH_EXPANDER_TITLE,
+    SUPER_ADMIN_WORKFLOW_HINT,
     button_detach_memberships,
     button_replay_quarantined,
+    error_delete_target_account_failed,
+    error_detach_memberships_failed,
+    flash_memberships_detached,
     saga_metric_label,
     selectbox_dlq_operation,
     selectbox_target_account,
+    super_admin_accounts_table_column_labels,
     super_admin_tab_labels,
+    super_admin_warning_detach_memberships,
 )
 
 logger = logging.getLogger(__name__)
@@ -1142,6 +1149,7 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
         st.info("Accès réservé aux super admins.")
         return
 
+    st.caption(SUPER_ADMIN_WORKFLOW_HINT)
     tab_accounts, tab_tech = st.tabs(super_admin_tab_labels())
     with tab_accounts:
         _render_super_admin_accounts_panel(user, engine)
@@ -1150,7 +1158,8 @@ def render_tab_super_admin(user: CurrentUser, engine: Engine) -> None:
 
 
 def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> None:
-    """Invitation, liste des comptes et actions courantes (issue-012)."""
+    """Invitation, liste des comptes et actions courantes (issue-012, issue-029)."""
+    st.markdown(f"## {SUPER_ADMIN_ACCOUNT_MANAGEMENT_HUB_TITLE}")
     st.markdown(f"### {SUPER_ADMIN_INVITE_SECTION_TITLE}")
     with st.form("super_admin_invite_form"):
         invite_email = st.text_input(
@@ -1212,7 +1221,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
             }
             for row in rows
         ]
-    )
+    ).rename(columns=super_admin_accounts_table_column_labels())
     if accounts_df.empty:
         st.info("Aucun compte actif.")
     else:
@@ -1236,7 +1245,10 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
 
     if membership_count > 0:
         st.warning(
-            f"Action destructive: retirer {membership_count} membership(s) du compte {target.email}.",
+            super_admin_warning_detach_memberships(
+                membership_count=membership_count,
+                email=target.email,
+            ),
             icon="⚠️",
         )
         detach_confirm = st.checkbox(
@@ -1258,10 +1270,13 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
                 return
             try:
                 removed = detach_memberships_as_super_admin(engine, user.user_id, target.user_id)
-                schedule_post_rerun_flash(st.session_state, f"Memberships détachées: {removed}")
+                schedule_post_rerun_flash(
+                    st.session_state,
+                    flash_memberships_detached(removed),
+                )
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
-                _show_action_error("Detach memberships impossible", exc)
+                _show_action_error(error_detach_memberships_failed(), exc)
 
     confirm_delete = st.checkbox(
         "Je confirme vouloir supprimer ce compte",
@@ -1287,7 +1302,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
             schedule_post_rerun_flash(st.session_state, "Compte supprimé.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001
-            _show_action_error("Suppression compte impossible", exc)
+            _show_action_error(error_delete_target_account_failed(), exc)
 
 
 def render_tab_settings_export(
