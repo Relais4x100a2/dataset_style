@@ -167,7 +167,11 @@ cohérence** (`_coherence_score`) : aucun filtre, seuil strict « sous X », tra
 (alignée sur le tableau de bord via les mêmes bornes que l’histogramme), ou **score non calculé
 uniquement** (N/A). Les entrées sans score exploitable peuvent aussi être incluses ou exclues
 explicitement lorsque le filtre score est un seuil ou une tranche. Un libellé indique en permanence
-combien d’entrées sont affichées par rapport au total du projet.
+combien d’entrées sont affichées par rapport au total du projet. Des boutons **Précédent** /
+**Suivant** et le sélecteur « Entrée » partagent le même ordre que la liste filtrée (tri stable sur
+l’identifiant) ; un dialogue de confirmation apparaît avant tout changement de fiche pour rappeler
+le risque de perte des modifications non sauvegardées du formulaire (comportement aligné sur les
+contraintes Streamlit `st.form`).
 
 Dans **Export** (même onglet), un contrôle unique définit le périmètre pour **CSV et JSONL** :
 « Validées seulement » (statut « Fait et validé ») ou « Tout le dataset » (tous les statuts, y compris brouillons).

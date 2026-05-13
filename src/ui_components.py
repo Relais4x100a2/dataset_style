@@ -116,6 +116,11 @@ from src.services.edition_filters_service import (
     build_edition_score_filter_spec,
     coherence_bucket_label_fr,
 )
+from src.services.edition_sequential_navigation import (
+    edition_nav_boundary_caption_fr,
+    edition_nav_singleton_filtered_caption_fr,
+    edition_nav_unsaved_changes_notice_fr,
+)
 from src.services.export_scope_service import summarize_export_perimeter
 from src.services.project_dataframe_view import prepare_for_dashboard_tab, prepare_for_edition_tab
 from src.super_admin_ui_texts import (
@@ -1626,6 +1631,35 @@ def render_tab_ajout(
         st.rerun()
 
 
+def _render_edition_entry_change_confirm_dialog(
+    *,
+    entry_widget_key: str,
+    committed_key: str,
+    pending_key: str,
+    target_entry_id: str,
+) -> None:
+    """Affiche la boîte de dialogue de confirmation avant changement de fiche (issue 032)."""
+
+    @st.dialog("Changer de fiche")
+    def _dialog_body() -> None:
+        st.markdown(edition_nav_unsaved_changes_notice_fr())
+        ok_key = f"{pending_key}_confirm_ok"
+        cancel_key = f"{pending_key}_confirm_cancel"
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Continuer", type="primary", key=ok_key):
+                tid = str(st.session_state.pop(pending_key, "") or target_entry_id)
+                st.session_state[entry_widget_key] = tid
+                st.session_state[committed_key] = tid
+                st.rerun()
+        with c2:
+            if st.button("Annuler", key=cancel_key):
+                st.session_state.pop(pending_key, None)
+                st.rerun()
+
+    _dialog_body()
+
+
 def render_tab_edition(
     user: CurrentUser,
     role: str,
@@ -1737,26 +1771,51 @@ def render_tab_edition(
         eid = str(r["id"])
         id_to_label[eid] = f"{eid} · {r['type']} · {r['statut']}"
     entry_widget_key = f"edition_entry_select_{project_id}"
+    committed_key = f"edition_entry_committed_{project_id}"
+    pending_key = f"edition_nav_pending_target_{project_id}"
     if entry_widget_key in st.session_state and st.session_state[entry_widget_key] not in entry_ids:
         del st.session_state[entry_widget_key]
-    peek_raw = st.session_state.get(entry_widget_key)
-    peek_id = str(peek_raw) if peek_raw is not None and str(peek_raw) in entry_ids else entry_ids[0]
+    if committed_key in st.session_state and st.session_state[committed_key] not in entry_ids:
+        del st.session_state[committed_key]
+    if pending_key in st.session_state and st.session_state[pending_key] not in entry_ids:
+        del st.session_state[pending_key]
+    if entry_widget_key not in st.session_state:
+        st.session_state[entry_widget_key] = entry_ids[0]
+    if committed_key not in st.session_state:
+        st.session_state[committed_key] = st.session_state[entry_widget_key]
+    pending_raw = st.session_state.get(pending_key)
+    pending_target = str(pending_raw) if pending_raw is not None and str(pending_raw) else ""
+    if not pending_target:
+        wid = str(st.session_state[entry_widget_key])
+        com = str(st.session_state[committed_key])
+        if wid != com:
+            st.session_state[pending_key] = wid
+            st.session_state[entry_widget_key] = com
+            st.rerun()
+    committed_id = str(st.session_state[committed_key])
     nav_prev_key = f"edition_nav_prev_{project_id}"
     nav_next_key = f"edition_nav_next_{project_id}"
-    can_prev = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="prev") is not None
-    can_next = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="next") is not None
+    can_prev = edition_nav_neighbor_entry_id(entry_ids, committed_id, direction="prev") is not None
+    can_next = edition_nav_neighbor_entry_id(entry_ids, committed_id, direction="next") is not None
+    if pending_target:
+        _render_edition_entry_change_confirm_dialog(
+            entry_widget_key=entry_widget_key,
+            committed_key=committed_key,
+            pending_key=pending_key,
+            target_entry_id=pending_target,
+        )
     c_prev, c_sel, c_next = st.columns([1, 8, 1])
     with c_prev:
         if st.button(
-            "◀",
+            "Précédent",
             key=nav_prev_key,
             disabled=not can_prev,
-            help="Fiche précédente (filtre actuel)",
+            help="Fiche précédente (ordre de la liste filtrée, tri stable sur l'identifiant)",
             width="content",
         ):
-            nid = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="prev")
+            nid = edition_nav_neighbor_entry_id(entry_ids, committed_id, direction="prev")
             if nid is not None:
-                st.session_state[entry_widget_key] = nid
+                st.session_state[pending_key] = nid
                 st.rerun()
     with c_sel:
         chosen_id = str(
@@ -1769,16 +1828,29 @@ def render_tab_edition(
         )
     with c_next:
         if st.button(
-            "▶",
+            "Suivant",
             key=nav_next_key,
             disabled=not can_next,
-            help="Fiche suivante (filtre actuel)",
+            help="Fiche suivante (ordre de la liste filtrée, tri stable sur l'identifiant)",
             width="content",
         ):
-            nid = edition_nav_neighbor_entry_id(entry_ids, peek_id, direction="next")
+            nid = edition_nav_neighbor_entry_id(entry_ids, committed_id, direction="next")
             if nid is not None:
-                st.session_state[entry_widget_key] = nid
+                st.session_state[pending_key] = nid
                 st.rerun()
+    hint_prev = edition_nav_boundary_caption_fr("prev", can_navigate=can_prev)
+    hint_next = edition_nav_boundary_caption_fr("next", can_navigate=can_next)
+    hint_single = edition_nav_singleton_filtered_caption_fr(n_filtered=n_pick)
+    if hint_single:
+        st.caption(hint_single)
+    else:
+        cap_prev, _, cap_next = st.columns([1, 8, 1])
+        with cap_prev:
+            if hint_prev:
+                st.caption(hint_prev)
+        with cap_next:
+            if hint_next:
+                st.caption(hint_next)
     k_pos, n_filtered = edition_entry_k_of_n(entry_ids, chosen_id)
     rev_pick = edition_pick_revision_stats(df_pick)
     m_pos, m_rev, m_ok, m_other = st.columns(4)
@@ -1797,8 +1869,9 @@ def render_tab_edition(
         "de la liste courante par rapport au projet."
     )
     st.caption(
-        "Changer de fiche (liste déroulante ou flèches) recharge le formulaire : "
-        "les modifications non enregistrées sur la fiche courante sont perdues."
+        "Navigation dans l'ordre de la **liste filtrée** (tri stable sur l'identifiant). "
+        "Un dialogue de confirmation s'affiche avant tout changement de fiche pour "
+        "rappeler le risque de perte des modifications non sauvegardées du formulaire."
     )
     row = df_pick.loc[df_pick["id"].astype(str) == chosen_id].iloc[0].copy()
     disabled = role == "viewer"
