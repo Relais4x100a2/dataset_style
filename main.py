@@ -108,8 +108,11 @@ _, _, dimensions = load_active_dimensions(project_settings)
 # per-tab renderer would pop session feedback before the curator's active tab runs.
 render_post_save_stylometric_feedback_banner(project_id)
 
-# Issue-007: tab strip follows the curator workflow; titles are defined in
-# ``src.tab_layout`` (``EXPECTED_WORKFLOW_TAB_ORDER`` + account tab).
+# Issue-007 / issue-024: tab strip follows the curator workflow; titles come from
+# ``src.tab_layout`` (``EXPECTED_WORKFLOW_TAB_ORDER`` + ``Mon compte`` [+ Super Admin]).
+# Bodies must stay aligned with ``main_tab_labels`` slot order:
+# tab1→projects | tab2→settings_export | tab3→ajout | tab4→edition |
+# tab5→dashboard | tab6→account | extra_tabs[0]→super_admin (if enabled).
 tab_labels = main_tab_labels(include_super_admin=user.is_super_admin)
 tabs = st.tabs(tab_labels)
 tab1, tab2, tab3, tab4, tab5, tab6, *extra_tabs = tabs
