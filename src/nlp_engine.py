@@ -800,9 +800,7 @@ def filter_edition_entries_dataframe(
         if score_column not in out.columns:
             out = out.copy()
             out[score_column] = ""
-        mask_na = [
-            parse_persisted_coherence_score(v) is None for v in out[score_column].tolist()
-        ]
+        mask_na = [parse_persisted_coherence_score(v) is None for v in out[score_column].tolist()]
         return _sort_edition_pick_by_stable_string_id(out.loc[mask_na])
     if score_column not in out.columns:
         out = out.copy()

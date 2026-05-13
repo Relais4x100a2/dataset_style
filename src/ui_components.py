@@ -592,6 +592,7 @@ def _render_project_create_form(
         return
     try:
         pid = create_project(engine, user.user_id, pname.strip())
+        invalidate_project_entries_cache()
         st.session_state["project_id"] = pid
         st.success("Projet créé.")
         st.rerun()
@@ -855,6 +856,7 @@ def _render_project_delete_guarded_form(
             return
         try:
             delete_project_as_admin(engine, project_id, user.user_id)
+            invalidate_project_entries_cache()
             st.session_state.pop("project_id", None)
             schedule_post_rerun_flash(st.session_state, "Projet supprimé.")
             st.rerun()
@@ -1262,6 +1264,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
                 max_retries=_saga_max_retries(),
                 detach_memberships=False,
             )
+            invalidate_project_entries_cache()
             schedule_post_rerun_flash(st.session_state, "Compte supprimé.")
             st.rerun()
         except Exception as exc:  # noqa: BLE001

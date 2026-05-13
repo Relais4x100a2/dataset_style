@@ -9,6 +9,7 @@ from src.project_entries_cache import (
     cached_load_project_entries,
     engine_url_cache_token,
     invalidate_project_entries_cache,
+    project_entries_cache_tenant_partition,
 )
 
 
@@ -27,3 +28,19 @@ def test_cached_loader_exposes_streamlit_invalidation_api() -> None:
     """Decorated function must support ``clear()`` for post-write invalidation."""
     assert callable(getattr(cached_load_project_entries, "clear", None))
     assert callable(invalidate_project_entries_cache)
+
+
+def test_tenant_partition_separates_projects_and_users() -> None:
+    """Acceptance issue-027: cache identity must not collide across users or projects."""
+    a = project_entries_cache_tenant_partition("proj-1", "user-a")
+    b = project_entries_cache_tenant_partition("proj-1", "user-b")
+    c = project_entries_cache_tenant_partition("proj-2", "user-a")
+    assert a == ("proj-1", "user-a")
+    assert a != b
+    assert a != c
+    assert b != c
+
+
+def test_tenant_partition_normalizes_to_strings() -> None:
+    """Partition values are stringified for stable hashing with Streamlit cache."""
+    assert project_entries_cache_tenant_partition("p", "u") == ("p", "u")
