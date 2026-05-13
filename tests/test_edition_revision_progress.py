@@ -1,4 +1,4 @@
-"""Tests indicateur position et compteurs révision (liste filtrée) — issue 016."""
+"""Tests indicateur position et compteurs révision (liste filtrée) — issues 016 / 033."""
 
 from __future__ import annotations
 
@@ -41,14 +41,21 @@ def test_edition_pick_revision_stats_preset_statuts() -> None:
         }
     )
     s = edition_pick_revision_stats(df)
-    assert s == EditionPickRevisionStats(total=4, needing_review=2, validated=1, other=1)
+    assert s == EditionPickRevisionStats(total=4, needing_review=2, validated=1, draft=1)
 
 
 def test_edition_pick_revision_stats_no_statut_column() -> None:
     """Sans colonne statut, tout est classé « autre »."""
     df = pd.DataFrame({"id": ["1"]})
     s = edition_pick_revision_stats(df)
-    assert s.total == 1 and s.needing_review == 0 and s.validated == 0 and s.other == 1
+    assert s.total == 1 and s.needing_review == 0 and s.validated == 0 and s.draft == 1
+
+
+def test_edition_pick_revision_stats_counts_validated_preset_label() -> None:
+    """Le libellé « Validé » du preset pro est compté comme validée."""
+    df = pd.DataFrame({"id": ["1", "2"], "statut": ["Validé", "Brouillon"]})
+    s = edition_pick_revision_stats(df)
+    assert s == EditionPickRevisionStats(total=2, needing_review=0, validated=1, draft=1)
 
 
 def test_filter_change_updates_k_and_n() -> None:

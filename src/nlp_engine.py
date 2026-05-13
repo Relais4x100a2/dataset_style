@@ -824,9 +824,9 @@ def filter_edition_entries_dataframe(
     return _sort_edition_pick_by_stable_string_id(out.loc[mask_sc])
 
 
-# Issue 016 — position et compteurs révision (liste filtrée édition, sans BDD).
+# Issue 016 / 033 — position et compteurs révision (liste filtrée édition, sans BDD).
 EDITION_STATUTS_NEEDS_REVIEW: frozenset[str] = frozenset({"A faire", "En cours"})
-EDITION_STATUT_VALIDATED: str = "Fait et validé"
+EDITION_STATUTS_VALIDATED: frozenset[str] = frozenset({"Fait et validé", "Validé"})
 
 
 @dataclass(frozen=True)
@@ -836,7 +836,7 @@ class EditionPickRevisionStats:
     total: int
     needing_review: int
     validated: int
-    other: int
+    draft: int
 
 
 def edition_entry_k_of_n(
@@ -878,21 +878,21 @@ def edition_pick_revision_stats(
     """Compte les statuts dans la sélection filtrée (même source que la liste d'édition).
 
     « À réviser » : libellés exacts ``A faire`` ou ``En cours`` (après strip).
-    « Validées » : ``Fait et validé``. Tout autre libellé (ou statut vide / NaN)
-    est compté dans ``other``.
+    « Validées » : ``Fait et validé`` ou ``Validé``. Tout autre libellé (ou statut
+    vide / NaN) est compté dans ``draft`` (libellé UI « Brouillon »).
 
     Args:
         df_pick: Données déjà filtrées ; aucune persistance ni requête SQL.
         statut_column: Colonne statut métier.
 
     Returns:
-        Totaux avec ``total == needing_review + validated + other``.
+        Totaux avec ``total == needing_review + validated + draft``.
     """
     total = len(df_pick)
     if total == 0:
         return EditionPickRevisionStats(0, 0, 0, 0)
     if statut_column not in df_pick.columns:
-        return EditionPickRevisionStats(total=total, needing_review=0, validated=0, other=total)
+        return EditionPickRevisionStats(total=total, needing_review=0, validated=0, draft=total)
 
     needing = 0
     validated = 0
@@ -903,11 +903,11 @@ def edition_pick_revision_stats(
             label = str(raw).strip()
         if label in EDITION_STATUTS_NEEDS_REVIEW:
             needing += 1
-        elif label == EDITION_STATUT_VALIDATED:
+        elif label in EDITION_STATUTS_VALIDATED:
             validated += 1
-    other = total - needing - validated
+    draft = total - needing - validated
     return EditionPickRevisionStats(
-        total=total, needing_review=needing, validated=validated, other=other
+        total=total, needing_review=needing, validated=validated, draft=draft
     )
 
 
