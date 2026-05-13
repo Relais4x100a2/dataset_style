@@ -1,4 +1,4 @@
-"""Copy and flags for the empty-project onboarding flow (issue-008, issue-025).
+"""Copy and flags for the empty-project onboarding flow (issue-008, issue-025, issue-028).
 
 Streamlit widgets stay in ``ui_components``; this module holds testable
 strings and environment-driven behaviour.
@@ -13,9 +13,10 @@ from src.tab_layout import EXPECTED_WORKFLOW_TAB_ORDER
 
 DISABLE_SELF_SERVICE_PROJECT_CREATION_ENV = "DISABLE_SELF_SERVICE_PROJECT_CREATION"
 
-# Widget key roots — must stay distinct between sidebar and main column forms.
+# Widget key roots — must stay distinct between onboarding vs in-tab project actions.
 ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX = "onboarding_main"
-SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX = "sb_first"
+# Additional / follow-up project creation + delete guard in ``render_tab_projects`` (issue-028).
+TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX = "proj_tab"
 
 NO_PROJECT_CREATION_DISABLED_MESSAGE = (
     "Tu n’as accès à aucun projet et la création de projet est désactivée sur cette instance. "
@@ -31,17 +32,19 @@ STYLOMETRIC_VALUE_SENTENCE_FR = (
     "reste lisible et cohérent pour ceux qui l’exploitent."
 )
 
-# Same canonical wording as issue 11 / PR (sidebar vs onglet Projets).
+# Canonical wording: issue 8 / 11 (règle unique), refined issue-028 (contexte vs actions).
 PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR = (
-    "Règle produit (issue 11) — Parcours principal pour le tout premier projet : "
-    "ce formulaire plein écran. La barre latérale propose la même création et sert "
-    "surtout à fixer le projet courant. L’onglet Projets du studio gère la liste des "
-    "projets existants (créations supplémentaires, suppression) une fois le studio ouvert."
+    "Règle produit (issues 8, 11 et 28) — **Contexte** : le menu **☰** (barre latérale) "
+    "affiche ton compte et, dès qu’au moins un projet existe, permet de choisir le "
+    "**projet courant**. **Actions projet** : l’onglet **Projets** regroupe la création "
+    "(premier projet comme les suivants), la lecture du projet actif et la suppression ; "
+    "il n’y a pas de formulaire de création dans la barre latérale pour éviter deux "
+    "« endroits officiels » concurrents."
 )
 
 SIDEBAR_CONTEXT_HINT_FR = (
-    "Le menu **☰** regroupe compte et projet courant ; tu n’as pas besoin de l’ouvrir "
-    "pour créer depuis cette page."
+    "Astuce : le menu **☰** sert surtout au **contexte** (compte, projet courant). "
+    "Pour créer ou retirer un projet, utilise l’onglet **Projets** dans la zone principale."
 )
 
 
@@ -71,10 +74,10 @@ def onboarding_steps_when_creation_allowed() -> tuple[OnboardingStep, ...]:
     return (
         OnboardingStep(
             1,
-            f"**Étape 1 — Créer ton premier projet** — Saisis un nom ci-dessous puis "
-            f"clique sur **{cta}**. Tu peux aussi utiliser le même formulaire dans la "
-            "barre latérale (menu **☰**, zone « Projet courant ») : ce n’est pas "
-            "obligatoire pour démarrer ici.",
+            f"**Étape 1 — Créer ton premier projet** — Tu es dans l’onglet **Projets** : "
+            f"saisis un nom ci-dessous puis clique sur **{cta}**. "
+            "Après chargement du studio, tu reviendras ici pour les autres actions "
+            "(nouveau projet, suppression).",
         ),
         OnboardingStep(
             2,

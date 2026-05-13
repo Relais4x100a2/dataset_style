@@ -19,9 +19,11 @@ def test_onboarding_steps_reference_workflow_tab_labels() -> None:
     assert EXPECTED_WORKFLOW_TAB_ORDER[2] in labels
 
 
-def test_onboarding_step_one_mentions_sidebar_non_blocking() -> None:
+def test_onboarding_step_one_points_to_projects_tab_for_first_project() -> None:
+    """Issue-028: premier projet se crée dans l'onglet Projets, pas depuis la sidebar."""
     joined = ep.onboarding_steps_when_creation_allowed()[0].body_markdown
-    assert "☰" in joined or "menu" in joined.lower()
+    assert "Projets" in joined
+    assert "barre latérale" not in joined.lower()
 
 
 def test_primary_submit_label_for_onboarding() -> None:
@@ -34,9 +36,12 @@ def test_stylometric_value_sentence_is_french_and_non_empty() -> None:
     assert "stylom" not in text.lower()
 
 
-def test_product_rule_issue_11_covers_sidebar_and_projects_tab() -> None:
+def test_product_rule_issue_11_separates_context_sidebar_and_actions_tab() -> None:
+    """Issue-028 / issue-8: contexte (sidebar) vs actions (onglet Projets)."""
     rule = ep.PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR
-    assert "sidebar" in rule.lower() or "latérale" in rule.lower()
+    assert "contexte" in rule.lower()
+    assert "action" in rule.lower() or "actions" in rule.lower()
+    assert "latérale" in rule.lower() or "sidebar" in rule.lower()
     assert "projet" in rule.lower()
 
 
@@ -58,7 +63,8 @@ def test_creation_disabled_message_is_non_trivial() -> None:
     assert len(ep.NO_PROJECT_CREATION_DISABLED_MESSAGE.strip()) >= 40
 
 
-def test_main_and_sidebar_create_key_prefixes_differ() -> None:
+def test_main_onboarding_and_tab_projects_create_key_prefixes_differ() -> None:
+    """Distinct Streamlit key roots for first-project vs in-studio project actions (issue-028)."""
     main_p = ep.ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX
-    sb_p = ep.SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX
-    assert main_p != sb_p
+    tab_p = ep.TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX
+    assert main_p != tab_p
