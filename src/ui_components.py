@@ -58,12 +58,7 @@ from src.empty_project_onboarding import (
     is_self_service_project_creation_allowed,
     onboarding_steps_when_creation_allowed,
 )
-from src.export_utils import (
-    ExportScope,
-    convert_to_jsonl,
-    dataframe_for_export,
-    export_perimeter_ui_recap_fr,
-)
+from src.export_utils import ExportScope, convert_to_jsonl
 from src.flash_messages import schedule_post_rerun_flash
 from src.llm_generate import generate_input_from_output, generate_output_from_input
 from src.mailer import send_account_link_email
@@ -71,9 +66,7 @@ from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
     DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
     DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
-    EditionScoreFilterSpec,
     RowNlpCacheResult,
-    _edition_coherence_bucket_bounds,
     avg_signature_from_cache,
     coherence_score_bucket_table,
     compute_row_cache,
@@ -90,7 +83,6 @@ from src.nlp_engine import (
     list_parsed_coherence_scores,
     mean_syntax_contrast_parsed,
     outliers_low_coherence_table,
-    parse_persisted_coherence_score,
     parse_persisted_syntax_contrast,
     post_save_stylometric_session_payload,
     row_nlp_feedback_bundle_after_persist,
@@ -116,6 +108,16 @@ from src.project_entries_cache import (
     invalidate_project_entries_cache,
 )
 from src.project_session import MembershipProject, resolve_active_project
+from src.services.dashboard_stylometry_service import (
+    count_rows_missing_parseable_coherence_score,
+    project_dataset_headline_metrics,
+)
+from src.services.edition_filters_service import (
+    build_edition_score_filter_spec,
+    coherence_bucket_label_fr,
+)
+from src.services.export_scope_service import summarize_export_perimeter
+from src.services.project_dataframe_view import prepare_for_dashboard_tab, prepare_for_edition_tab
 from src.super_admin_ui_texts import (
     SUPER_ADMIN_ACCOUNT_MANAGEMENT_HUB_TITLE,
     SUPER_ADMIN_ACCOUNTS_SECTION_TITLE,
@@ -167,12 +169,8 @@ def _load_fr_core_nlp():
 
 
 def _ensure_cache_columns_on_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Garantit la présence des colonnes de cache NLP (DataFrame issu d'anciennes données)."""
-    out = df.copy()
-    for col in CACHE_COLUMNS:
-        if col not in out.columns:
-            out[col] = ""
-    return out
+    """Garantit colonnes de cache NLP + alias legacy (voir ``prepare_for_edition_tab``)."""
+    return prepare_for_edition_tab(df)
 
 
 def _clear_post_save_stylometric_feedback(project_id: str) -> None:
@@ -1351,13 +1349,13 @@ def render_tab_settings_export(
         "n'est pas « Fait et validé » (par ex. « À faire »), pas seulement les entrées finalisées."
     )
 
-    df_export = dataframe_for_export(df, export_scope)
-    row_n = len(df_export)
+    perimeter = summarize_export_perimeter(df, export_scope)
+    df_export = perimeter.dataframe
+    row_n = perimeter.row_count
     st.metric("Fiches dans le périmètre", row_n)
-    recap_line, recap_warning = export_perimeter_ui_recap_fr(row_n, export_scope)
-    st.caption(recap_line)
-    if recap_warning:
-        st.warning(recap_warning)
+    st.caption(perimeter.recap_caption)
+    if perimeter.recap_warning:
+        st.warning(perimeter.recap_warning)
 
     export_format = st.selectbox(
         "Format JSONL",
@@ -1643,13 +1641,7 @@ def render_tab_edition(
     if df.empty:
         st.info("Aucune entrée.")
         return
-    if "structure" not in df.columns and "forme" in df.columns:
-        df["structure"] = df["forme"]
-    if "format" not in df.columns and "support" in df.columns:
-        df["format"] = df["support"]
-    if "public" not in df.columns:
-        df["public"] = ""
-    basis = _ensure_cache_columns_on_df(df)
+    basis = prepare_for_edition_tab(df)
     st.markdown("##### Filtres de la liste d'entrées")
     statut_labels = edition_statut_filter_options(dimensions["statuts"], basis)
     statut_choice_key = f"edition_filter_statut_{project_id}"
@@ -1689,16 +1681,11 @@ def render_tab_edition(
         )
     elif score_mode_choice == "bucket":
         b_key = f"edition_filter_score_bucket_{project_id}"
-
-        def _bucket_label(i: int) -> str:
-            lo, hi = _edition_coherence_bucket_bounds(i)
-            return f"{lo}–{hi}"
-
         bucket_decile_pick = int(
             st.selectbox(
                 "Tranche",
                 options=list(range(10)),
-                format_func=_bucket_label,
+                format_func=coherence_bucket_label_fr,
                 key=b_key,
             )
         )
@@ -1718,22 +1705,12 @@ def render_tab_edition(
             "Règle N/A : si la case est décochée, les entrées sans score exploitable sont "
             "exclues dès qu'un filtre sur le score (autre que « Tous les scores ») est actif."
         )
-    if score_mode_choice == "all":
-        score_spec = EditionScoreFilterSpec()
-    elif score_mode_choice == "na_only":
-        score_spec = EditionScoreFilterSpec(mode="na_only")
-    elif score_mode_choice == "below":
-        score_spec = EditionScoreFilterSpec(
-            mode="below",
-            threshold_lt=threshold_lt,
-            include_na=include_na_scores,
-        )
-    else:
-        score_spec = EditionScoreFilterSpec(
-            mode="bucket",
-            bucket_decile=bucket_decile_pick,
-            include_na=include_na_scores,
-        )
+    score_spec = build_edition_score_filter_spec(
+        score_mode_choice,
+        threshold_lt=threshold_lt,
+        bucket_decile=bucket_decile_pick,
+        include_na=include_na_scores,
+    )
 
     df_pick = filter_edition_entries_dataframe(
         basis,
@@ -1995,21 +1972,15 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
     if df.empty:
         st.info("Aucune donnée.")
         return
-    df_view = df.copy()
-    if "structure" not in df_view.columns and "forme" in df_view.columns:
-        df_view["structure"] = df_view["forme"]
-    if "format" not in df_view.columns and "support" in df_view.columns:
-        df_view["format"] = df_view["support"]
-    if "public" not in df_view.columns:
-        df_view["public"] = ""
-    for cache_col in ("_coherence_score", "_syntax_contrast", "_signature_json"):
-        if cache_col not in df_view.columns:
-            df_view[cache_col] = ""
-
+    df_view = prepare_for_dashboard_tab(df)
+    total_rows, validated_rows, n_types = project_dataset_headline_metrics(
+        df_view,
+        validated_status_label=STATUT_VALIDE,
+    )
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total", len(df_view))
-    c2.metric("Validées", int((df_view["statut"] == STATUT_VALIDE).sum()))
-    c3.metric("Types", int(df_view["type"].nunique()))
+    c1.metric("Total", total_rows)
+    c2.metric("Validées", validated_rows)
+    c3.metric("Types", n_types)
 
     scope_key = "dashboard_stylometry_scope"
     if scope_key not in st.session_state:
@@ -2062,14 +2033,7 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
             "lignes (scores lus via le même parseur que l'export et les filtres)."
         )
     scores = list_parsed_coherence_scores(work_df)
-    if "_coherence_score" in work_df.columns:
-        missing_scores = sum(
-            1
-            for v in work_df["_coherence_score"].tolist()
-            if parse_persisted_coherence_score(v) is None
-        )
-    else:
-        missing_scores = len(work_df)
+    missing_scores = count_rows_missing_parseable_coherence_score(work_df)
     if not scores:
         st.info("Aucun score de cohérence numérique sur ce périmètre.")
     else:
