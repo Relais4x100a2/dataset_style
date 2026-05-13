@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 from src.flash_messages import (
+    POST_RERUN_FLASH_ADMIN_KEY,
     POST_RERUN_FLASH_KEY,
     FlashLevel,
     consume_post_rerun_flash,
@@ -37,6 +38,37 @@ def test_reschedule_overwrites_previous_flash() -> None:
     schedule_post_rerun_flash(session, "Premier", level="warning")
     schedule_post_rerun_flash(session, "Deuxième", level="success")
     assert consume_post_rerun_flash(session) == {"message": "Deuxième", "level": "success"}
+
+
+def test_super_admin_channel_uses_dedicated_session_key() -> None:
+    """Super-admin flashes use a separate session key (issue-030 / admin namespace)."""
+    session: dict[str, Any] = {}
+    schedule_post_rerun_flash(session, "Compte supprimé.", channel="super_admin")
+    assert POST_RERUN_FLASH_KEY not in session
+    assert POST_RERUN_FLASH_ADMIN_KEY in session
+    assert consume_post_rerun_flash(session) == {"message": "Compte supprimé.", "level": "success"}
+    assert POST_RERUN_FLASH_ADMIN_KEY not in session
+
+
+def test_super_admin_schedule_clears_default_flash() -> None:
+    """Scheduling a super-admin flash must drop any curator default flash (single banner)."""
+    session: dict[str, Any] = {}
+    schedule_post_rerun_flash(session, "Curateur", level="info")
+    schedule_post_rerun_flash(session, "Admin", channel="super_admin")
+    assert POST_RERUN_FLASH_KEY not in session
+    assert consume_post_rerun_flash(session) == {"message": "Admin", "level": "success"}
+
+
+def test_default_schedule_clears_super_admin_flash() -> None:
+    """Curator-path flash clears a pending super-admin payload so channels do not stack."""
+    session: dict[str, Any] = {}
+    schedule_post_rerun_flash(session, "Admin", channel="super_admin")
+    schedule_post_rerun_flash(session, "Réglages enregistrés.", level="success")
+    assert POST_RERUN_FLASH_ADMIN_KEY not in session
+    assert consume_post_rerun_flash(session) == {
+        "message": "Réglages enregistrés.",
+        "level": "success",
+    }
 
 
 def test_render_post_rerun_flash_once_invokes_streamlit() -> None:
@@ -102,6 +134,29 @@ def test_logout_preserves_scheduled_flash_payload() -> None:
     assert "_pending_clear_new_entry_p1_u_u1" not in session
     assert POST_RERUN_FLASH_KEY in session
     assert session[POST_RERUN_FLASH_KEY]["message"] == "Compte supprimé."
+
+
+def test_logout_preserves_super_admin_scheduled_flash_payload() -> None:
+    """Super-admin channel flash survives ``logout()`` (separate session key)."""
+    from unittest.mock import patch
+
+    from src import auth
+
+    session: dict[str, Any] = {
+        "current_user": {
+            "user_id": "u1",
+            "email": "a@example.com",
+            "display_name": "a",
+            "access_token": "tok",
+            "is_super_admin": True,
+        },
+    }
+    schedule_post_rerun_flash(session, "Compte cible supprimé.", channel="super_admin")
+    with patch.object(auth.st, "session_state", session):
+        auth.logout()
+    assert "current_user" not in session
+    assert POST_RERUN_FLASH_ADMIN_KEY in session
+    assert session[POST_RERUN_FLASH_ADMIN_KEY]["message"] == "Compte cible supprimé."
 
 
 def test_render_auth_gate_invokes_post_rerun_flash_once() -> None:

@@ -1136,7 +1136,11 @@ def _render_super_admin_technical_panel(user: CurrentUser, engine: Engine) -> No
         ):
             try:
                 replay_quarantined_operation(engine, user.user_id, selected_op)
-                schedule_post_rerun_flash(st.session_state, "Opération remise en file d'attente.")
+                schedule_post_rerun_flash(
+                    st.session_state,
+                    "Opération remise en file d'attente.",
+                    channel="super_admin",
+                )
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
                 _show_action_error("Relance du traitement impossible", exc)
@@ -1273,6 +1277,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
                 schedule_post_rerun_flash(
                     st.session_state,
                     flash_memberships_detached(removed),
+                    channel="super_admin",
                 )
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
@@ -1299,7 +1304,11 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
                 detach_memberships=False,
             )
             invalidate_project_entries_cache()
-            schedule_post_rerun_flash(st.session_state, "Compte supprimé.")
+            schedule_post_rerun_flash(
+                st.session_state,
+                "Compte supprimé.",
+                channel="super_admin",
+            )
             st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error(error_delete_target_account_failed(), exc)
