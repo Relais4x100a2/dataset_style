@@ -242,7 +242,7 @@ La sidebar (`render_sidebar`, l. 423-461) contient le sélecteur de projet et le
 
 ### 5.4 Libellés mélangent le technique et le métier
 
-- "LLM base URL", "LLM model", "LLM API key", "LanguageTool base URL" sont exposés directement dans l'onglet Réglages (`_render_project_settings_form`, l. 160-222).
+- L'onglet Réglages expose désormais des libellés métier en français pour la génération assistée (URL du serveur d'IA, Modèle d'IA, etc.), avec infobulles (`help=`) rappelant les variables `LLM_*` pour le support — voir `_render_project_settings_form` dans `src/ui_components.py` (issue 034).
 - Les libellés anglais type « Detach memberships » / « DLQ » ont été remplacés par des formulations françaises côté actions principales (issue 029 : messages d’erreur, avertissements retrait d’accès, en-têtes de tableau) ; le vocabulaire technique reste visible dans les tableaux et l’onglet technique.
 - `operation_id`, `target_user_id` apparaissent directement dans les tableaux de l'interface Super Admin.
 
@@ -320,7 +320,7 @@ Reproduire cette boucle dans Label Studio via un ML Backend est techniquement po
 |---|--------|--------|
 | N1 | Navigation précédent/suivant dans l'édition (boutons) | Curation séquentielle plus rapide |
 | N2 | Indicateur de progression ("Entrée 12/47 · 8 à réviser · 3 outliers") | Sentiment de contrôle |
-| N3 | Libellés techniques traduits en français métier ("Modèle d'IA" au lieu de "LLM model") | Accessibilité non-technique |
+| N3 | **Fait (issue-034)** : libellés réglages projet en français métier (« Modèle d'IA », infobulles `LLM_*`) | Accessibilité non-technique |
 | N4 | Email d'invitation avec description en une phrase de la proposition de valeur stylométrique | Onboarding email → contexte immédiat |
 | N5 | Rapport de cohérence avant export : "47 entrées validées · cohérence moyenne 81/100 · 3 outliers à vérifier" | Confiance avant export |
 | N6 | Tests utilisateur courts (3-5 sessions) sur le parcours : invitation → projet → première entrée → lecture score cohérence → validation | Données terrain pour prioriser les itérations suivantes |
