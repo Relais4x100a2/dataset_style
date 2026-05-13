@@ -1,6 +1,7 @@
 import logging
 import os
 
+import pandas as pd
 import streamlit as st
 from src.auth import bootstrap_first_admin, render_auth_gate
 from src.config import initialize_runtime_config
@@ -15,8 +16,9 @@ from src.db_startup import (
 )
 from src.presets import load_active_dimensions
 from src.project_entries_cache import cached_load_project_entries
-from src.tab_layout import main_tab_labels
+from src.tab_layout import EXPECTED_WORKFLOW_TAB_ORDER, main_tab_labels
 from src.ui_components import (
+    render_needs_active_project_tab_notice,
     render_no_project_onboarding,
     render_post_save_stylometric_feedback_banner,
     render_sidebar,
@@ -96,17 +98,28 @@ st.title("Dataset Style Studio · Multi-projet")
 with st.sidebar:
     project_id, role = render_sidebar(user, engine)
 
-if not project_id:
-    render_no_project_onboarding(user, engine)
-    st.stop()
+# Issue-028: keep the tab strip mounted even without ``project_id`` so « Projets » can host
+# first-project creation; isolate dataset/settings loads behind a project guard.
+if project_id:
+    df = cached_load_project_entries(engine, project_id, user.user_id)
+    project_settings = get_project_settings(engine, project_id)
+    _, _, dimensions = load_active_dimensions(project_settings)
+else:
+    df = pd.DataFrame()
+    project_settings = None
+    dimensions = {
+        "types": [],
+        "structures": [],
+        "tons": [],
+        "formats": [],
+        "publics": [],
+        "statuts": [],
+    }
 
-df = cached_load_project_entries(engine, project_id, user.user_id)
-project_settings = get_project_settings(engine, project_id)
-_, _, dimensions = load_active_dimensions(project_settings)
-
-# Issue-021: single render site — each ``st.tabs`` body runs every rerun, so a
-# per-tab renderer would pop session feedback before the curator's active tab runs.
-render_post_save_stylometric_feedback_banner(project_id)
+if project_id:
+    # Issue-021: single render site — each ``st.tabs`` body runs every rerun, so a
+    # per-tab renderer would pop session feedback before the curator's active tab runs.
+    render_post_save_stylometric_feedback_banner(project_id)
 
 # Issue-007 / issue-024: tab strip follows the curator workflow; titles come from
 # ``src.tab_layout`` (``EXPECTED_WORKFLOW_TAB_ORDER`` + ``Mon compte`` [+ Super Admin]).
@@ -117,15 +130,38 @@ tab_labels = main_tab_labels(include_super_admin=user.is_super_admin)
 tabs = st.tabs(tab_labels)
 tab1, tab2, tab3, tab4, tab5, tab6, *extra_tabs = tabs
 with tab1:
-    render_tab_projects(user, role, project_id, engine)
+    if not project_id:
+        render_no_project_onboarding(user, engine)
+    else:
+        render_tab_projects(user, role, project_id, engine)
 with tab2:
-    render_tab_settings_export(user, role, project_id, df, engine)
+    if not project_id:
+        render_needs_active_project_tab_notice(
+            target_workflow_tab_title_fr=EXPECTED_WORKFLOW_TAB_ORDER[1],
+        )
+    else:
+        render_tab_settings_export(user, role, project_id, df, engine)
 with tab3:
-    render_tab_ajout(user, role, project_id, project_settings, df, engine, dimensions)
+    if not project_id:
+        render_needs_active_project_tab_notice(
+            target_workflow_tab_title_fr=EXPECTED_WORKFLOW_TAB_ORDER[2],
+        )
+    else:
+        render_tab_ajout(user, role, project_id, project_settings, df, engine, dimensions)
 with tab4:
-    render_tab_edition(user, role, project_id, project_settings, df, engine, dimensions)
+    if not project_id:
+        render_needs_active_project_tab_notice(
+            target_workflow_tab_title_fr=EXPECTED_WORKFLOW_TAB_ORDER[3],
+        )
+    else:
+        render_tab_edition(user, role, project_id, project_settings, df, engine, dimensions)
 with tab5:
-    render_tab_dashboard(df, role)
+    if not project_id:
+        render_needs_active_project_tab_notice(
+            target_workflow_tab_title_fr=EXPECTED_WORKFLOW_TAB_ORDER[4],
+        )
+    else:
+        render_tab_dashboard(df, role)
 with tab6:
     render_tab_account(user, engine)
 if user.is_super_admin and extra_tabs:

@@ -53,8 +53,8 @@ from src.empty_project_onboarding import (
     ONBOARDING_PRIMARY_SUBMIT_LABEL_FR,
     PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR,
     SIDEBAR_CONTEXT_HINT_FR,
-    SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX,
     STYLOMETRIC_VALUE_SENTENCE_FR,
+    TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX,
     is_self_service_project_creation_allowed,
     onboarding_steps_when_creation_allowed,
 )
@@ -864,11 +864,27 @@ def _render_project_delete_guarded_form(
             _show_action_error("Suppression projet impossible", exc)
 
 
-def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
-    """Full-width welcome when the user has zero projects (issue-008, issue-025).
+def render_needs_active_project_tab_notice(*, target_workflow_tab_title_fr: str) -> None:
+    """Placeholder when a workflow tab is rendered before any project exists (issue-028).
 
-    Shows value proposition, the issue-11 product rule, step 1 with an on-page
-    creation form (``ONBOARDING_MAIN_*`` keys), then narrative steps 2–3 that
+    Streamlit runs every tab body on each rerun; this avoids loading project-scoped
+    data without a valid ``project_id``.
+
+    Args:
+        target_workflow_tab_title_fr: Label of the gated tab (from ``tab_layout``).
+    """
+    st.info(
+        "Crée d’abord un projet depuis l’onglet **Projets**, puis reviens dans "
+        f"**{target_workflow_tab_title_fr}**.",
+        icon="ℹ️",
+    )
+
+
+def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
+    """Welcome + first-project flow inside the **Projets** tab (issue-008, issue-025, issue-028).
+
+    Shows value proposition, the issue-11 / issue-28 product rule, step 1 with an
+    on-page creation form (``ONBOARDING_MAIN_*`` keys), then narrative steps 2–3 that
     reference real tab titles from ``main_tab_labels``.
 
     When ``DISABLE_SELF_SERVICE_PROJECT_CREATION`` is set, shows guidance without
@@ -891,7 +907,7 @@ def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
         )
         return
     st.info(
-        "Tu n’as pas encore de projet : l’étape 1 te fait créer le premier ici ; "
+        "Tu n’as pas encore de projet : l’étape 1 te fait créer le premier dans cet onglet ; "
         "les étapes 2 et 3 décrivent la suite une fois le studio chargé.",
         icon="👋",
     )
@@ -929,12 +945,11 @@ def render_sidebar(
         if not is_self_service_project_creation_allowed():
             st.warning(NO_PROJECT_CREATION_DISABLED_MESSAGE)
             return "", ""
-        st.warning("Aucun projet. Crée le premier projet.")
-        _render_project_create_form(
-            user,
-            engine,
-            key_prefix=SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX,
-            label="Nom du projet",
+        st.warning("Aucun projet pour l’instant.")
+        st.caption(
+            "Crée ton premier projet depuis l’onglet **Projets** (zone principale, "
+            "bandeau d’onglets). Ce menu latéral reste dédié au **contexte** : compte "
+            "et, plus tard, choix du projet courant."
         )
         return "", ""
 
@@ -975,7 +990,11 @@ def render_tab_projects(
 
     st.markdown("### Projet")
     st.text_input("Projet courant", value=current.name, disabled=True, key="proj_current_name")
-    _render_project_create_form(user, engine, key_prefix="proj_tab")
+    _render_project_create_form(
+        user,
+        engine,
+        key_prefix=TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX,
+    )
 
     st.markdown("### Zone sensible")
     _render_project_delete_guarded_form(
@@ -984,7 +1003,7 @@ def render_tab_projects(
         project_id,
         current.name,
         role,
-        key_prefix="proj_tab",
+        key_prefix=TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX,
     )
 
 
