@@ -103,7 +103,7 @@ make down
 pytest -q
 ```
 
-Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`), onboarding sans projet (`tests/test_empty_project_onboarding.py`).
+Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`), libellés d'alertes corpus (`tests/test_corpus_stylometry_alerts_fr.py`), onboarding sans projet (`tests/test_empty_project_onboarding.py`).
 
 ## Déploiement CapRover (une commande)
 
@@ -158,7 +158,7 @@ Les garde-fous sont appliqués dans `src/database.py` (`require_role`, `require_
   - `Réglages & Export`
   - `Nouvelle entrée`
   - `Gestion & édition`
-  - `Tableau de bord`
+  - `Tableau de bord` : variance par axe (validées), distribution des scores de cohérence, outliers (top N), alerte **Paire quasi identique** (`_syntax_contrast` sous seuil strict défini dans le code), glossaire FR dans un expander partagé avec l'édition et le retour post-sauvegarde.
   - `Mon compte` (et `Super Admin` si rôle adapté)
 
 Dans **Gestion & édition**, la liste déroulante des fiches peut être réduite par **filtre statut**

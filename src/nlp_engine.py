@@ -903,7 +903,7 @@ def edition_pick_revision_stats(
     )
 
 
-# Issue 014 (S8) : seuil unique pour « paire trop proche » au sens syntaxique
+# Issue 014 (S8) : seuil unique pour l'alerte « Paire quasi identique » au sens syntaxique
 # (motifs POS / trigrammes, comme ``syntax_contrast_score`` → ``compute_row_cache``).
 # Une entrée est signalée seulement si une valeur persistée est parseable et
 # strictement inférieure à ce flottant (pas les cellules vides ou invalides).
@@ -912,6 +912,9 @@ SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT: float = 0.2
 # Au-delà : ``dataframe_for_coherence_distribution_scan`` échantillonne pour l'histogramme
 # et la synthèse (même parseur Python, pas d'agrégat SQL divergent).
 DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN: int = 25_000
+
+# Limite unique d'affichage : outliers cohérence + tableau des paires sous seuil (issue-023).
+DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT: int = 15
 
 
 def parse_persisted_syntax_contrast(value: object) -> float | None:
@@ -977,7 +980,7 @@ def count_trivial_syntax_contrast_entries(
 def trivial_syntax_contrast_entries_table(
     df: pd.DataFrame,
     *,
-    limit: int = 15,
+    limit: int = DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
     threshold_lt: float = SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
     column: str = "_syntax_contrast",
 ) -> pd.DataFrame:
@@ -1146,7 +1149,7 @@ def coherence_score_bucket_table(scores: list[int]) -> pd.DataFrame:
 def outliers_low_coherence_table(
     df: pd.DataFrame,
     *,
-    limit: int = 15,
+    limit: int = DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
     score_column: str = "_coherence_score",
 ) -> pd.DataFrame:
     """Sous-table triée : entrées au score de cohérence le plus bas (parseable)."""

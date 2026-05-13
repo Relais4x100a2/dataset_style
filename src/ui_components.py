@@ -20,6 +20,13 @@ import streamlit as st
 from sqlalchemy.engine import Engine
 
 from src.auth import CurrentUser, create_invitation_link, logout, revoke_account_with_saga
+from src.corpus_stylometry_alerts_fr import (
+    TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR,
+    dashboard_stylometry_glossary_markdown_fr,
+    trivial_syntax_contrast_missing_cache_caption_fr,
+    trivial_syntax_pair_curator_warning_fr,
+    trivial_syntax_pair_threshold_rule_sentence_fr,
+)
 from src.database import (
     CACHE_COLUMNS,
     STATUT_VALIDE,
@@ -59,7 +66,7 @@ from src.mailer import send_account_link_email
 from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
     DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
-    SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
+    DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
     EditionScoreFilterSpec,
     RowNlpCacheResult,
     avg_signature_from_cache,
@@ -190,10 +197,9 @@ def _render_post_save_stylometric_feedback(project_id: str) -> None:
         st.metric(labels["syntax_contrast"], str(payload.get("contrast", "—")))
     if payload.get("syntax_contrast_trivially_low"):
         st.warning(
-            "Paire trop proche sur le plan syntaxique : le texte généré ressemble fortement "
-            "au brouillon au niveau des motifs grammaticaux (pas le sens ni le plagiat). "
-            "Pour le fine-tuning, cet exemple risque d'apporter peu d'information nouvelle — "
-            "envisagez de le réviser ou de l'exclure.",
+            trivial_syntax_pair_curator_warning_fr(
+                contrast_raw_display=str(payload.get("contrast", "") or "").strip() or None
+            ),
             icon="⚠️",
         )
     tone = str(payload.get("tone", "info"))
@@ -1796,18 +1802,13 @@ def render_tab_edition(
     sc_cell = row.get("_syntax_contrast")
     if is_persisted_syntax_contrast_trivially_low(sc_cell):
         st.warning(
-            "Paire trop proche sur le plan syntaxique : le texte généré ressemble fortement "
-            "au brouillon au niveau des motifs grammaticaux (pas le sens ni le plagiat). "
-            "Pour le fine-tuning, cet exemple risque d'apporter peu d'information nouvelle — "
-            "envisagez de le réviser ou de l'exclure.",
+            trivial_syntax_pair_curator_warning_fr(
+                contrast_raw_display=str(sc_cell or "").strip() or None
+            ),
             icon="⚠️",
         )
     elif parse_persisted_syntax_contrast(sc_cell) is None:
-        st.caption(
-            "Contraste syntaxique non disponible pour cette fiche (cache vide ou invalide). "
-            "La signalisation « paire trop proche » ne s'affiche pas tant qu'une mesure "
-            "exploitable n'est pas présente."
-        )
+        st.caption(trivial_syntax_contrast_missing_cache_caption_fr())
     with st.form("edit_entry_form"):
         row["type"] = _select_with_legacy(
             "Type de transformation",
@@ -1985,6 +1986,12 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
             "vue avec le périmètre exporté (validées seulement)."
         )
 
+    with st.expander(
+        "Seuils et définitions (stylométrie du corpus)",
+        expanded=False,
+    ):
+        st.markdown(dashboard_stylometry_glossary_markdown_fr())
+
     st.markdown("#### Distribution des scores de cohérence")
     work_df, used_sample, n_scope = dataframe_for_coherence_distribution_scan(
         scope_df,
@@ -2049,9 +2056,10 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
             .reset_index(drop=True)
         )
         st.bar_chart(var_frame.set_index("Axe"), width="stretch", horizontal=False)
+        st.dataframe(var_frame, hide_index=True, width="stretch")
 
     st.markdown("#### Entrées aux scores de cohérence les plus bas (outliers)")
-    out_tbl = outliers_low_coherence_table(scope_df, limit=15)
+    out_tbl = outliers_low_coherence_table(scope_df, limit=DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT)
     if out_tbl.empty:
         st.info("Aucune entrée avec score de cohérence numérique sur ce périmètre.")
     else:
@@ -2066,31 +2074,41 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
         st.dataframe(disp, hide_index=True, width="stretch")
         st.caption(
             "Retrouvez une fiche via son identifiant dans l'onglet « Gestion & édition » "
-            "(liste déroulante ou navigation entre fiches)."
+            "(liste déroulante ou navigation entre fiches). "
+            f"Jusqu'à {DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT} entrées les plus basses sur ce périmètre."
         )
 
-    st.markdown("#### Paires trop proches sur le plan syntaxique (fine-tuning)")
+    st.markdown(
+        f"#### {TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR} (contraste syntaxique brouillon ↔ généré)"
+    )
     n_trivial = count_trivial_syntax_contrast_entries(scope_df)
     st.metric(
-        f"Nombre (contraste syntaxique mesuré < {SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT})",
+        f"Nombre — {TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR}",
         int(n_trivial),
+        help=trivial_syntax_pair_threshold_rule_sentence_fr(),
     )
     st.caption(
-        "Comptage basé uniquement sur les cellules `_syntax_contrast` déjà persistées et "
-        "parseables ; seuil strict (valeur = "
-        f"{SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT} non incluse). "
-        "Indicateur syntaxique (motifs grammaticaux), pas une mesure sémantique ni de similarité textuelle."
+        "Comptage sur cellules `_syntax_contrast` persistées et parseables uniquement. "
+        "Indicateur syntaxique (motifs grammaticaux), pas une mesure sémantique."
     )
-    trivial_tbl = trivial_syntax_contrast_entries_table(scope_df, limit=15)
+    trivial_tbl = trivial_syntax_contrast_entries_table(
+        scope_df, limit=DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT
+    )
     if trivial_tbl.empty:
-        st.info("Aucune entrée avec contraste syntaxique mesuré sous le seuil sur ce périmètre.")
+        st.info(
+            f"Aucune entrée ne remplit le critère « {TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR} » "
+            "sur ce périmètre (voir l'expander « Seuils et définitions » ou l'info-bulle du compteur)."
+        )
     else:
-        disp_trivial = trivial_tbl.rename(
+        show_tbl = trivial_tbl.copy()
+        show_tbl.insert(3, "alerte", TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR)
+        disp_trivial = show_tbl.rename(
             columns={
                 "id": "Identifiant",
                 "statut": "Statut",
                 "type": "Type",
-                "syntax_contrast": "Contraste syntaxique (0–1)",
+                "alerte": "Alerte",
+                "syntax_contrast": "Valeur `_syntax_contrast`",
             }
         )
         st.dataframe(disp_trivial, hide_index=True, width="stretch")
