@@ -163,9 +163,11 @@ Les garde-fous sont appliqués dans `src/database.py` (`require_role`, `require_
 
 Dans **Gestion & édition**, la liste déroulante des fiches peut être réduite par **filtre statut**
 (preset + valeurs réellement présentes dans le projet, y compris legacy) et par **filtre score de
-cohérence** (`_coherence_score`) : aucun filtre, seuil strict « sous X », ou tranche de 10 points
-(alignée sur le tableau de bord). Les entrées sans score exploitable (N/A) peuvent être incluses ou
-exclues explicitement lorsque le filtre score est actif.
+cohérence** (`_coherence_score`) : aucun filtre, seuil strict « sous X », tranche de 10 points
+(alignée sur le tableau de bord via les mêmes bornes que l’histogramme), ou **score non calculé
+uniquement** (N/A). Les entrées sans score exploitable peuvent aussi être incluses ou exclues
+explicitement lorsque le filtre score est un seuil ou une tranche. Un libellé indique en permanence
+combien d’entrées sont affichées par rapport au total du projet.
 
 Dans **Export** (même onglet), un contrôle unique définit le périmètre pour **CSV et JSONL** :
 « Validées seulement » (statut « Fait et validé ») ou « Tout le dataset » (tous les statuts, y compris brouillons).

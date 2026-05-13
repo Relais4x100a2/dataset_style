@@ -1,4 +1,4 @@
-"""Tests filtres édition (statut + score de cohérence) — issue 009."""
+"""Tests filtres édition (statut + score de cohérence) — issues 009, 026."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 from src.nlp_engine import (
     EditionScoreFilterSpec,
+    _edition_coherence_bucket_bounds,
     edition_statut_filter_options,
     filter_edition_entries_dataframe,
 )
@@ -87,6 +88,58 @@ def test_filter_edition_score_below_includes_na_when_requested() -> None:
     spec = EditionScoreFilterSpec(mode="below", threshold_lt=50, include_na=True)
     out = filter_edition_entries_dataframe(df, statut_label=None, score_spec=spec)
     assert set(out["id"].tolist()) == {"1", "3"}
+
+
+def test_edition_coherence_bucket_bounds_match_dashboard_deciles() -> None:
+    """Tranches 10 points : mêmes bornes que coherence_score_bucket_table (90–100)."""
+    for decile in range(10):
+        lo, hi = _edition_coherence_bucket_bounds(decile)
+        if decile < 9:
+            assert hi == lo + 9
+        else:
+            assert (lo, hi) == (90, 100)
+
+
+def test_filter_edition_score_na_only() -> None:
+    """Mode na_only : uniquement les lignes sans score exploitable (NULL / parse)."""
+    df = pd.DataFrame(
+        {
+            "id": ["1", "2", "3", "4"],
+            "statut": ["S", "S", "S", "S"],
+            "_coherence_score": ["40", "", "n/a", "55.2"],
+        }
+    )
+    spec = EditionScoreFilterSpec(mode="na_only")
+    out = filter_edition_entries_dataframe(df, statut_label=None, score_spec=spec)
+    assert set(out["id"].tolist()) == {"2", "3"}
+
+
+def test_filter_edition_score_na_only_missing_score_column() -> None:
+    """Sans colonne score : tout est N/A → toutes les lignes conservées."""
+    df = pd.DataFrame({"id": ["1", "2"], "statut": ["S", "S"]})
+    out = filter_edition_entries_dataframe(
+        df,
+        statut_label=None,
+        score_spec=EditionScoreFilterSpec(mode="na_only"),
+    )
+    assert len(out) == 2
+
+
+def test_filter_edition_na_only_combined_with_statut() -> None:
+    """na_only + filtre statut."""
+    df = pd.DataFrame(
+        {
+            "id": ["a", "b", "c"],
+            "statut": ["En cours", "Validé", "En cours"],
+            "_coherence_score": ["", "x", "50"],
+        }
+    )
+    out = filter_edition_entries_dataframe(
+        df,
+        statut_label="En cours",
+        score_spec=EditionScoreFilterSpec(mode="na_only"),
+    )
+    assert set(out["id"].tolist()) == {"a"}
 
 
 def test_filter_edition_score_bucket() -> None:

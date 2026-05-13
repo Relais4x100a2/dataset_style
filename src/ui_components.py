@@ -73,6 +73,7 @@ from src.nlp_engine import (
     DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
     EditionScoreFilterSpec,
     RowNlpCacheResult,
+    _edition_coherence_bucket_bounds,
     avg_signature_from_cache,
     coherence_score_bucket_table,
     compute_row_cache,
@@ -1617,11 +1618,12 @@ def render_tab_edition(
     score_mode_key = f"edition_filter_score_mode_{project_id}"
     score_mode_choice = st.selectbox(
         "Filtrer par score de cohérence (_coherence_score)",
-        options=("all", "below", "bucket"),
+        options=("all", "below", "bucket", "na_only"),
         format_func=lambda m: {
             "all": "Tous les scores (aucun filtre)",
             "below": "Strictement sous un seuil (score < seuil)",
             "bucket": "Tranche de 10 points (comme le tableau de bord)",
+            "na_only": "Score non calculé uniquement (N/A)",
         }[m],
         key=score_mode_key,
     )
@@ -1643,8 +1645,7 @@ def render_tab_edition(
         b_key = f"edition_filter_score_bucket_{project_id}"
 
         def _bucket_label(i: int) -> str:
-            lo = i * 10
-            hi = lo + 9 if i < 9 else 100
+            lo, hi = _edition_coherence_bucket_bounds(i)
             return f"{lo}–{hi}"
 
         bucket_decile_pick = int(
@@ -1657,7 +1658,7 @@ def render_tab_edition(
         )
     include_na_key = f"edition_filter_include_na_score_{project_id}"
     include_na_scores = False
-    if score_mode_choice != "all":
+    if score_mode_choice not in ("all", "na_only"):
         include_na_scores = st.checkbox(
             "Inclure les fiches sans score exploitable (N/A)",
             value=False,
@@ -1673,6 +1674,8 @@ def render_tab_edition(
         )
     if score_mode_choice == "all":
         score_spec = EditionScoreFilterSpec()
+    elif score_mode_choice == "na_only":
+        score_spec = EditionScoreFilterSpec(mode="na_only")
     elif score_mode_choice == "below":
         score_spec = EditionScoreFilterSpec(
             mode="below",
@@ -1693,12 +1696,17 @@ def render_tab_edition(
     )
     if df_pick.empty:
         st.warning(
-            "Aucune entrée ne correspond aux filtres. Élargissez les critères "
-            "(statut, tranche ou seuil de score, ou incluez les N/A)."
+            "Aucune entrée ne correspond aux filtres. Élargissez les critères : "
+            "passez le statut à « Tous », le score à « Tous les scores » ou à une autre "
+            "tranche, désactivez « Score non calculé uniquement », ou cochez « Inclure les "
+            "fiches sans score exploitable » lorsque vous filtrez par seuil ou tranche."
         )
         return
-    if len(df_pick) < len(basis):
-        st.caption(f"{len(df_pick)} entrée(s) affichées sur {len(basis)} (filtres actifs).")
+    n_pick, n_basis = len(df_pick), len(basis)
+    if n_pick == 1:
+        st.caption(f"1 entrée affichée sur {n_basis} au total.")
+    else:
+        st.caption(f"{n_pick} entrées affichées sur {n_basis} au total.")
 
     entry_ids = df_pick["id"].astype(str).tolist()
     id_to_label: dict[str, str] = {}
@@ -1762,8 +1770,8 @@ def render_tab_edition(
     st.caption(
         "Compteurs ci-dessus : périmètre **liste filtrée** uniquement. "
         "« À réviser » : fiches en statut « A faire » ou « En cours ». "
-        "Pour le volume **projet entier**, se référer au libellé « entrée(s) affichée(s) sur … » "
-        "lorsque des filtres sont actifs."
+        "Le libellé « N entrée(s) affichée(s) sur … au total » (au-dessus) indique la taille "
+        "de la liste courante par rapport au projet."
     )
     st.caption(
         "Changer de fiche (liste déroulante ou flèches) recharge le formulaire : "

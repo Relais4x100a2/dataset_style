@@ -648,14 +648,15 @@ class EditionScoreFilterSpec:
 
     Attributes:
         mode: ``all`` (aucun filtre score), ``below`` (score strictement inférieur
-            au seuil), ``bucket`` (tranche décennale alignée sur l'histogramme).
+            au seuil), ``bucket`` (tranche décennale alignée sur l'histogramme),
+            ``na_only`` (uniquement les lignes sans score exploitable, équivalent NULL).
         threshold_lt: Pour ``below`` : garder les lignes avec ``score < threshold_lt``.
         bucket_decile: Pour ``bucket`` : entier ``0``..``9`` → tranches ``0–9`` … ``90–100``.
         include_na: Si vrai, les lignes sans score exploitable (N/A) sont conservées
-            lorsque le filtre score est actif (``mode != all``).
+            lorsque le filtre score est actif (``mode`` parmi ``below`` ou ``bucket``).
     """
 
-    mode: Literal["all", "below", "bucket"] = "all"
+    mode: Literal["all", "below", "bucket", "na_only"] = "all"
     threshold_lt: int = 50
     bucket_decile: int = 0
     include_na: bool = False
@@ -778,7 +779,8 @@ def filter_edition_entries_dataframe(
     Args:
         df: Entrées du projet (colonnes habituelles + cache NLP si présent).
         statut_label: Statut exact à garder, ou ``None`` / chaîne vide pour tout.
-        score_spec: Règles de filtre sur ``_coherence_score`` (parseur unique).
+        score_spec: Règles de filtre sur ``_coherence_score`` (parseur unique). Mode
+            ``na_only`` : uniquement les lignes sans score exploitable.
         score_column: Colonne score persistée.
         statut_column: Colonne statut métier.
 
@@ -794,6 +796,14 @@ def filter_edition_entries_dataframe(
         out = out.loc[mask_st]
     if score_spec.mode == "all":
         return _sort_edition_pick_by_stable_string_id(out)
+    if score_spec.mode == "na_only":
+        if score_column not in out.columns:
+            out = out.copy()
+            out[score_column] = ""
+        mask_na = [
+            parse_persisted_coherence_score(v) is None for v in out[score_column].tolist()
+        ]
+        return _sort_edition_pick_by_stable_string_id(out.loc[mask_na])
     if score_column not in out.columns:
         out = out.copy()
         out[score_column] = ""
