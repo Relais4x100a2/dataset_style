@@ -16,7 +16,7 @@ Application Streamlit de curation de datasets littéraires, en mode multi-utilis
   - `formats` (Format de sortie)
   - `publics` (Public cible)
   - `statuts`
-- Paramétrage LLM + LanguageTool par projet (`project_settings`).
+- Paramétrage de la génération assistée par IA et de LanguageTool par projet (`project_settings`, libellés métier dans l’onglet Réglages).
 - Tableau de bord stylométrique : distribution des scores de cohérence avec synthèse numérique (moyenne, médiane, minimum) sur le même périmètre et le même parseur que l’export ; au-delà de 25 000 entrées dans le périmètre, échantillon aléatoire documenté dans l’UI pour l’histogramme et la synthèse. Variance par axe sur fiches validées (union des axes du cache ; écart-type seulement si l’axe a au moins deux valeurs sur des fiches distinctes), outliers, moyenne du contraste syntaxique (`src/ui_components.py`, `src/nlp_engine.py`).
 - Persistance PostgreSQL multi-tenant (`src/database.py`).
 - Accueil guidé (étapes + formulaire de création dans la zone principale) lorsque l’utilisateur n’a aucun projet, pour les petits écrans et la barre latérale repliée (`src/ui_components.py`, `src/empty_project_onboarding.py`, `src/project_session.py`).

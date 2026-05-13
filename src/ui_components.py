@@ -148,6 +148,11 @@ from src.super_admin_ui_texts import (
 
 logger = logging.getLogger(__name__)
 
+_GENERATION_FAILED_REVIEW_IA_SETTINGS_FR = (
+    "La génération a échoué. Vérifiez l'URL du service, le modèle d'IA et la clé "
+    "d'API dans Réglages projet, puis réessayez."
+)
+
 _SESSION_EDITION_LAST_ENTRY_ID = "edition_last_entry_id"
 
 
@@ -627,29 +632,45 @@ def _render_project_settings_form(
     disabled = role != "admin"
     with st.form(f"{key_prefix}_project_settings_form"):
         llm_base_url = st.text_input(
-            "LLM base URL",
+            "Adresse du service d'IA (URL)",
             value=settings.llm_base_url,
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_base_url_input",
+            help=(
+                "URL de base du serveur compatible API « Chat Completions » (ex. Ollama). "
+                "Variable d'environnement équivalente : LLM_BASE_URL."
+            ),
         )
         llm_model = st.text_input(
-            "LLM model",
+            "Modèle d'IA",
             value=settings.llm_model,
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_model_input",
+            help=(
+                "Identifiant du modèle côté serveur (ex. mistral, gpt-4o). "
+                "Variable d'environnement équivalente : LLM_MODEL."
+            ),
         )
         llm_api_key = st.text_input(
-            "LLM API key",
+            "Clé d'API (IA)",
             value=settings.llm_api_key,
             type="password",
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_api_key_input",
+            help=(
+                "Jeton d'authentification si le service l'exige ; laisser vide pour un serveur "
+                "local sans clé. Variable d'environnement équivalente : LLM_API_KEY."
+            ),
         )
         llm_timeout_seconds = st.text_input(
-            "LLM timeout (s)",
+            "Délai d'attente maximal (secondes)",
             value=settings.llm_timeout_seconds,
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_timeout_input",
+            help=(
+                "Durée maximale d'une requête de génération assistée. "
+                "Variable d'environnement équivalente : LLM_TIMEOUT_SECONDS."
+            ),
         )
         languagetool_base_url = st.text_input(
             "LanguageTool base URL",
@@ -1451,7 +1472,7 @@ def _new_entry_llm_generate_clicked(
                 st.toast("Texte généré.")
                 st.rerun()
             else:
-                st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
+                st.error(_GENERATION_FAILED_REVIEW_IA_SETTINGS_FR)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Erreur génération texte", exc_info=exc)
             st.error("Génération impossible: erreur inattendue côté service.")
@@ -1477,7 +1498,7 @@ def _new_entry_llm_generate_clicked(
             st.toast("Brouillon généré.")
             st.rerun()
         else:
-            st.error("La génération a échoué. Vérifiez vos paramètres LLM puis réessayez.")
+            st.error(_GENERATION_FAILED_REVIEW_IA_SETTINGS_FR)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Erreur génération brouillon", exc_info=exc)
         st.error("Génération impossible: erreur inattendue côté service.")
