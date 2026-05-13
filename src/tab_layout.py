@@ -1,6 +1,10 @@
-"""Central Streamlit tab labels, ordered to match the curator workflow."""
+"""Central Streamlit tab labels, ordered to match the curator workflow.
 
-# Product workflow (issue-007): projet → réglages → saisie → révision → tableau de bord.
+Issue-024 (validated order): projet → réglages → saisie → édition → tableau de bord,
+then ``Mon compte``; optional ``Super Admin`` is appended for super-admins only.
+"""
+
+# Product workflow: issue-007 baseline, issue-024 wording (édition = Gestion & édition).
 EXPECTED_WORKFLOW_TAB_ORDER: list[str] = [
     "Projets",
     "Réglages & Export",

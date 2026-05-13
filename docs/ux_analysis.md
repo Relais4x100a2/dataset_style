@@ -171,7 +171,7 @@ Après une sauvegarde réussie (`update_project_entries` sans erreur), l’appli
 | 5 | Tableau de bord | **5e** étape (monitoring / cohérence) |
 | 6 | Mon compte | hors workflow principal curation |
 
-Le parcours gauche-droite correspond désormais à projet → réglages → saisie → révision → pilotage.
+Le parcours gauche-droite correspond désormais à projet → réglages → saisie → édition (Gestion & édition) → tableau de bord → compte (issue-024) ; la doc produit historique parlait aussi de « révision » pour l’étape d’édition.
 
 ---
 
