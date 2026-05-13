@@ -236,14 +236,14 @@ La sidebar (`render_sidebar`, l. 423-461) contient le sélecteur de projet et le
 
 `render_tab_super_admin` concentrait invitation, gestion de comptes et monitoring technique sur une seule vue scrollable.
 
-**État actuel (issue 012)** : l’invitation et les actions sur les comptes sont dans le premier onglet d’une paire `st.tabs` ; le suivi saga, la quarantaine et la relance manuelle sont dans un second onglet « Suivi technique », non sélectionné par défaut. Les libellés métier et les chaînes factorisées vivent dans `src/super_admin_ui_texts.py` (les deux corps d’onglets s’exécutent toujours à chaque rerun Streamlit — pas de lazy-load BDD).
+**État actuel (issue 012, complété issue 029)** : l’invitation et les actions sur les comptes sont dans le premier onglet d’une paire `st.tabs` (libellé centré « gestion des comptes » / actions courantes) ; un titre de section « Gestion des comptes » regroupe visuellement invitations, tableau et actions. Le suivi saga, la quarantaine et la relance manuelle sont dans un second onglet « Suivi technique », non sélectionné par défaut (pas d’`st.expander` supplémentaire : l’onglet secondaire remplit le rôle de zone repliée côté navigation). Les libellés métier et les chaînes factorisées vivent dans `src/super_admin_ui_texts.py` (les deux corps d’onglets s’exécutent toujours à chaque rerun Streamlit — pas de lazy-load BDD).
 
 ---
 
 ### 5.4 Libellés mélangent le technique et le métier
 
 - "LLM base URL", "LLM model", "LLM API key", "LanguageTool base URL" sont exposés directement dans l'onglet Réglages (`_render_project_settings_form`, l. 160-222).
-- Les libellés anglais type « Detach memberships » / « DLQ » ont été remplacés par des formulations françaises côté actions principales ; le vocabulaire technique reste visible dans les tableaux et l’expander avancé.
+- Les libellés anglais type « Detach memberships » / « DLQ » ont été remplacés par des formulations françaises côté actions principales (issue 029 : messages d’erreur, avertissements retrait d’accès, en-têtes de tableau) ; le vocabulaire technique reste visible dans les tableaux et l’onglet technique.
 - `operation_id`, `target_user_id` apparaissent directement dans les tableaux de l'interface Super Admin.
 
 ---
