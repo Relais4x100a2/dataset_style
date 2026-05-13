@@ -50,7 +50,11 @@ from src.database import (
 from src.empty_project_onboarding import (
     NO_PROJECT_CREATION_DISABLED_MESSAGE,
     ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX,
+    ONBOARDING_PRIMARY_SUBMIT_LABEL_FR,
+    PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR,
+    SIDEBAR_CONTEXT_HINT_FR,
     SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX,
+    STYLOMETRIC_VALUE_SENTENCE_FR,
     is_self_service_project_creation_allowed,
     onboarding_steps_when_creation_allowed,
 )
@@ -570,6 +574,7 @@ def _render_project_create_form(
     *,
     key_prefix: str,
     label: str = "Nouveau projet",
+    submit_label: str = "Créer",
 ) -> None:
     """
     Formulaire de création projet.
@@ -578,7 +583,7 @@ def _render_project_create_form(
     """
     with st.form(f"{key_prefix}_create_project_form"):
         pname = st.text_input(label, key=f"{key_prefix}_new_project_name_input")
-        submit = st.form_submit_button("Créer", key=f"{key_prefix}_create_project_submit")
+        submit = st.form_submit_button(submit_label, key=f"{key_prefix}_create_project_submit")
     if not submit:
         return
     if not pname.strip():
@@ -857,12 +862,11 @@ def _render_project_delete_guarded_form(
 
 
 def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
-    """Guided empty-state in the main column when the user has zero projects.
+    """Full-width welcome when the user has zero projects (issue-008, issue-025).
 
-    Ensures a visible creation path on narrow viewports without relying on the
-    collapsed sidebar alone. Reuses ``_render_project_create_form`` with
-    ``ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX`` so widget keys stay distinct from the
-    sidebar form (``SIDEBAR_FIRST_PROJECT_CREATE_FORM_KEY_PREFIX``).
+    Shows value proposition, the issue-11 product rule, step 1 with an on-page
+    creation form (``ONBOARDING_MAIN_*`` keys), then narrative steps 2–3 that
+    reference real tab titles from ``main_tab_labels``.
 
     When ``DISABLE_SELF_SERVICE_PROJECT_CREATION`` is set, shows guidance without
     a creation form (invitation-only deployments).
@@ -871,7 +875,10 @@ def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
         user: Authenticated user.
         engine: SQLAlchemy engine.
     """
-    st.markdown("### Bienvenue dans Dataset Style Studio")
+    st.markdown("## Bienvenue dans Dataset Style Studio")
+    st.markdown(STYLOMETRIC_VALUE_SENTENCE_FR)
+    st.caption(PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR)
+    st.caption(SIDEBAR_CONTEXT_HINT_FR)
     if not is_self_service_project_creation_allowed():
         st.warning(NO_PROJECT_CREATION_DISABLED_MESSAGE, icon="🔒")
         st.info(
@@ -881,24 +888,21 @@ def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
         )
         return
     st.info(
-        "Tu n’as pas encore de projet. Suis les étapes ci-dessous, puis crée ton "
-        "premier projet — la page se mettra à jour automatiquement.",
+        "Tu n’as pas encore de projet : l’étape 1 te fait créer le premier ici ; "
+        "les étapes 2 et 3 décrivent la suite une fois le studio chargé.",
         icon="👋",
     )
-    for step in onboarding_steps_when_creation_allowed():
-        st.markdown(step.body_markdown)
-    st.divider()
-    st.markdown("#### Créer ton premier projet")
-    st.caption(
-        "Sur écran étroit, privilégie ce bloc : tu n’as pas besoin d’ouvrir "
-        "uniquement la barre latérale pour agir."
-    )
+    steps = onboarding_steps_when_creation_allowed()
+    st.markdown(steps[0].body_markdown)
     _render_project_create_form(
         user,
         engine,
         key_prefix=ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX,
         label="Nom du projet",
+        submit_label=ONBOARDING_PRIMARY_SUBMIT_LABEL_FR,
     )
+    for step in steps[1:]:
+        st.markdown(step.body_markdown)
 
 
 def render_sidebar(
