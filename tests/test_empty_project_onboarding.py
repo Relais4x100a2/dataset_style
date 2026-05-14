@@ -1,4 +1,4 @@
-"""Tests for empty-project onboarding copy and feature flags (issue-008, issue-025)."""
+"""Tests for empty-project onboarding copy and feature flags (issue-008, issue-011, issue-025)."""
 
 import pytest
 from src import empty_project_onboarding as ep
@@ -45,13 +45,14 @@ def test_invitation_account_link_email_intro_aligns_with_stylometric_sentence() 
     assert "invitation" in intro.lower()
 
 
-def test_product_rule_issue_11_separates_context_sidebar_and_actions_tab() -> None:
-    """Issue-028 / issue-8: contexte (sidebar) vs actions (onglet Projets)."""
-    rule = ep.PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR
+def test_product_rule_issue_011_separates_context_sidebar_and_actions_tab() -> None:
+    """Issue-011: contexte (sidebar ☰) vs actions projet (onglet Projets uniquement)."""
+    rule = ep.PRODUCT_RULE_ISSUE_011_CREATION_PATHS_FR
     assert "contexte" in rule.lower()
     assert "action" in rule.lower() or "actions" in rule.lower()
     assert "latérale" in rule.lower() or "sidebar" in rule.lower()
     assert "projet" in rule.lower()
+    assert "Projets" in rule
 
 
 def test_creation_allowed_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,9 @@
 """Copy and flags for the empty-project onboarding flow (issue-008, issue-025, issue-028).
 
+Issue-011: canonical French copy for the **sidebar vs Projets tab** navigation
+rule (single official place for project lifecycle actions) lives in
+:data:`PRODUCT_RULE_ISSUE_011_CREATION_PATHS_FR` and :data:`SIDEBAR_CONTEXT_HINT_FR`.
+
 Streamlit widgets stay in ``ui_components``; this module holds testable
 strings and environment-driven behaviour.
 
@@ -55,14 +59,14 @@ def invitation_account_link_email_intro_fr() -> str:
     )
 
 
-# Canonical wording: issue 8 / 11 (règle unique), refined issue-028 (contexte vs actions).
-PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR = (
-    "Règle produit (issues 8, 11 et 28) — **Contexte** : le menu **☰** (barre latérale) "
-    "affiche ton compte et, dès qu’au moins un projet existe, permet de choisir le "
-    "**projet courant**. **Actions projet** : l’onglet **Projets** regroupe la création "
-    "(premier projet comme les suivants), la lecture du projet actif et la suppression ; "
-    "il n’y a pas de formulaire de création dans la barre latérale pour éviter deux "
-    "« endroits officiels » concurrents."
+# Issue-011: single product rule (no duplicate “official” creation surfaces).
+# Cross-tracks issue-008 (first project), issue-028 (wording / tab placement).
+PRODUCT_RULE_ISSUE_011_CREATION_PATHS_FR = (
+    "**Contexte** : le menu **☰** (barre latérale) affiche ton compte et, dès qu’au moins "
+    "un projet existe, permet de choisir le **projet courant**. **Actions projet** : "
+    "l’onglet **Projets** regroupe la création (premier projet comme les suivants), "
+    "la lecture du projet actif et la suppression ; il n’y a pas de formulaire de "
+    "création dans la barre latérale pour éviter deux « endroits officiels » concurrents."
 )
 
 SIDEBAR_CONTEXT_HINT_FR = (

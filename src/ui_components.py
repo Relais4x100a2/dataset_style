@@ -51,7 +51,7 @@ from src.empty_project_onboarding import (
     NO_PROJECT_CREATION_DISABLED_MESSAGE,
     ONBOARDING_MAIN_CREATE_FORM_KEY_PREFIX,
     ONBOARDING_PRIMARY_SUBMIT_LABEL_FR,
-    PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR,
+    PRODUCT_RULE_ISSUE_011_CREATION_PATHS_FR,
     SIDEBAR_CONTEXT_HINT_FR,
     STYLOMETRIC_VALUE_SENTENCE_FR,
     TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX,
@@ -972,7 +972,7 @@ def render_needs_active_project_tab_notice(*, target_workflow_tab_title_fr: str)
 def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
     """Welcome + first-project flow inside the **Projets** tab (issue-008, issue-025, issue-028).
 
-    Shows value proposition, the issue-11 / issue-28 product rule, step 1 with an
+    Shows value proposition, the issue-011 / issue-028 navigation rule, step 1 with an
     on-page creation form (``ONBOARDING_MAIN_*`` keys), then narrative steps 2–3 that
     reference real tab titles from ``main_tab_labels``.
 
@@ -985,7 +985,7 @@ def render_no_project_onboarding(user: CurrentUser, engine: Engine) -> None:
     """
     st.markdown("## Bienvenue dans Dataset Style Studio")
     st.markdown(STYLOMETRIC_VALUE_SENTENCE_FR)
-    st.caption(PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR)
+    st.caption(PRODUCT_RULE_ISSUE_011_CREATION_PATHS_FR)
     st.caption(SIDEBAR_CONTEXT_HINT_FR)
     if not is_self_service_project_creation_allowed():
         st.warning(NO_PROJECT_CREATION_DISABLED_MESSAGE, icon="🔒")
