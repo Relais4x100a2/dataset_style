@@ -16,7 +16,7 @@
 2. Basculer sur preset `pro`, puis cliquer `Charger le preset`.
 3. Ouvrir l'édition de l'entrée:
    - vérifier l'option `[obsolète] Chapitre` pré-sélectionnée,
-   - vérifier l'avertissement "Cette valeur existe dans vos données mais plus dans le preset actif."
+   - vérifier l'avertissement "Cette valeur existe dans vos données mais plus dans le profil de dimensions actif."
 4. Sauvegarder sans changer ce champ.
 5. Vérifier que la valeur `Chapitre` est toujours présente en base.
 

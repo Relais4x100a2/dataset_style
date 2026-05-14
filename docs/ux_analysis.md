@@ -242,7 +242,8 @@ La sidebar (`render_sidebar`, l. 423-461) contient le sélecteur de projet et le
 
 ### 5.4 Libellés mélangent le technique et le métier
 
-- L’onglet Réglages expose le bloc IA avec des libellés métier (URL du service, modèle d’IA, clé d’API, délai d’attente) et des infobulles `help=` rappelant les variables `LLM_*` ; « LanguageTool base URL » reste en anglais technique pour l’instant (`_render_project_settings_form` dans `src/ui_components.py`).
+- L’onglet Réglages expose le bloc IA et LanguageTool avec des libellés français métier ; les infobulles `help=` rappellent les variables `LLM_*` et `LANGUAGETOOL_BASE_URL` (`PROJECT_SETTINGS_FIELD_UI_FR` + `_render_project_settings_form` dans `src/ui_components.py`, issue-034).
+- Les jeux de dimensions prédéfinis sont présentés comme « profil de dimensions » côté libellé, le terme « preset » n’apparaît plus que dans les infobulles techniques si besoin.
 - Les libellés anglais type « Detach memberships » / « DLQ » ont été remplacés par des formulations françaises côté actions principales (issue 029 : messages d’erreur, avertissements retrait d’accès, en-têtes de tableau) ; le vocabulaire technique reste visible dans les tableaux et l’onglet technique.
 - `operation_id`, `target_user_id` apparaissent directement dans les tableaux de l'interface Super Admin.
 

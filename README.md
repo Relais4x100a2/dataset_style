@@ -177,13 +177,13 @@ Dans **Export** (même onglet), un contrôle unique définit le périmètre pour
 « Validées seulement » (statut « Fait et validé ») ou « Tout le dataset » (tous les statuts, y compris brouillons).
 
 Dans `Réglages & Export`, section **Dimensions du texte**:
-- choix de preset (`roman`, `pro`, `contenu`)
-- bouton explicite `Charger le preset` pour appliquer le preset sélectionné au projet
+- choix d'un **profil de dimensions** (jeu de listes prédéfini, clés techniques `roman`, `pro`, `contenu`, etc.)
+- bouton **Charger ce profil** pour appliquer le profil sélectionné au projet
 - édition des listes par dimension (ajout/retrait)
-- enregistrement comme preset personnalisé
-- réinitialisation depuis le preset sélectionné
+- enregistrement d'un **profil personnalisé** (identifiant technique + libellé affiché)
+- réinitialisation depuis le profil sélectionné
 - message de portée: ces dimensions s'appliquent au projet courant uniquement
-- en édition, une valeur hors preset est conservée via l'option `[obsolète] <valeur>` (jamais écrasée silencieusement)
+- en édition, une valeur hors profil actif est conservée via l'option `[obsolète] <valeur>` (jamais écrasée silencieusement)
 
 Dans les formulaires:
 - `Input` est renommé `Brouillon`
