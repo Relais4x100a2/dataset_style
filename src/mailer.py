@@ -60,7 +60,13 @@ def send_account_link_email(
     intro: str,
     link: str,
 ) -> MailDeliveryResult:
-    """Envoie un lien d'activation/reset en mode dev ou smtp."""
+    """Envoie un lien d'activation/reset en mode dev ou smtp.
+
+    Le corps est du texte brut (``EmailMessage.set_content``). Les invitations
+    super-admin construisent ``intro`` côté application (issue-035) pour rester
+    alignées sur l’onboarding ; elles ne passent pas par les templates SuperTokens
+    versionnés dans ce dépôt.
+    """
     mode = _mail_mode()
     body = f"{intro}\n\n{link}\n"
     if mode == "smtp":
