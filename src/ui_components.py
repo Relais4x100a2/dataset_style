@@ -10,9 +10,9 @@ import os
 import uuid
 from collections.abc import Mapping, MutableMapping
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import pandas as pd
 import requests
@@ -152,6 +152,58 @@ _GENERATION_FAILED_REVIEW_IA_SETTINGS_FR = (
     "La génération a échoué. Vérifiez l'URL du service, le modèle d'IA et la clé "
     "d'API dans Réglages projet, puis réessayez."
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectSettingsFieldUiFr:
+    """Libellé et infobulle français pour un champ persisté de ``ProjectSettings``.
+
+    Les clés du dictionnaire ``PROJECT_SETTINGS_FIELD_UI_FR`` reprennent les noms
+    d'attributs SQLAlchemy/dataclass (issue-034) ; les libellés restent non techniques.
+    """
+
+    label: str
+    help: str
+
+
+PROJECT_SETTINGS_FIELD_UI_FR: Final[dict[str, ProjectSettingsFieldUiFr]] = {
+    "llm_base_url": ProjectSettingsFieldUiFr(
+        label="Adresse du service d'IA (URL)",
+        help=(
+            "URL de base du serveur compatible API « Chat Completions » (ex. Ollama). "
+            "Variable d'environnement équivalente : LLM_BASE_URL."
+        ),
+    ),
+    "llm_model": ProjectSettingsFieldUiFr(
+        label="Modèle d'IA",
+        help=(
+            "Identifiant du modèle côté serveur (ex. mistral, gpt-4o). "
+            "Variable d'environnement équivalente : LLM_MODEL."
+        ),
+    ),
+    "llm_api_key": ProjectSettingsFieldUiFr(
+        label="Clé d'API (IA)",
+        help=(
+            "Jeton d'authentification si le service l'exige ; laisser vide pour un serveur "
+            "local sans clé. Variable d'environnement équivalente : LLM_API_KEY."
+        ),
+    ),
+    "llm_timeout_seconds": ProjectSettingsFieldUiFr(
+        label="Délai d'attente maximal (secondes)",
+        help=(
+            "Durée maximale d'une requête de génération assistée. "
+            "Variable d'environnement équivalente : LLM_TIMEOUT_SECONDS."
+        ),
+    ),
+    "languagetool_base_url": ProjectSettingsFieldUiFr(
+        label="Adresse du service LanguageTool (URL)",
+        help=(
+            "URL de base de l'API LanguageTool utilisée pour la correction grammaticale "
+            "(instance publique ou auto-hébergée). Variable d'environnement équivalente : "
+            "LANGUAGETOOL_BASE_URL."
+        ),
+    ),
+}
 
 _SESSION_EDITION_LAST_ENTRY_ID = "edition_last_entry_id"
 
@@ -551,7 +603,7 @@ def _select_with_legacy(
         index = 0
         if show_warning:
             st.warning(
-                "Cette valeur existe dans vos données mais plus dans le preset actif.",
+                "Cette valeur existe dans vos données mais plus dans le profil de dimensions actif.",
                 icon="⚠️",
             )
 
@@ -631,52 +683,42 @@ def _render_project_settings_form(
     settings = get_project_settings(engine, project_id)
     disabled = role != "admin"
     with st.form(f"{key_prefix}_project_settings_form"):
+        _ui = PROJECT_SETTINGS_FIELD_UI_FR
         llm_base_url = st.text_input(
-            "Adresse du service d'IA (URL)",
+            _ui["llm_base_url"].label,
             value=settings.llm_base_url,
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_base_url_input",
-            help=(
-                "URL de base du serveur compatible API « Chat Completions » (ex. Ollama). "
-                "Variable d'environnement équivalente : LLM_BASE_URL."
-            ),
+            help=_ui["llm_base_url"].help,
         )
         llm_model = st.text_input(
-            "Modèle d'IA",
+            _ui["llm_model"].label,
             value=settings.llm_model,
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_model_input",
-            help=(
-                "Identifiant du modèle côté serveur (ex. mistral, gpt-4o). "
-                "Variable d'environnement équivalente : LLM_MODEL."
-            ),
+            help=_ui["llm_model"].help,
         )
         llm_api_key = st.text_input(
-            "Clé d'API (IA)",
+            _ui["llm_api_key"].label,
             value=settings.llm_api_key,
             type="password",
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_api_key_input",
-            help=(
-                "Jeton d'authentification si le service l'exige ; laisser vide pour un serveur "
-                "local sans clé. Variable d'environnement équivalente : LLM_API_KEY."
-            ),
+            help=_ui["llm_api_key"].help,
         )
         llm_timeout_seconds = st.text_input(
-            "Délai d'attente maximal (secondes)",
+            _ui["llm_timeout_seconds"].label,
             value=settings.llm_timeout_seconds,
             disabled=disabled,
             key=f"{key_prefix}_settings_llm_timeout_input",
-            help=(
-                "Durée maximale d'une requête de génération assistée. "
-                "Variable d'environnement équivalente : LLM_TIMEOUT_SECONDS."
-            ),
+            help=_ui["llm_timeout_seconds"].help,
         )
         languagetool_base_url = st.text_input(
-            "LanguageTool base URL",
+            _ui["languagetool_base_url"].label,
             value=settings.languagetool_base_url,
             disabled=disabled,
             key=f"{key_prefix}_settings_languagetool_base_url_input",
+            help=_ui["languagetool_base_url"].help,
         )
         save = st.form_submit_button(
             "Enregistrer réglages",
@@ -771,26 +813,30 @@ def _render_dimensions_section(
     presets_map = available_presets(custom_presets)
     preset_keys = list(presets_map.keys())
     selected_key = st.selectbox(
-        "Preset",
+        "Profil de dimensions",
         preset_keys,
         index=_safe_index(preset_keys, active_key),
         format_func=lambda k: str(presets_map[k].get("label") or k),
         key=f"{key_prefix}_preset_select",
         disabled=role != "admin",
+        help=(
+            "Jeu de listes prédéfini pour les menus « Type », « Structure », etc. "
+            "(équivalent technique : preset)."
+        ),
     )
 
     if role != "admin":
         st.info("Seul un admin peut modifier les dimensions.")
         return
 
-    if st.button("Charger le preset", key=f"{key_prefix}_preset_apply_btn"):
+    if st.button("Charger ce profil", key=f"{key_prefix}_preset_apply_btn"):
         target_dims = preset_dimensions(presets_map[selected_key])
         next_settings = replace(
             settings,
             active_preset_key=selected_key,
             dimensions_override_json=dumps_dimensions_override(target_dims),
         )
-        _persist_settings(user, engine, project_id, next_settings, "Preset appliqué au projet.")
+        _persist_settings(user, engine, project_id, next_settings, "Profil de dimensions appliqué.")
 
     if st.button("Réinitialiser", key=f"{key_prefix}_preset_reset_btn"):
         target_dims = preset_dimensions(presets_map[selected_key])
@@ -825,16 +871,24 @@ def _render_dimensions_section(
         )
         st.divider()
 
-    st.markdown("#### Enregistrer comme preset")
-    custom_name = st.text_input("Nom du preset", key=f"{key_prefix}_custom_preset_name_input")
-    custom_label = st.text_input("Label du preset", key=f"{key_prefix}_custom_preset_label_input")
-    if st.button("Enregistrer comme preset", key=f"{key_prefix}_custom_preset_save_btn"):
+    st.markdown("#### Enregistrer un profil personnalisé")
+    custom_name = st.text_input(
+        "Identifiant technique du profil",
+        key=f"{key_prefix}_custom_preset_name_input",
+        help="Nom interne stable (sans espace de préférence), utilisé comme clé de stockage.",
+    )
+    custom_label = st.text_input(
+        "Libellé affiché dans les listes",
+        key=f"{key_prefix}_custom_preset_label_input",
+        help="Texte présenté aux curateurs dans le sélecteur de profil de dimensions.",
+    )
+    if st.button("Enregistrer le profil", key=f"{key_prefix}_custom_preset_save_btn"):
         preset_key = custom_name.strip().lower().replace(" ", "_")
         if not preset_key:
-            st.error("Nom de preset requis.")
+            st.error("Identifiant du profil requis.")
             return
         if preset_key in PRESETS:
-            st.error("Ce nom est réservé par un preset par défaut.")
+            st.error("Ce nom est réservé par un profil fourni avec l'application.")
             return
         saved_label = custom_label.strip() or preset_key
         updated_custom = deepcopy(custom_presets)
@@ -846,7 +900,7 @@ def _render_dimensions_section(
             dimensions_override_json=dumps_dimensions_override(dimensions),
         )
         _persist_settings(
-            user, engine, project_id, next_settings, "Preset personnalisé enregistré."
+            user, engine, project_id, next_settings, "Profil personnalisé enregistré."
         )
 
 
@@ -1927,7 +1981,7 @@ def render_tab_edition(
     if legacy_fields:
         st.warning(
             f"{len(legacy_fields)} champ(s) obsolète(s) détecté(s): {', '.join(legacy_fields)}. "
-            "Cette valeur existe dans vos données mais plus dans le preset actif.",
+            "Cette valeur existe dans vos données mais plus dans le profil de dimensions actif.",
             icon="⚠️",
         )
     sc_cell = row.get("_syntax_contrast")
