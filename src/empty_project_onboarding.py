@@ -2,6 +2,12 @@
 
 Streamlit widgets stay in ``ui_components``; this module holds testable
 strings and environment-driven behaviour.
+
+Issue-035 (invitation email): the super-admin invitation body is composed here
+and sent via ``src/mailer.send_account_link_email`` from ``ui_components``.
+SuperTokens Core email templates are not versioned in this repository; any
+parallel lifecycle mail from Core must be kept consistent at deployment time
+to avoid duplicate or contradictory wordings.
 """
 
 from __future__ import annotations
@@ -31,6 +37,23 @@ STYLOMETRIC_VALUE_SENTENCE_FR = (
     "Tu peux harmoniser progressivement la voix de tes textes pour que ton dataset "
     "reste lisible et cohérent pour ceux qui l’exploitent."
 )
+
+
+def invitation_account_link_email_intro_fr() -> str:
+    """Plain-text lead for super-admin invitation emails (issue-035).
+
+    Reuses :data:`STYLOMETRIC_VALUE_SENTENCE_FR` so the recipient lands with the
+    same stylometric value framing as the in-app onboarding.
+
+    Returns:
+        French paragraphs passed as ``intro`` to :func:`src.mailer.send_account_link_email`.
+    """
+    return (
+        "Tu as reçu une invitation pour rejoindre Dataset Style Studio.\n\n"
+        f"{STYLOMETRIC_VALUE_SENTENCE_FR}\n\n"
+        "Clique sur le lien ci-dessous pour définir ton mot de passe."
+    )
+
 
 # Canonical wording: issue 8 / 11 (règle unique), refined issue-028 (contexte vs actions).
 PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR = (

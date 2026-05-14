@@ -55,6 +55,7 @@ from src.empty_project_onboarding import (
     SIDEBAR_CONTEXT_HINT_FR,
     STYLOMETRIC_VALUE_SENTENCE_FR,
     TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX,
+    invitation_account_link_email_intro_fr,
     is_self_service_project_creation_allowed,
     onboarding_steps_when_creation_allowed,
 )
@@ -1255,7 +1256,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
             delivery = send_account_link_email(
                 to_email=invite_email.strip().lower(),
                 subject="Invitation Dataset Style Studio",
-                intro="Tu as été invité. Clique sur le lien pour définir ton mot de passe.",
+                intro=invitation_account_link_email_intro_fr(),
                 link=invite_link,
             )
             if delivery.mode == "smtp":

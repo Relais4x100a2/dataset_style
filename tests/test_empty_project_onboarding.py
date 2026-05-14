@@ -36,6 +36,15 @@ def test_stylometric_value_sentence_is_french_and_non_empty() -> None:
     assert "stylom" not in text.lower()
 
 
+def test_invitation_account_link_email_intro_aligns_with_stylometric_sentence() -> None:
+    """Issue-035: invitation email shares the same product line as onboarding (no drift)."""
+    intro = ep.invitation_account_link_email_intro_fr()
+    assert ep.STYLOMETRIC_VALUE_SENTENCE_FR in intro
+    assert "Dataset Style Studio" in intro
+    assert "mot de passe" in intro.lower()
+    assert "invitation" in intro.lower()
+
+
 def test_product_rule_issue_11_separates_context_sidebar_and_actions_tab() -> None:
     """Issue-028 / issue-8: contexte (sidebar) vs actions (onglet Projets)."""
     rule = ep.PRODUCT_RULE_ISSUE_11_CREATION_PATHS_FR

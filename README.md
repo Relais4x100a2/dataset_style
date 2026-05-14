@@ -68,6 +68,7 @@ Le chargeur (`src/config.py`) applique cet ordre:
 
 - `MAIL_MODE`: `dev` (affiche un lien masqué en UI) ou `smtp`.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`: configuration SMTP en mode `smtp`.
+- Texte d’introduction des invitations super-admin : `invitation_account_link_email_intro_fr()` dans `src/empty_project_onboarding.py` (aligné sur la phrase produit stylométrique de l’onboarding ; envoi via `src/mailer.py`, pas via les templates email versionnés de SuperTokens Core).
 
 ## Dev local (une commande)
 
