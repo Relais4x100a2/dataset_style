@@ -924,6 +924,17 @@ DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN: int = 25_000
 # Limite unique d'affichage : outliers cohérence + tableau des paires sous seuil (issue-023).
 DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT: int = 15
 
+# Issue 036 (export) : seuil exclusif sur la moyenne des scores de cohérence parseés
+# du périmètre d'export. Alerte produit lorsque la moyenne existe et est strictement
+# inférieure à cette borne (la valeur égale au seuil n'est pas alertée).
+EXPORT_PERIMETER_COHERENCE_MEAN_ALERT_LT: int = 50
+
+# Issue 036 (export) : borne exclusive pour compter les fiches « score de cohérence bas »
+# dans le périmètre d'export (cellules ``_coherence_score`` parseables uniquement,
+# comparaison stricte ``score < seuil``).
+# Distinct du tableau de bord « top-N scores les plus bas », qui est un classement sans seuil fixe.
+EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT: int = 40
+
 
 def parse_persisted_syntax_contrast(value: object) -> float | None:
     """Parse une cellule ``_syntax_contrast`` ; ``None`` si vide ou invalide.
@@ -1025,6 +1036,35 @@ def list_parsed_coherence_scores(
         if p is not None:
             out.append(p)
     return out
+
+
+def count_persisted_coherence_scores_strictly_below(
+    df: pd.DataFrame,
+    *,
+    threshold_lt: int = EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT,
+    column: str = "_coherence_score",
+) -> int:
+    """Compte les lignes avec score de cohérence persisté parseable sous le seuil.
+
+    Seuil exclusif : ``parsed < threshold_lt``. Les cellules vides ou non numériques sont
+    ignorées (pas comptées comme « sous seuil »).
+
+    Args:
+        df: Périmètre d'export (ex. :attr:`ExportPerimeterSummary.dataframe`).
+        threshold_lt: Borne exclusive (défaut : constante métier issue 036).
+        column: Colonne cache des scores persistés.
+
+    Returns:
+        Nombre de lignes avec une valeur parseable ``< threshold_lt``.
+    """
+    if df.empty or column not in df.columns:
+        return 0
+    n = 0
+    for v in df[column].tolist():
+        p = parse_persisted_coherence_score(v)
+        if p is not None and p < threshold_lt:
+            n += 1
+    return n
 
 
 @dataclass(frozen=True)

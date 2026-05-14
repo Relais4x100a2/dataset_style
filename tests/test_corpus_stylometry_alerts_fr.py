@@ -11,6 +11,7 @@ from src.corpus_stylometry_alerts_fr import (
 )
 from src.nlp_engine import (
     DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
+    EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT,
     SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
 )
 
@@ -45,4 +46,5 @@ def test_dashboard_glossary_covers_variance_outliers_and_trivial_pairs() -> None
     assert "écart-type" in md.lower() or "Écart-type" in md
     assert str(DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT) in md
     assert str(SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT) in md
+    assert str(EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT) in md
     assert TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR in md

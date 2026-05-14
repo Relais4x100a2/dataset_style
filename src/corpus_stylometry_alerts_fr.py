@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from src.nlp_engine import (
     DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
+    EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT,
     SYNTAX_CONTRAST_TRIVIAL_PAIR_THRESHOLD_LT,
 )
 
@@ -63,10 +64,14 @@ def signature_axis_variance_help_fr() -> str:
 def low_coherence_outliers_help_fr() -> str:
     """Markdown paragraph: top-N lowest persisted coherence scores."""
     n = DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT
+    thr = EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT
     return (
         f"**Scores de cohérence bas** : jusqu'à {n} entrées du périmètre sélectionné avec "
         "les valeurs `_coherence_score` numériques les plus faibles (tri croissant). "
         "Identifiant et statut pour retrouver la fiche dans « Gestion & édition »."
+        "\n\n**Export (Réglages & export)** : le compteur « scores bas » avant téléchargement "
+        f"compte les fiches du périmètre CSV/JSONL avec score parseable strictement sous **{thr}** "
+        "(constante produit), indépendamment de ce classement top-N."
     )
 
 

@@ -104,7 +104,7 @@ make down
 pytest -q
 ```
 
-Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`), libellés d'alertes corpus (`tests/test_corpus_stylometry_alerts_fr.py`), onboarding sans projet (`tests/test_empty_project_onboarding.py`).
+Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémoire), export_utils, récap export (`tests/test_export_quality_recap_service.py`), nlp_engine, agrégats du tableau de bord (`tests/test_dashboard_metrics.py`), libellés d'alertes corpus (`tests/test_corpus_stylometry_alerts_fr.py`), onboarding sans projet (`tests/test_empty_project_onboarding.py`).
 
 ## Déploiement CapRover (une commande)
 
@@ -176,6 +176,7 @@ contraintes Streamlit `st.form`).
 
 Dans **Export** (même onglet), un contrôle unique définit le périmètre pour **CSV et JSONL** :
 « Validées seulement » (statut « Fait et validé ») ou « Tout le dataset » (tous les statuts, y compris brouillons).
+Un **récap qualité** (fiches exportées, nombre validées dans ce périmètre, moyenne de cohérence, comptage des scores bas selon un seuil produit documenté) s’affiche au-dessus des boutons de téléchargement ; une alerte apparaît si la moyenne de cohérence du périmètre est strictement sous le seuil produit (`EXPORT_PERIMETER_COHERENCE_MEAN_ALERT_LT` dans `src/nlp_engine.py`).
 
 Dans `Réglages & Export`, section **Dimensions du texte**:
 - choix d'un **profil de dimensions** (jeu de listes prédéfini, clés techniques `roman`, `pro`, `contenu`, etc.)

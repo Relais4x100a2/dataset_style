@@ -67,6 +67,8 @@ from src.nlp_engine import (
     CURATOR_MESSAGE_ADVICE_BALANCED,
     DASHBOARD_COHERENCE_SCORE_MAX_ROWS_FULL_SCAN,
     DASHBOARD_STYLOMETRY_ALERT_TABLE_LIMIT,
+    EXPORT_PERIMETER_COHERENCE_MEAN_ALERT_LT,
+    EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT,
     RowNlpCacheResult,
     avg_signature_from_cache,
     coherence_score_bucket_table,
@@ -122,6 +124,7 @@ from src.services.edition_sequential_navigation import (
     edition_nav_singleton_filtered_caption_fr,
     edition_nav_unsaved_changes_notice_fr,
 )
+from src.services.export_quality_recap_service import build_export_quality_recap
 from src.services.export_scope_service import summarize_export_perimeter
 from src.services.project_dataframe_view import prepare_for_dashboard_tab, prepare_for_edition_tab
 from src.super_admin_ui_texts import (
@@ -1432,11 +1435,46 @@ def render_tab_settings_export(
 
     perimeter = summarize_export_perimeter(df, export_scope)
     df_export = perimeter.dataframe
-    row_n = perimeter.row_count
-    st.metric("Fiches dans le périmètre", row_n)
+    recap = build_export_quality_recap(df_export)
+
+    st.markdown("#### Récap qualité avant téléchargement")
+    c_export, c_valid, c_mean, c_low = st.columns(4)
+    c_export.metric("Fiches exportées", recap.export_row_count)
+    c_valid.metric(
+        "Validées (statut)",
+        recap.validated_row_count,
+        help=(
+            "Nombre de fiches au statut « Fait et validé » dans ce périmètre. "
+            "Avec « Validées seulement », ce nombre coïncide avec les fiches exportées."
+        ),
+    )
+    mean_display = "—" if recap.coherence_mean is None else f"{recap.coherence_mean:.2f}"
+    c_mean.metric(
+        "Moyenne cohérence",
+        mean_display,
+        help=(
+            "Moyenne sur les scores `_coherence_score` numériques du périmètre "
+            "(même parseur que le tableau de bord). « — » si aucun score exploitable."
+        ),
+    )
+    c_low.metric(
+        f"Scores bas (<{EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT})",
+        recap.low_coherence_outlier_count,
+        help=(
+            "Fiches avec score parseable strictement sous le seuil produit "
+            f"({EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT}) — "
+            "comptage sur le périmètre d'export, distinct du top-N du tableau de bord."
+        ),
+    )
     st.caption(perimeter.recap_caption)
     if perimeter.recap_warning:
         st.warning(perimeter.recap_warning)
+    if recap.coherence_mean_alert:
+        st.warning(
+            "Moyenne de cohérence du périmètre strictement sous le seuil produit "
+            f"({EXPORT_PERIMETER_COHERENCE_MEAN_ALERT_LT}) — envisagez d'enrichir ou de "
+            "réviser le corpus avant export."
+        )
 
     export_format = st.selectbox(
         "Format JSONL",
