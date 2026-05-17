@@ -23,3 +23,10 @@ Voir **`docs/release_train_caprover.md`** (pytest, ruff, bootstrap_check, auth-c
 
 - `docs/caprover_deployment.md`
 - `docs/caprover_env_example.md`
+
+## Sync GitHub ↔ backlog (attention)
+
+- Les numéros GitHub **ne correspondent pas** aux ids `issue-NNN` du backlog (ex. GitHub #9 = ancien sprint Streamlit, pas `issue-001` migration).
+- Ne pas marquer `done` dans `backlog.json` uniquement parce qu’une issue GitHub fermée porte un titre `[issue-00X]`.
+- Créer de **nouvelles** issues GitHub par sprint migration ; lier explicitement `githubIssueNumber` après création.
+- Cible de merge pipeline : **`deploy-caprover-relais4`**, pas `main`.
