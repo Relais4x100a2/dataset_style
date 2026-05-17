@@ -1,0 +1,25 @@
+# Contexte orchestrateur — Dataset Style
+
+## Source de vérité Git
+
+| Concept | Branche |
+|--------|---------|
+| Intégration applicative par défaut | `main` |
+| Déploiement CapRover production (Relais4) | `deploy-caprover-relais4` |
+| Intégration de migration (ex. nouveau front) | Nom à figer côté produit (ex. `deploy-newfrontend`) — **distinct** de `deploy-caprover-relais4` |
+
+La branche distante réelle pour la prod est **`deploy-caprover-relais4`** (tiret, pas `deploy/caprover-relais4`).
+
+## Workflows GitHub Actions
+
+- **`ci.yml`** : `ruff check`, `ruff format --check`, `pytest -q` — déclenché sur push et PR vers **`main`** et **`deploy-caprover-relais4`**.
+- **`auth-contract.yml`** : horaire + PR filtrées sur chemins auth / DB / UI auth / tests auth.
+
+## Checklist avant merge déploiement
+
+Voir **`docs/release_train_caprover.md`** (pytest, ruff, bootstrap_check, auth-contract si applicable) et **`docs/merge_ready_checklist.md`**.
+
+## Docs déploiement
+
+- `docs/caprover_deployment.md`
+- `docs/caprover_env_example.md`
