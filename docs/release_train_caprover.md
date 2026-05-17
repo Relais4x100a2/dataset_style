@@ -8,7 +8,7 @@ Ce document fige la **source de vérité** côté Git et le **train de déploiem
 |---------|------|-------------------|
 | `main` | Historique / miroir éventuel ; **ne pas y merger** les livraisons Relais4 tant que la prod suit `deploy-caprover-relais4`. | Non pour le déploiement CapRover actuel. |
 | `deploy-caprover-relais4` | **Branche d’intégration et de déploiement production** Relais4 : toute PR fonctionnelle et doc d’exploitation destinée à la prod doit **merger ici** (`make prod` / `caprover deploy`). | Oui pour ce qui est **réellement déployé** sur l’instance CapRover Relais4. |
-| `deploy-newfrontend` *(exemple / future)* | **Branche d’intégration de migration** (nouveau front, refonte Streamlit, etc.) : à créer ou renommer selon la stratégie de bascule ; distincte de la prod actuelle. | Non tant qu’elle n’existe pas ; une fois créée, elle sert de rampe d’intégration **avant** promotion vers `deploy-caprover-relais4`. |
+| `deploy-newfrontend` *(exemple / future)* | **Branche d’intégration de migration** (nouveau front, refonte Streamlit, etc.) : à créer ou renommer selon la stratégie de bascule ; distincte de la prod actuelle. Décision de bascule (cutover prod, URL canonique, rollback) : **`docs/streamlit_to_new_frontend_cutover.md`** — prérequis pour les stories **007–016**. | Non tant qu’elle n’existe pas ; une fois créée, elle sert de rampe d’intégration **avant** promotion vers `deploy-caprover-relais4`. |
 
 **À ne pas confondre** : l’ancien nom documenté `deploy/caprover-relais4` (avec slash) ne correspond **pas** à une branche du dépôt distant ; la branche réelle est **`deploy-caprover-relais4`** (tiret).
 
