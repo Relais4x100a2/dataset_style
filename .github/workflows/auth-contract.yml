@@ -6,10 +6,12 @@ on:
   pull_request:
     paths:
       - "src/auth.py"
+      - "src/bff_spike_app.py"
       - "src/database.py"
       - "src/ui_components.py"
       - "scripts/retry_deprovision_ops.py"
       - "tests/test_auth.py"
+      - "tests/test_bff_spike_issue006.py"
       - ".github/workflows/auth-contract.yml"
 
 jobs:

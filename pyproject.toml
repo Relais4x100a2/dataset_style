@@ -5,6 +5,8 @@ description = "Dataset Style Studio — curation et export pour fine-tuning styl
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115.2",
+    "httpx>=0.27.0",
     "pandas>=3.0.2",
     "psycopg[binary]>=3.3.3",
     "python-dotenv>=1.2.2",
@@ -31,4 +33,6 @@ select = ["E", "F", "I", "UP", "W"]
 "src/llm_generate.py" = ["E501"]
 "src/flash_messages.py" = ["E501"]
 "src/api_errors.py" = ["E501"]
+"src/bff_spike_app.py" = ["E501"]
 "tests/test_api_errors.py" = ["E501"]
+"tests/test_bff_spike_issue006.py" = ["E501"]
