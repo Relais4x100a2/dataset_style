@@ -224,7 +224,6 @@ def ensure_schema(engine: Engine) -> None:
     CREATE INDEX IF NOT EXISTS idx_projects_created_by ON projects(created_by);
     CREATE INDEX IF NOT EXISTS idx_users_last_login_at ON users(last_login_at);
     CREATE INDEX IF NOT EXISTS idx_users_disabled_at ON users(disabled_at);
-    CREATE INDEX IF NOT EXISTS idx_users_email_ci ON users((lower(email)));
 
     CREATE TABLE IF NOT EXISTS user_deprovision_ops (
         operation_id TEXT PRIMARY KEY,
@@ -245,6 +244,12 @@ def ensure_schema(engine: Engine) -> None:
     logger.debug("ensure_schema: début de l'initialisation du schéma")
     with engine.begin() as conn:
         conn.execute(text(ddl))
+        if engine.dialect.name == "postgresql":
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_users_email_ci ON users ((lower(email)));")
+            )
+        else:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_email_ci ON users (email);"))
 
         # ── Migrations incrémentales : project_settings ──
         _add_column_if_missing(
@@ -412,6 +417,39 @@ def get_su_user_id_by_user_id(engine: Engine, user_id: str) -> str:
     if not row:
         raise ValueError("Utilisateur introuvable.")
     return str(row["su_user_id"])
+
+
+def get_user_record_by_su_user_id(engine: Engine, su_user_id: str) -> UserRecord | None:
+    """Retourne l'utilisateur applicatif lié à un ``su_user_id`` SuperTokens, ou ``None``."""
+    if not su_user_id.strip():
+        return None
+    ensure_schema(engine)
+    with engine.begin() as conn:
+        row = (
+            conn.execute(
+                text(
+                    """
+                    SELECT id, email, display_name, is_super_admin, disabled_at, last_login_at
+                    FROM users
+                    WHERE su_user_id = :su
+                    LIMIT 1;
+                    """
+                ),
+                {"su": su_user_id.strip()},
+            )
+            .mappings()
+            .first()
+        )
+    if not row:
+        return None
+    return UserRecord(
+        user_id=str(row["id"]),
+        email=str(row["email"]),
+        display_name=str(row["display_name"]),
+        is_super_admin=bool(row.get("is_super_admin") or False),
+        disabled_at="" if row.get("disabled_at") is None else str(row["disabled_at"]),
+        last_login_at="" if row.get("last_login_at") is None else str(row["last_login_at"]),
+    )
 
 
 def require_super_admin(engine: Engine, actor_user_id: str) -> None:

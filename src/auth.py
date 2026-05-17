@@ -7,7 +7,6 @@ import os
 import secrets
 from dataclasses import dataclass
 
-import requests
 import streamlit as st
 from sqlalchemy.engine import Engine
 
@@ -29,6 +28,9 @@ from src.database import (
     upsert_user_from_su,
 )
 from src.flash_messages import render_post_rerun_flash_once
+from src.supertokens_recipe_client import recipe_post as _post
+from src.supertokens_recipe_client import signin_email_password as _signin_http
+from src.supertokens_recipe_client import signup_email_password as _signup_http
 
 logger = logging.getLogger(__name__)
 
@@ -44,63 +46,12 @@ class CurrentUser:
     is_super_admin: bool = False
 
 
-def _su_base_url() -> str:
-    return (os.environ.get("SUPERTOKENS_CONNECTION_URI") or "").strip().rstrip("/")
-
-
-def _su_header() -> dict[str, str]:
-    api_key = (os.environ.get("SUPERTOKENS_API_KEY") or "").strip()
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["api-key"] = api_key
-    return headers
-
-
-def _post(path: str, payload: dict) -> dict:
-    base = _su_base_url()
-    if not base:
-        raise RuntimeError("SUPERTOKENS_CONNECTION_URI manquant.")
-    resp = requests.post(f"{base}{path}", json=payload, headers=_su_header(), timeout=20)
-    if resp.status_code >= 400:
-        body = (resp.text or "").strip()
-        raise RuntimeError(f"SuperTokens {path} HTTP {resp.status_code}: {body}")
-    return resp.json()
-
-
 def _signin(email: str, password: str) -> dict:
-    try:
-        return _post(
-            "/recipe/signin",
-            {
-                "formFields": [
-                    {"id": "email", "value": email},
-                    {"id": "password", "value": password},
-                ]
-            },
-        )
-    except RuntimeError as exc:
-        # Compatibilité entre versions SuperTokens Core (formFields vs email/password).
-        if "Field name 'email' is invalid in JSON input" not in str(exc):
-            raise
-        return _post("/recipe/signin", {"email": email, "password": password})
+    return _signin_http(email, password)
 
 
 def _signup(email: str, password: str) -> dict:
-    try:
-        return _post(
-            "/recipe/signup",
-            {
-                "formFields": [
-                    {"id": "email", "value": email},
-                    {"id": "password", "value": password},
-                ]
-            },
-        )
-    except RuntimeError as exc:
-        # Compatibilité entre versions SuperTokens Core (formFields vs email/password).
-        if "Field name 'email' is invalid in JSON input" not in str(exc):
-            raise
-        return _post("/recipe/signup", {"email": email, "password": password})
+    return _signup_http(email, password)
 
 
 def _extract_email_verified(user: object) -> bool:
@@ -302,6 +253,24 @@ def logout() -> None:
 
     purge_all_new_entry_session_state(st.session_state)
     st.session_state.pop(_state_key(), None)
+
+
+def persist_user_from_signin_ok(engine: Engine, out: dict, *, submitted_email: str) -> UserRecord:
+    """Synchronise l'utilisateur applicatif après une réponse SuperTokens ``signin`` OK."""
+    user = out.get("user", {})
+    su_user_id = _extract_user_id(user)
+    em = _normalize_email(_extract_email(user, submitted_email))
+    email_verified = _extract_email_verified(user)
+    record = upsert_user_from_su(
+        engine=engine,
+        su_user_id=su_user_id,
+        email=em,
+        display_name=em.split("@")[0],
+    )
+    _maybe_promote_super_admin(engine, em, email_verified)
+    record.is_super_admin = is_user_super_admin(engine, record.user_id)
+    mark_user_login(engine, record.user_id)
+    return record
 
 
 def _set_user(record: UserRecord, access_token: str) -> None:
@@ -506,19 +475,9 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
             if out.get("status") != "OK":
                 st.error(f"Échec connexion: {out.get('status')}")
                 return None
-            user = out.get("user", {})
-            su_user_id = _extract_user_id(user)
-            em = _normalize_email(_extract_email(user, email))
-            email_verified = _extract_email_verified(user)
-            record = upsert_user_from_su(
-                engine=engine,
-                su_user_id=su_user_id,
-                email=em,
-                display_name=em.split("@")[0],
+            record = persist_user_from_signin_ok(
+                engine, out, submitted_email=_normalize_email(email)
             )
-            _maybe_promote_super_admin(engine, em, email_verified)
-            record.is_super_admin = is_user_super_admin(engine, record.user_id)
-            mark_user_login(engine, record.user_id)
             _set_user(record, out.get("accessToken", ""))
             st.rerun()
         except Exception as exc:  # noqa: BLE001

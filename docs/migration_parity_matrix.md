@@ -59,6 +59,21 @@ Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaqu
 
 ---
 
+## Slice vertical (issue-007 / GitHub #129)
+
+Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par défaut avec `make dev` / compose) : connexion invitation-only via SuperTokens, liste des projets **propriétaire** (`list_projects_for_user`), lecture/édition/création d’entrées via `load_project_entries` / `update_project_entries`, export **CSV** et **JSONL** via `dataframe_for_export` + `convert_to_jsonl` (mêmes périmètres `validated_only` / `full_dataset` que `export_utils`). Les erreurs JSON suivent `src/api_errors.py`. **Streamlit** reste sur **8501** en coexistence.
+
+| ID flux | Slice vertical (issue-007) |
+| --- | --- |
+| SB-CTX | OK — jeton vérifié (`/recipe/session/verify`) + résolution `users.su_user_id` |
+| PRJ-VIEW | OK — `GET /api/projects` |
+| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création minimale) |
+| EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` |
+
+Lien PR : *voir la PR GitHub associée à la branche `cursor/issue-007-vertical-slice-webapp-c88e` (ferme #129).*
+
+---
+
 ## Grille statut sprint backlog (issues issue-010 à issue-016)
 
 Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (pas le numéro GitHub — voir règle de synchronisation backlog / GitHub dans la doc projet).

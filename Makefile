@@ -2,6 +2,7 @@
 
 dev:
 	docker compose --env-file .env up
+	# Lance PostgreSQL, SuperTokens, Streamlit (:8501) et le slice web FastAPI (:8080 par défaut).
 
 dev-build:
 	docker compose --env-file .env up --build
