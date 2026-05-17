@@ -110,6 +110,8 @@ Les tests couvrent : auth (contrats sécurité, saga), database (SQLite en mémo
 
 Guide pas à pas (variables, ordre des apps, health checks, rollback) : **`docs/caprover_deployment.md`**.
 
+Train de release (branches `main` / `deploy-caprover-relais4`, CI, contrats auth) : **`docs/release_train_caprover.md`**.
+
 1. Définir une seule variable `APP_CONFIG_JSON` dans CapRover (voir `docs/caprover_env_example.md`).
 2. Déployer:
 

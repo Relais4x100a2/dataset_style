@@ -150,13 +150,15 @@ CapRover gère le reverse proxy automatiquement si le port interne est déclaré
 ```bash
 # Depuis la racine du projet
 caprover login
-caprover deploy --appName dataset-style --branch deploy/caprover-relais4
+caprover deploy --appName dataset-style --branch deploy-caprover-relais4
 ```
 
 ### 5.2 Via GitHub Actions (CI/CD)
 
-Le workflow `.github/workflows/ci.yml` déclenche automatiquement le déploiement
-sur push sur les branches `deploy/*` si les secrets GitHub sont configurés.
+Le workflow `.github/workflows/ci.yml` exécute lint et tests sur **push** et **pull_request**
+vers `main` et `deploy-caprover-relais4`. Un déploiement automatique CapRover via GitHub Actions
+n’est documenté ici que si l’équipe ajoute un job dédié et les secrets requis ; le chemin nominal
+reste `make prod` / `caprover deploy` depuis la branche de déploiement (voir `docs/release_train_caprover.md`).
 
 **Secrets GitHub requis :**
 
