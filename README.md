@@ -142,10 +142,10 @@ Ce fichier ajoute un healthcheck HTTP sur SuperTokens et attend que Postgres **e
 
 ## Règles de permissions
 
-- Le propriétaire du projet a tous les droits sur son projet.
-- Aucun partage multi-membres n'est actif.
-- Le super admin global peut inviter/supprimer des comptes depuis l'onglet dédié.
-- Les actions super admin sont validées côté backend (pas uniquement via visibilité UI).
+- **Propriétaire** (`projects.created_by`) : tous les droits sur le projet et les entrées, via `get_role` / `require_role` dans `src/database.py`.
+- **Partage multi-membres** : la table `project_memberships` existe pour la persistance et les opérations admin ; le parcours curateur **effectif** reste propriétaire-seul tant que `get_role` n'intègre pas les memberships (voir [`docs/architecture/project_access_model.md`](docs/architecture/project_access_model.md)).
+- **Super admin** (`users.is_super_admin`) : gouvernance globale des comptes (invitation, saga, détachement des memberships) ; pas un co-propriétaire implicite des projets d'autrui pour les opérations dataset.
+- Les actions sensibles sont validées côté backend (pas uniquement via visibilité UI).
 
 Les garde-fous sont appliqués dans `src/database.py` (`require_role`, `require_admin`), pas uniquement dans l'UI.
 
@@ -214,7 +214,8 @@ Toutes les actions sensibles (suppression projet, réglages) sont validées côt
 
 ## Documentation architecture
 
-Voir `docs/multi_tenant_architecture.md`.
+- `docs/multi_tenant_architecture.md` — vue d'ensemble multi-tenant.
+- `docs/architecture/project_access_model.md` — **issue-003** : propriétaire vs `project_memberships`, super-admin, implications API/UI.
 
 ## Merge-ready & incidents
 

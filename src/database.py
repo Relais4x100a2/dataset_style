@@ -1092,6 +1092,13 @@ def delete_project(engine: Engine, project_id: str, user_id: str) -> None:
 
 
 def get_role(engine: Engine, project_id: str, user_id: str) -> str | None:
+    """Rôle effectif pour les gardes-fous projet (propriétaire uniquement).
+
+    Retourne la chaîne ``admin`` si ``user_id`` est le propriétaire non archivé
+    (``projects.created_by``). Ne lit pas ``project_memberships`` ; la
+    sémantique propriétaire vs collaboration est documentée dans
+    ``docs/architecture/project_access_model.md``.
+    """
     sql = "SELECT 1 FROM projects WHERE id = :pid AND created_by = :uid AND archived = FALSE"
     with engine.begin() as conn:
         row = conn.execute(text(sql), {"pid": project_id, "uid": user_id}).first()

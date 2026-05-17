@@ -18,9 +18,11 @@ flowchart LR
 - `project_settings`: paramètres runtime par projet (LLM et correction).
 - `entries`: lignes du dataset, filtrées par `project_id`.
 
-Le modèle d'accès est simplifié:
-- `1 projet = 1 utilisateur propriétaire` (`projects.created_by`)
-- `1 utilisateur = N projets`
+Le modèle d'accès (détaillé dans [`docs/architecture/project_access_model.md`](architecture/project_access_model.md)) :
+
+- **Propriétaire** : `1 projet = 1 utilisateur propriétaire` via `projects.created_by` (source de vérité produit).
+- **Projets par utilisateur** : `1 utilisateur = N projets` dont il est propriétaire.
+- **Collaboration** : la table `project_memberships` enregistre des rôles (`admin`, `collaborator`, `viewer`) **sans** second propriétaire ; l'autorisation effective sur les données du dataset suit aujourd'hui `get_role` / propriétaire uniquement (voir document d'architecture).
 
 ## Contrôle d'accès
 
