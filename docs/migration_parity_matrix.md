@@ -70,7 +70,7 @@ Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par 
 | EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création minimale) |
 | EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` |
 
-Lien PR : *voir la PR GitHub associée à la branche `cursor/issue-007-vertical-slice-webapp-c88e` (ferme #129).*
+Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
 ---
 
