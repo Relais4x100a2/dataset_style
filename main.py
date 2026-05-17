@@ -3,6 +3,7 @@ import os
 
 import pandas as pd
 import streamlit as st
+from src.api_errors import resolve_db_startup_category
 from src.auth import bootstrap_first_admin, render_auth_gate
 from src.config import initialize_runtime_config
 from src.database import create_db_engine, ensure_schema, get_project_settings
@@ -12,7 +13,6 @@ from src.db_startup import (
     effective_database_url,
     is_development_ui,
     technical_hint_for_dev,
-    user_facing_summary,
 )
 from src.presets import load_active_dimensions
 from src.project_entries_cache import cached_load_project_entries
@@ -51,7 +51,14 @@ def _render_database_unavailable(
     exc: BaseException | None = None,
 ) -> None:
     """Affiche un message utilisateur compréhensible ; journalise le détail côté serveur."""
-    summary = user_facing_summary(category)
+    resolved = resolve_db_startup_category(category)
+    logger.error(
+        "database_startup_unavailable code=%s category=%s",
+        resolved.code,
+        category,
+        exc_info=exc if isinstance(exc, BaseException) else False,
+    )
+    summary = resolved.message_fr
     st.error(summary)
     if is_development_ui():
         hint = technical_hint_for_dev(exc, category=category)
@@ -62,7 +69,6 @@ def _render_database_unavailable(
 try:
     initialize_runtime_config()
 except ValueError as exc:
-    logger.exception("Runtime configuration failed (APP_CONFIG_JSON or derived settings)")
     st.set_page_config(page_title="Dataset Style Studio", layout="wide")
     _render_database_unavailable("invalid_config", exc=exc)
     st.stop()
@@ -83,7 +89,6 @@ try:
     engine = create_db_engine(db_url)
     ensure_schema(engine)
 except Exception as exc:
-    logger.exception("Database engine creation or schema initialization failed")
     category = classify_database_startup_error(exc)
     _render_database_unavailable(category, exc=exc)
     st.stop()

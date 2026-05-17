@@ -32,6 +32,16 @@ def test_consume_empty_session_returns_none() -> None:
     assert session == {"other": 1}
 
 
+def test_consume_accepts_optional_error_code_in_payload() -> None:
+    session: dict[str, Any] = {}
+    schedule_post_rerun_flash(session, "X", level="warning", code="NOT_FOUND_GENERIC")
+    out = consume_post_rerun_flash(session)
+    assert out is not None
+    assert out["message"] == "X"
+    assert out["level"] == "warning"
+    assert out["code"] == "NOT_FOUND_GENERIC"
+
+
 def test_reschedule_overwrites_previous_flash() -> None:
     """Only one flash is kept; later schedule replaces the first (no accumulation)."""
     session: dict[str, Any] = {}
@@ -84,6 +94,21 @@ def test_render_post_rerun_flash_once_invokes_streamlit() -> None:
         render_post_rerun_flash_once(session)
     fake_st.success.assert_called_once_with("OK")
     assert POST_RERUN_FLASH_KEY not in session
+
+
+def test_render_post_rerun_flash_shows_stable_code_caption_when_set() -> None:
+    """Issue-005 / issue-022 : bandeau post-rerun peut porter un code d'erreur stable."""
+    from unittest.mock import MagicMock, patch
+
+    from src.flash_messages import render_post_rerun_flash_once
+
+    session: dict[str, Any] = {}
+    schedule_post_rerun_flash(session, "Opération refusée.", level="error", code="FORBIDDEN")
+    fake_st = MagicMock()
+    with patch("src.flash_messages.st", fake_st):
+        render_post_rerun_flash_once(session)
+    fake_st.error.assert_called_once_with("Opération refusée.")
+    fake_st.caption.assert_called_once_with("code: FORBIDDEN")
 
 
 @pytest.mark.parametrize(
