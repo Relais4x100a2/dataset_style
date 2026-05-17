@@ -9,6 +9,22 @@ on:
 jobs:
   lint-and-tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bff_spike_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bff_spike_ci"
+          --health-interval 4s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      PYTEST_BFF_SPIKE_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/bff_spike_ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
