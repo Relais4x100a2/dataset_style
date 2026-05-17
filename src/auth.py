@@ -11,6 +11,7 @@ import requests
 import streamlit as st
 from sqlalchemy.engine import Engine
 
+from src.api_errors import error_envelope_for_client, log_resolved_api_error
 from src.database import (
     UserRecord,
     create_deprovision_operation,
@@ -457,6 +458,19 @@ def revoke_account_with_saga(
         raise
 
 
+def _render_signed_out_api_error(exc: BaseException, *, flow: str) -> None:
+    """Affiche une erreur auth sans texte provider brut ; journalise avec code stable."""
+    log_resolved_api_error(logger, exc, extra_context={"flow": flow})
+    env = error_envelope_for_client(exc, include_technical_detail=None)
+    err = env["error"]
+    st.error(err["message"])
+    st.caption(f"code: {err['code']}")
+    detail = err.get("detail")
+    if detail:
+        with st.expander("Détails techniques (mode développement)"):
+            st.code(detail)
+
+
 def render_auth_gate(engine: Engine) -> CurrentUser | None:
     """
     Affiche login et retourne l'utilisateur courant si authentifié.
@@ -508,7 +522,7 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
             _set_user(record, out.get("accessToken", ""))
             st.rerun()
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Connexion impossible: {exc}")
+            _render_signed_out_api_error(exc, flow="signin")
             return None
 
     if reset_btn:
@@ -517,6 +531,6 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
             st.success("Lien de réinitialisation généré.")
             st.code(_mask_link(link))
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Réinitialisation impossible: {exc}")
+            _render_signed_out_api_error(exc, flow="password_reset")
             return None
     return None

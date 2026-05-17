@@ -17,7 +17,7 @@ scheduling on one channel clears the other channel’s pending payload.
 from __future__ import annotations
 
 from collections.abc import MutableMapping
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 import streamlit as st
 
@@ -35,6 +35,7 @@ class PostRerunFlashPayload(TypedDict):
 
     message: str
     level: FlashLevel
+    code: NotRequired[str]
 
 
 def _payload_from_stored_raw(raw: object) -> PostRerunFlashPayload | None:
@@ -45,11 +46,17 @@ def _payload_from_stored_raw(raw: object) -> PostRerunFlashPayload | None:
         return None
     message = raw.get("message")
     level = raw.get("level", "success")
+    code_raw = raw.get("code")
     if not isinstance(message, str) or not message.strip():
         return None
     if not isinstance(level, str) or level not in _FLASH_LEVELS:
         level = "success"
-    return PostRerunFlashPayload(message=message, level=cast(FlashLevel, level))
+    out: PostRerunFlashPayload = PostRerunFlashPayload(
+        message=message, level=cast(FlashLevel, level)
+    )
+    if isinstance(code_raw, str) and code_raw.strip():
+        out["code"] = code_raw.strip()
+    return out
 
 
 def schedule_post_rerun_flash(
@@ -58,6 +65,7 @@ def schedule_post_rerun_flash(
     *,
     level: FlashLevel = "success",
     channel: FlashChannel = "default",
+    code: str | None = None,
 ) -> None:
     """Store a message to display on the next run.
 
@@ -73,8 +81,11 @@ def schedule_post_rerun_flash(
         level: Which Streamlit banner to use when rendering.
         channel: ``default`` (curateur / compte) or ``super_admin`` (namespace
             dédié, clé ``POST_RERUN_FLASH_ADMIN_KEY``).
+        code: Code d'erreur stable (issue-005 / issue-022) pour le futur front ; optionnel.
     """
     payload: PostRerunFlashPayload = PostRerunFlashPayload(message=message, level=level)
+    if code is not None and str(code).strip():
+        payload["code"] = str(code).strip()
     if channel == "super_admin":
         session.pop(POST_RERUN_FLASH_KEY, None)
         session[POST_RERUN_FLASH_ADMIN_KEY] = payload
@@ -115,6 +126,7 @@ def render_post_rerun_flash_once(session: MutableMapping[str, Any]) -> None:
         return
     message = payload["message"]
     level = payload["level"]
+    err_code = payload.get("code")
     if level == "success":
         st.success(message)
     elif level == "warning":
@@ -123,3 +135,5 @@ def render_post_rerun_flash_once(session: MutableMapping[str, Any]) -> None:
         st.error(message)
     else:
         st.info(message)
+    if err_code:
+        st.caption(f"code: {err_code}")

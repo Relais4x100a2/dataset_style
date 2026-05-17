@@ -572,6 +572,13 @@ def _current_project_id() -> str:
 
 
 def _show_action_error(prefix: str, exc: Exception) -> None:
+    from src.api_errors import TenantResourceOpaqueDenial, resolve_exception_for_api
+
+    if isinstance(exc, TenantResourceOpaqueDenial):
+        resolved = resolve_exception_for_api(exc, include_technical_detail=False)
+        st.error(resolved.message_fr)
+        st.caption(f"code: {resolved.code}")
+        return
     if isinstance(exc, PermissionError):
         st.error(str(exc))
     else:

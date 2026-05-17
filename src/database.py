@@ -18,6 +18,8 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
+from src.api_errors import TenantResourceOpaqueDenial
+
 logger = logging.getLogger(__name__)
 
 STATUT_VALIDE = "Fait et validé"
@@ -1115,7 +1117,7 @@ def require_role(engine: Engine, project_id: str, user_id: str, allowed: tuple[s
             allowed,
             role,
         )
-        raise PermissionError("Droits insuffisants pour cette action.")
+        raise TenantResourceOpaqueDenial()
     return role
 
 
