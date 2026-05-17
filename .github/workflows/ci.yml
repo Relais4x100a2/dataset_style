@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, deploy/caprover-relais4]
+    branches: [main, deploy-caprover-relais4]
   pull_request:
-    branches: [main, deploy/caprover-relais4]
+    branches: [main, deploy-caprover-relais4]
 
 jobs:
   lint-and-tests:

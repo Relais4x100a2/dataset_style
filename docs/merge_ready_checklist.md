@@ -1,5 +1,9 @@
 # Checklist Merge-Ready
 
+## 0) Avant merge sur la branche de déploiement CapRover
+
+Pour tout merge vers **`deploy-caprover-relais4`** (prod Relais4), suivre la procédure détaillée dans **`docs/release_train_caprover.md`** : `pytest -q`, `ruff check` / `ruff format --check`, `bootstrap_check`, contrats auth si la PR touche les chemins listés dans `auth-contract.yml`.
+
 ## 1) Sécurité auth validée
 
 - [ ] `AUTH_ENFORCE_INVITATION_ONLY=true` en cible.
