@@ -4,7 +4,7 @@
 
 | Concept | Branche |
 |--------|---------|
-| Intégration applicative par défaut | `main` |
+| **Cible de merge PR / pipeline** (prod Relais4) | `deploy-caprover-relais4` — **pas `main`** |
 | Déploiement CapRover production (Relais4) | `deploy-caprover-relais4` |
 | Intégration de migration (ex. nouveau front) | Nom à figer côté produit (ex. `deploy-newfrontend`) — **distinct** de `deploy-caprover-relais4` |
 

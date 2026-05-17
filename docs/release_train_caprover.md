@@ -6,8 +6,8 @@ Ce document fige la **source de vérité** côté Git et le **train de déploiem
 
 | Branche | Rôle | Source de vérité |
 |---------|------|-------------------|
-| `main` | Intégration continue du code applicatif ; cible par défaut des PR de fonctionnalités. | Oui pour le produit « en développement ». |
-| `deploy-caprover-relais4` | Branche de **déploiement production** Relais4 (CapRover) : le code mergé ici est celui visé par `make prod` / `caprover deploy` depuis cette branche. | Oui pour ce qui est **réellement déployé** sur l’instance CapRover Relais4. |
+| `main` | Historique / miroir éventuel ; **ne pas y merger** les livraisons Relais4 tant que la prod suit `deploy-caprover-relais4`. | Non pour le déploiement CapRover actuel. |
+| `deploy-caprover-relais4` | **Branche d’intégration et de déploiement production** Relais4 : toute PR fonctionnelle et doc d’exploitation destinée à la prod doit **merger ici** (`make prod` / `caprover deploy`). | Oui pour ce qui est **réellement déployé** sur l’instance CapRover Relais4. |
 | `deploy-newfrontend` *(exemple / future)* | **Branche d’intégration de migration** (nouveau front, refonte Streamlit, etc.) : à créer ou renommer selon la stratégie de bascule ; distincte de la prod actuelle. | Non tant qu’elle n’existe pas ; une fois créée, elle sert de rampe d’intégration **avant** promotion vers `deploy-caprover-relais4`. |
 
 **À ne pas confondre** : l’ancien nom documenté `deploy/caprover-relais4` (avec slash) ne correspond **pas** à une branche du dépôt distant ; la branche réelle est **`deploy-caprover-relais4`** (tiret).
