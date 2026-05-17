@@ -20,6 +20,12 @@ Documentation canonique : **`docs/release_train_caprover.md`** (tableau branche 
 
 En local : `ruff check .`, `ruff format --check .`, `pytest -q`, `uv run python scripts/bootstrap_check.py`.
 
+## Contraintes (résumé)
+
+1. **Branches** : cible de merge prod = `deploy-caprover-relais4` (voir section détaillée ci-dessous).
+2. **Qualité** : respecter la CI (`ruff`, `pytest`, `bootstrap_check` avant merge selon `docs/release_train_caprover.md`).
+3. **Accès projet** : un seul **propriétaire** par projet (`projects.created_by`). La table `project_memberships` modélise des rôles de collaboration **sans** définir un second propriétaire ; l'autorisation effective sur les données projet suit la règle documentée dans **`docs/architecture/project_access_model.md`** — toute nouvelle surface (API, BFF) doit rester alignée pour éviter une double logique d'accès.
+
 ## Conventions
 
 - Identifiants / modules en anglais ; UI souvent en français.
