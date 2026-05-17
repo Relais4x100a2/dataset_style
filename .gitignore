@@ -206,3 +206,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# AI team orchestrator — only shared context is versioned (sprints/runs stay local)
+.ai-team-orchestrator/*
+!.ai-team-orchestrator/context.md
