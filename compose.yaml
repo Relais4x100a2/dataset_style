@@ -1,3 +1,6 @@
+# Stack local : PostgreSQL, SuperTokens, Streamlit (app :8501), FastAPI webapp (:8080).
+# Même image `Dockerfile` pour `app` et `webapp` ; commande surchargée pour `webapp`.
+# Healthchecks : Streamlit `/_stcore/health`, FastAPI `/health` (voir docs/caprover_deployment.md).
 services:
   postgres:
     image: postgres:16
@@ -51,6 +54,16 @@ services:
       SUPERTOKENS_PORT: 3567
     ports:
       - "${APP_PORT:-8501}:8501"
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - import urllib.request as u; r=u.urlopen("http://127.0.0.1:8501/_stcore/health"); assert b"ok" in r.read().lower()
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
 
   webapp:
     build:
@@ -85,6 +98,16 @@ services:
         "--port",
         "8080",
       ]
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - import urllib.request as u; u.urlopen("http://127.0.0.1:8080/health")
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   postgres_data:

@@ -141,6 +141,26 @@ proxy_pass http://localhost:8501;
 
 CapRover gère le reverse proxy automatiquement si le port interne est déclaré à `8501`.
 
+### 4.5 Deuxième application FastAPI (préprod / recette, même image)
+
+En **développement**, `compose.yaml` lance deux services à partir du **même** `Dockerfile` :
+
+- `app` : Streamlit, port conteneur **8501** (commande par défaut de l’image).
+- `webapp` : FastAPI (`uvicorn src.webapp.app:app`), port conteneur **8080**.
+
+Pour une **recette CapRover** (typiquement préprod) où Streamlit et le slice FastAPI doivent coexister **sans** fusionner les processus dans un seul conteneur :
+
+1. Créer une **seconde app** CapRover (ex. `dataset-style-web`) avec la **même image** que `dataset-style`.
+2. Définir le **port interne** exposé par CapRover sur **8080** (aligné sur le service `webapp` du compose).
+3. Renseigner la **commande de démarrage** (équivalent compose) :
+   ` /app/.venv/bin/uvicorn src.webapp.app:app --host 0.0.0.0 --port 8080 `
+4. Répliquer les variables d’environnement obligatoires (`DATABASE_URL`, `SUPERTOKENS_*`, `AUTH_ENFORCE_INVITATION_ONLY`, etc.) comme pour Streamlit.
+5. **Healthcheck HTTP** côté CapRover : sonder `GET /health` sur le port interne **8080** (réponse JSON `{"status":"ok"}` ; pas d’authentification). Symétrie avec la sonde Streamlit sur `/_stcore/health` (port **8501**).
+
+> **Production Relais4** : la cible produit reste un **cutover unique** (une interface officielle), voir `docs/streamlit_to_new_frontend_cutover.md`. La double app ci-dessus sert surtout la **préprod** ou des fenêtres de recette explicitement cadrées.
+
+**CORS et URL canonique** : si le frontal et le BFF ne partagent pas la même origine, appliquer l’ADR `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` (`WEBAPP_CORS_ORIGINS` liste fermée, `APP_PUBLIC_BASE_URL` aligné sur l’hôte réellement servi).
+
 ---
 
 ## 5. Déploiement
@@ -230,6 +250,9 @@ GET http://srv-captain--supertokens:3567/hello
 
 ### 7.3 Healthcheck App Streamlit
 
+Sonde HTTP interne (exemple dans `compose.yaml`) : `GET http://127.0.0.1:8501/_stcore/health`
+(le corps contient la sous-chaîne `ok` en cas de succès).
+
 CapRover surveille le port `8501`. Si l'app crashe au démarrage (erreur de config),
 consulter les logs :
 
@@ -237,6 +260,12 @@ consulter les logs :
 caprover api --method GET --path /api/v2/user/apps/appData?appName=dataset-style
 # Ou depuis le dashboard : Apps → dataset-style → App Logs
 ```
+
+### 7.4 Healthcheck App FastAPI (`webapp`)
+
+Sonde dédiée : **`GET /health`** sur le port interne **8080**, réponse attendue `{"status":"ok"}` (sans en-tête `Authorization`).
+
+Configurer la même URL dans CapRover pour l’app déployant `uvicorn` (voir §4.5), afin d’aligner le comportement avec `compose.yaml`.
 
 ---
 

@@ -94,6 +94,15 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
 
     app = FastAPI(title="Dataset Style — slice vertical", lifespan=lifespan)
 
+    @app.get("/health", include_in_schema=False)
+    async def http_health() -> dict[str, str]:
+        """Liveness HTTP pour compose et CapRover (sans auth ni requête base).
+
+        Returns:
+            Statut minimal attendu par les sondes HTTP.
+        """
+        return {"status": "ok"}
+
     @app.exception_handler(EnvelopeHttpError)
     async def _envelope_handler(_request: Request, exc: EnvelopeHttpError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content=exc.body)
