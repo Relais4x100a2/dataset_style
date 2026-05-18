@@ -91,6 +91,7 @@ def test_accounts_table_column_labels_cover_dataframe_keys() -> None:
     labels = super_admin_accounts_table_column_labels()
     expected_keys = (
         "user_id",
+        "nom_affichage",
         "email",
         "super_admin",
         "nb_projets",

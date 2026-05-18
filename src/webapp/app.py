@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -27,15 +28,20 @@ from src.api_errors import (
 from src.auth import persist_user_from_signin_ok, verify_invitation_only_contract
 from src.database import (
     STATUT_VALIDE,
+    SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX,
+    SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN,
     UserRecord,
     count_active_memberships,
     count_owned_projects,
+    count_users_for_admin,
     create_db_engine,
     create_project,
     delete_project_as_admin,
     get_user_email_display_name_by_id,
+    list_accounts_for_super_admin,
     list_projects_for_user,
     load_project_entries,
+    validate_super_admin_accounts_list_params,
 )
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
 from src.nlp_engine import filter_edition_entries_dataframe
@@ -650,6 +656,64 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             "status": "ok",
             "mailMode": outcome.mail_mode,
             "message": outcome.message_fr,
+        }
+
+    @app.get("/api/super-admin/accounts")
+    async def api_super_admin_accounts(
+        request: Request,
+        user: Annotated[UserRecord, Depends(webapp_deps.require_super_admin_app_user)],
+        page: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[
+            int,
+            Query(
+                ge=SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN,
+                le=SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX,
+            ),
+        ] = 25,
+    ) -> Any:
+        """Annuaire paginé des comptes actifs (issue-018)."""
+        eng = webapp_deps.get_engine(request)
+        total = count_users_for_admin(eng)
+        try:
+            p, s = validate_super_admin_accounts_list_params(
+                page=page, page_size=page_size, total_active_accounts=total
+            )
+        except ValueError as exc:
+            raise EnvelopeHttpError(
+                400,
+                {
+                    "error": {
+                        "code": "BAD_REQUEST",
+                        "title": "Paramètres invalides",
+                        "message": str(exc),
+                        "suggested_action": "Corrigez les paramètres « page » ou « page_size » puis réessayez.",
+                        "detail": None,
+                    }
+                },
+            ) from exc
+        rows = list_accounts_for_super_admin(eng, user.user_id, page=p, page_size=s)
+        total_pages = max(1, math.ceil(total / s)) if total else 1
+        accounts: list[dict[str, Any]] = []
+        for row in rows:
+            last_login = row.last_login_at.strip() if row.last_login_at else ""
+            accounts.append(
+                {
+                    "accountId": row.user_id,
+                    "email": row.email,
+                    "displayName": row.display_name,
+                    "isSuperAdmin": row.is_super_admin,
+                    "ownedProjects": row.project_count,
+                    "entriesTotal": row.entries_total,
+                    "entriesValidated": row.entries_validated,
+                    "lastLoginAt": last_login or None,
+                }
+            )
+        return {
+            "totalActiveAccounts": total,
+            "page": p,
+            "pageSize": s,
+            "totalPages": total_pages,
+            "accounts": accounts,
         }
 
     return app

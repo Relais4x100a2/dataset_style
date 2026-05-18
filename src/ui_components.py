@@ -50,6 +50,7 @@ from src.database import (
     replay_quarantined_operation,
     require_role,
     update_project_settings_as_admin,
+    validate_super_admin_accounts_list_params,
 )
 from src.empty_project_onboarding import (
     NO_PROJECT_CREATION_DISABLED_MESSAGE,
@@ -1256,6 +1257,10 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
     """Invitation, liste des comptes et actions courantes (issue-012, issue-029)."""
     st.markdown(f"## {SUPER_ADMIN_ACCOUNT_MANAGEMENT_HUB_TITLE}")
     st.markdown(f"### {SUPER_ADMIN_INVITE_SECTION_TITLE}")
+    dev_preview = st.session_state.pop("sa_invite_dev_preview", None)
+    if dev_preview:
+        st.warning("Mode dev : invitation créée — lien ci-dessous.")
+        st.code(dev_preview)
     with st.form("super_admin_invite_form"):
         invite_email = st.text_input(
             "E-mail du collaborateur à inviter",
@@ -1272,10 +1277,19 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
                 link=invite_link,
             )
             if delivery.mode == "smtp":
-                st.success("Invitation envoyée par email.")
+                schedule_post_rerun_flash(
+                    st.session_state,
+                    "Invitation envoyée par email.",
+                    channel="super_admin",
+                )
             else:
-                st.warning("Mode dev: partage le lien affiché au destinataire.")
-                st.code(delivery.preview)
+                st.session_state["sa_invite_dev_preview"] = delivery.preview
+                schedule_post_rerun_flash(
+                    st.session_state,
+                    "Mode dev : invitation créée (lien affiché sous la section invitation).",
+                    channel="super_admin",
+                )
+            st.rerun()
         except Exception as exc:  # noqa: BLE001
             _show_action_error("Invitation impossible", exc)
 
@@ -1296,17 +1310,26 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
         step=1,
         key="sa_page_number_input",
     )
-    offset = (int(page_idx) - 1) * int(page_size)
-    rows = list_accounts_for_super_admin(
-        engine,
-        user.user_id,
-        limit=int(page_size),
-        offset=int(offset),
-    )
+    try:
+        v_page, v_size = validate_super_admin_accounts_list_params(
+            page=int(page_idx),
+            page_size=int(page_size),
+            total_active_accounts=total_users,
+        )
+        rows = list_accounts_for_super_admin(
+            engine,
+            user.user_id,
+            page=v_page,
+            page_size=v_size,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        rows = []
     accounts_df = pd.DataFrame(
         [
             {
                 "user_id": row.user_id,
+                "nom_affichage": row.display_name,
                 "email": row.email,
                 "super_admin": row.is_super_admin,
                 "nb_projets": row.project_count,
