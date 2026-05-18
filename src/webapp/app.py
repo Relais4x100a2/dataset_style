@@ -1,4 +1,4 @@
-"""Application FastAPI — slice vertical issue-007 (auth, projets, entrées, export)."""
+"""Application FastAPI — slice vertical (issue-007) + shell curateur (issue-010)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.engine import Engine
 
 from src.api_errors import (
@@ -20,12 +20,22 @@ from src.api_errors import (
     log_resolved_api_error,
 )
 from src.auth import persist_user_from_signin_ok
-from src.database import create_db_engine, list_projects_for_user, load_project_entries
+from src.database import (
+    UserRecord,
+    create_db_engine,
+    create_project,
+    delete_project_as_admin,
+    list_projects_for_user,
+    load_project_entries,
+)
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
+from src.tab_layout import main_tab_labels
 from src.webapp import deps as webapp_deps
 from src.webapp import entry_mutations
 from src.webapp.errors import EnvelopeHttpError
+from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
+from src.webapp.workspace_payload import projects_list_response
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +81,29 @@ class EntryPatchBody(BaseModel):
     format: str | None = None
     public: str | None = None
     date: str | None = None
+
+
+class CreateProjectBody(BaseModel):
+    """Création d'un projet propriétaire (``database.create_project``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=500)
+    description: str = Field(default="", max_length=10_000)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _strip_description(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
 
 def _cors_origins() -> list[str]:
@@ -154,16 +187,53 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             try_revoke_access_token(token)
         return {"status": "signed_out"}
 
+    @app.get("/api/me")
+    async def api_me(
+        user: Annotated[UserRecord, Depends(webapp_deps.require_app_user)],
+    ) -> dict[str, Any]:
+        """Contexte utilisateur + ordre des onglets (``main_tab_labels`` / issue-010)."""
+        labels = main_tab_labels(include_super_admin=bool(user.is_super_admin))
+        return {
+            "user": {
+                "appUserId": user.user_id,
+                "email": user.email,
+                "displayName": user.display_name,
+                "isSuperAdmin": bool(user.is_super_admin),
+            },
+            "mainTabLabels": labels,
+        }
+
     @app.get("/api/projects")
     async def api_projects(
         request: Request,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        active_hint: Annotated[
+            str | None, Query(description="Préférence client projet actif")
+        ] = None,
     ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         projects = list_projects_for_user(eng, user_id)
-        return {
-            "projects": [{"id": p.project_id, "name": p.name, "role": p.role} for p in projects]
-        }
+        return projects_list_response(projects, active_hint)
+
+    @app.post("/api/projects")
+    async def api_create_project(
+        request: Request,
+        body: CreateProjectBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, str]:
+        eng = webapp_deps.get_engine(request)
+        pid = create_project(eng, user_id, body.name, body.description)
+        return {"id": pid, "status": "ok"}
+
+    @app.delete("/api/projects/{project_id}")
+    async def api_delete_project(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, str]:
+        eng = webapp_deps.get_engine(request)
+        delete_project_as_admin(eng, project_id, user_id)
+        return {"status": "ok"}
 
     @app.get("/api/projects/{project_id}/entries")
     async def api_list_entries(
@@ -249,232 +319,3 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
 
 
 app = create_slice_app()
-
-_INDEX_HTML = """<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dataset Style — slice vertical</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
-    label { display: block; margin-top: 0.75rem; }
-    input, textarea, select, button { width: 100%; max-width: 32rem; box-sizing: border-box; }
-    textarea { min-height: 6rem; }
-    .row { margin: 1rem 0; }
-    .err { color: #a40000; white-space: pre-wrap; }
-    .ok { color: #0b5; }
-    code { font-size: 0.85rem; }
-  </style>
-</head>
-<body>
-  <h1>Slice vertical (issue-007)</h1>
-  <p>Parcours minimal : connexion, projet propriétaire, édition entrée, export CSV/JSONL.</p>
-  <p>Streamlit reste sur le port <code>8501</code> ; cette coquille est servie sur le port du service <code>webapp</code>.</p>
-
-  <section id="auth">
-    <h2>Connexion</h2>
-    <label>Email <input type="email" id="email" autocomplete="username" /></label>
-    <label>Mot de passe <input type="password" id="password" autocomplete="current-password" /></label>
-    <div class="row"><button type="button" id="btnSignin">Se connecter</button></div>
-    <div class="row"><button type="button" id="btnSignout">Se déconnecter</button></div>
-    <p id="authMsg" class="err" aria-live="polite"></p>
-  </section>
-
-  <section id="workspace" hidden>
-    <h2>Projet</h2>
-    <label>Projet sélectionné
-      <select id="projectSel"></select>
-    </label>
-    <h2>Entrées</h2>
-    <p><button type="button" id="btnReloadEntries">Recharger les entrées</button></p>
-    <div id="entriesTable"></div>
-    <h3>Édition (id de fiche)</h3>
-    <label>id <input type="text" id="entryId" /></label>
-    <label>input <textarea id="fldInput"></textarea></label>
-    <label>output <textarea id="fldOutput"></textarea></label>
-    <div class="row"><button type="button" id="btnSave">Enregistrer</button></div>
-    <h3>Création rapide</h3>
-    <label>nouveau input <textarea id="newInput"></textarea></label>
-    <label>nouveau output <textarea id="newOutput"></textarea></label>
-    <div class="row"><button type="button" id="btnCreate">Créer une fiche</button></div>
-    <h3>Export (périmètre <code>export_utils</code>)</h3>
-    <label>Périmètre
-      <select id="exportScope">
-        <option value="validated_only">Validées seulement</option>
-        <option value="full_dataset">Tout le dataset</option>
-      </select>
-    </label>
-    <div class="row">
-      <button type="button" id="btnCsv">Télécharger CSV</button>
-      <button type="button" id="btnJsonl">Télécharger JSONL (LFM2)</button>
-    </div>
-  </section>
-
-  <script>
-    const LS = "slice_vertical_access_token";
-    const authMsg = document.getElementById("authMsg");
-    const workspace = document.getElementById("workspace");
-
-    function token() { return localStorage.getItem(LS) || ""; }
-    function setToken(t) {
-      if (t) localStorage.setItem(LS, t); else localStorage.removeItem(LS);
-      workspace.hidden = !t;
-    }
-    setToken(token());
-
-    function showErr(obj) {
-      if (obj && obj.error) {
-        const e = obj.error;
-        authMsg.textContent = (e.title || "") + "\\n" + (e.message || "") + (e.code ? "\\ncode: " + e.code : "");
-        authMsg.className = "err";
-      } else {
-        authMsg.textContent = JSON.stringify(obj);
-        authMsg.className = "err";
-      }
-    }
-    function showOk(msg) {
-      authMsg.textContent = msg || "OK";
-      authMsg.className = "ok";
-    }
-
-    async function api(path, opts = {}) {
-      const headers = Object.assign({}, opts.headers || {});
-      if (token()) headers["Authorization"] = "Bearer " + token();
-      const r = await fetch(path, Object.assign({}, opts, { headers }));
-      const ct = r.headers.get("content-type") || "";
-      const body = ct.includes("application/json") ? await r.json() : await r.text();
-      if (!r.ok) throw body;
-      return body;
-    }
-
-    document.getElementById("btnSignin").onclick = async () => {
-      authMsg.textContent = "";
-      const email = document.getElementById("email").value.trim();
-      const password = document.getElementById("password").value;
-      try {
-        const out = await api("/api/auth/signin", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
-        });
-        setToken(out.accessToken || "");
-        showOk("Connecté.");
-        await loadProjects();
-      } catch (e) { showErr(e); }
-    };
-
-    document.getElementById("btnSignout").onclick = async () => {
-      try {
-        const t = token();
-        await api("/api/auth/signout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + t },
-          body: JSON.stringify({ access_token: t }),
-        });
-      } catch (_) { /* ignore */ }
-      setToken("");
-      showOk("Déconnecté.");
-    };
-
-    async function loadProjects() {
-      const data = await api("/api/projects");
-      const sel = document.getElementById("projectSel");
-      sel.innerHTML = "";
-      for (const p of data.projects) {
-        const o = document.createElement("option");
-        o.value = p.id; o.textContent = p.name + " (" + p.role + ")";
-        sel.appendChild(o);
-      }
-      await loadEntries();
-    }
-
-    document.getElementById("projectSel").onchange = () => loadEntries();
-    document.getElementById("btnReloadEntries").onclick = () => loadEntries();
-
-    async function loadEntries() {
-      const pid = document.getElementById("projectSel").value;
-      if (!pid) return;
-      const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries");
-      const div = document.getElementById("entriesTable");
-      if (!data.entries.length) { div.textContent = "(aucune fiche)"; return; }
-      const t = document.createElement("table");
-      t.border = "1";
-      const keys = Object.keys(data.entries[0]).filter(k => !k.startsWith("_"));
-      const trh = document.createElement("tr");
-      for (const k of keys) { const th = document.createElement("th"); th.textContent = k; trh.appendChild(th); }
-      t.appendChild(trh);
-      for (const row of data.entries) {
-        const tr = document.createElement("tr");
-        for (const k of keys) { const td = document.createElement("td"); td.textContent = row[k]; tr.appendChild(td); }
-        t.appendChild(tr);
-      }
-      div.innerHTML = "";
-      div.appendChild(t);
-    }
-
-    document.getElementById("btnSave").onclick = async () => {
-      const pid = document.getElementById("projectSel").value;
-      const eid = document.getElementById("entryId").value.trim();
-      const input = document.getElementById("fldInput").value;
-      const output = document.getElementById("fldOutput").value;
-      try {
-        await api("/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid), {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input, output }),
-        });
-        showOk("Fiche enregistrée.");
-        await loadEntries();
-      } catch (e) { showErr(e); }
-    };
-
-    document.getElementById("btnCreate").onclick = async () => {
-      const pid = document.getElementById("projectSel").value;
-      const input = document.getElementById("newInput").value;
-      const output = document.getElementById("newOutput").value;
-      try {
-        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/entries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input, output }),
-        });
-        document.getElementById("entryId").value = out.id;
-        showOk("Fiche créée : " + out.id);
-        await loadEntries();
-      } catch (e) { showErr(e); }
-    };
-
-    function scopeParam() {
-      return "?scope=" + encodeURIComponent(document.getElementById("exportScope").value);
-    }
-
-    document.getElementById("btnCsv").onclick = async () => {
-      const pid = document.getElementById("projectSel").value;
-      const r = await fetch("/api/projects/" + encodeURIComponent(pid) + "/export.csv" + scopeParam(), {
-        headers: { "Authorization": "Bearer " + token() },
-      });
-      if (!r.ok) { showErr(await r.json()); return; }
-      const blob = await r.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "export.csv";
-      a.click();
-    };
-
-    document.getElementById("btnJsonl").onclick = async () => {
-      const pid = document.getElementById("projectSel").value;
-      const r = await fetch("/api/projects/" + encodeURIComponent(pid) + "/export.jsonl" + scopeParam(), {
-        headers: { "Authorization": "Bearer " + token() },
-      });
-      if (!r.ok) { showErr(await r.json()); return; }
-      const blob = await r.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "export.jsonl";
-      a.click();
-    };
-  </script>
-</body>
-</html>
-"""

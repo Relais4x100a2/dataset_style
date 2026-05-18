@@ -70,6 +70,8 @@ Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par 
 | EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création minimale) |
 | EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` |
 
+**Issue-010 (coquille curateur / webapp)** : navigation par onglets alignée sur `main_tab_labels` (`GET /api/me`), persistance du projet actif côté client (`sessionStorage` + `active_hint` sur `GET /api/projects`), création et suppression projet via `POST` / `DELETE /api/projects` (primitives `database.create_project`, `delete_project_as_admin`). Voir `src/webapp/index_template.py`, `src/webapp/workspace_payload.py`.
+
 Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
 ---
@@ -80,10 +82,10 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 
 | ID flux | issue-010 | issue-011 | issue-012 | issue-013 | issue-014 | issue-015 | issue-016 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SB-CTX | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| PRJ-VIEW | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| PRJ-CREATE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| PRJ-DELETE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| SB-CTX | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| PRJ-VIEW | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| PRJ-CREATE | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| PRJ-DELETE | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SET-READ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SET-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DIM-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
