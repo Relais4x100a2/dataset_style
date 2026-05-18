@@ -22,6 +22,7 @@ from src.nlp_engine import (
     corriger_texte_fr,
     curator_advices_after_save,
     languagetool_check_url,
+    languagetool_fr_corrected_with_matches,
     normalize_signature,
     palier_details,
     post_save_stylometric_session_payload,
@@ -303,3 +304,38 @@ def test_corriger_texte_fr_invalid_json_raises() -> None:
     with patch("src.nlp_engine.requests.post", return_value=mock_resp):
         with pytest.raises(ValueError, match="invalide"):
             corriger_texte_fr("test")
+
+
+def test_languagetool_fr_corrected_with_matches_empty() -> None:
+    """Texte vide → pas d'appel réseau, liste de suggestions vide."""
+    with patch("src.nlp_engine.requests.post") as post_m:
+        corrected, matches = languagetool_fr_corrected_with_matches("  ")
+    assert corrected == ""
+    assert matches == []
+    post_m.assert_not_called()
+
+
+def test_languagetool_fr_corrected_with_matches_preserves_accents() -> None:
+    """Le texte corrigé et les suggestions conservent les caractères accentués FR."""
+    fake_json = {
+        "matches": [
+            {
+                "offset": 0,
+                "length": 4,
+                "message": "Accent manquant",
+                "rule": {"id": "FRENCH_ACCENTS"},
+                "replacements": [{"value": "très"}],
+            },
+        ]
+    }
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = fake_json
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("src.nlp_engine.requests.post", return_value=mock_resp):
+        corrected, matches = languagetool_fr_corrected_with_matches("tres bon café")
+    assert corrected == "très bon café"
+    assert "é" in corrected
+    assert len(matches) == 1
+    assert matches[0]["offset"] == 0
+    assert matches[0]["replacements"][0]["value"] == "très"

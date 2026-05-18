@@ -91,9 +91,9 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-NEW-READ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-NEW-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| ENT-LLM | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| ENT-LLM | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
 | EDI-SAVE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| EDI-LT | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| EDI-LT | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
 | DASH-METRICS | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DASH-STYLO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | ACC-INFO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |

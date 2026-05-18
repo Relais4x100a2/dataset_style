@@ -53,6 +53,85 @@ _POS_FR: dict[str, str] = {
 }
 
 
+def _languagetool_post_check_json(
+    text: str, languagetool_base_url: str | None = None
+) -> dict[str, Any]:
+    """Appelle l'API ``/v2/check`` et retourne le JSON parsé.
+
+    Raises:
+        requests.RequestException: En cas de timeout ou d'erreur réseau.
+        ValueError: Si la réponse de l'API est invalide.
+    """
+    try:
+        resp = requests.post(
+            languagetool_check_url(languagetool_base_url),
+            data={"text": text, "language": "fr"},
+            timeout=LANGUAGETOOL_TIMEOUT,
+        )
+        resp.raise_for_status()
+    except requests.Timeout:
+        logger.warning("LanguageTool API timeout")
+        raise
+    except requests.RequestException as e:
+        logger.warning("LanguageTool API error: %s", e)
+        raise
+
+    try:
+        return resp.json()
+    except json.JSONDecodeError as e:
+        logger.warning("LanguageTool API invalid JSON: %s", e)
+        raise ValueError("Réponse API invalide") from e
+
+
+def _apply_languagetool_matches(text: str, matches: Sequence[Any]) -> str:
+    """Applique les remplacements LanguageTool du dernier offset au premier."""
+    if not matches:
+        return text
+    result = text
+    for match in sorted(matches, key=lambda m: int(m["offset"]), reverse=True):
+        offset = int(match["offset"])
+        length = int(match["length"])
+        replacements = match.get("replacements", [])
+        if not replacements:
+            continue
+        replacement = replacements[0].get("value")
+        if replacement is None:
+            continue
+        result = result[:offset] + str(replacement) + result[offset + length :]
+    return result
+
+
+def _languagetool_match_to_suggestion(match: Any) -> dict[str, Any] | None:
+    """Normalise une entrée ``matches`` pour exposition au client (curateur)."""
+    if not isinstance(match, dict):
+        return None
+    try:
+        offset = int(match["offset"])
+        length = int(match["length"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    rule = match.get("rule")
+    rule_id = ""
+    if isinstance(rule, dict):
+        rule_id = str(rule.get("id") or "")
+    raw_repl = match.get("replacements") or []
+    replacements: list[dict[str, str]] = []
+    if isinstance(raw_repl, list):
+        for item in raw_repl[:8]:
+            if isinstance(item, dict) and item.get("value") is not None:
+                replacements.append({"value": str(item["value"])})
+    return {
+        "offset": offset,
+        "length": length,
+        "message": str(match.get("message") or ""),
+        "ruleId": rule_id,
+        "context": str(match.get("context", {}).get("text", ""))
+        if isinstance(match.get("context"), dict)
+        else "",
+        "replacements": replacements,
+    }
+
+
 def corriger_texte_fr(text: str, languagetool_base_url: str | None = None) -> str:
     """
     Corrige l'orthographe et la grammaire du texte en français via l'API
@@ -72,44 +151,47 @@ def corriger_texte_fr(text: str, languagetool_base_url: str | None = None) -> st
     if not text or not text.strip():
         return ""
 
-    try:
-        resp = requests.post(
-            languagetool_check_url(languagetool_base_url),
-            data={"text": text, "language": "fr"},
-            timeout=LANGUAGETOOL_TIMEOUT,
-        )
-        resp.raise_for_status()
-    except requests.Timeout:
-        logger.warning("LanguageTool API timeout")
-        raise
-    except requests.RequestException as e:
-        logger.warning("LanguageTool API error: %s", e)
-        raise
-
-    try:
-        data = resp.json()
-    except json.JSONDecodeError as e:
-        logger.warning("LanguageTool API invalid JSON: %s", e)
-        raise ValueError("Réponse API invalide") from e
-
+    data = _languagetool_post_check_json(text, languagetool_base_url)
     matches = data.get("matches", [])
-    if not matches:
-        return text
+    return _apply_languagetool_matches(text, matches)
 
-    # Appliquer les corrections de la fin vers le début pour ne pas décaler les offsets
-    result = text
-    for match in sorted(matches, key=lambda m: m["offset"], reverse=True):
-        offset = match["offset"]
-        length = match["length"]
-        replacements = match.get("replacements", [])
-        if not replacements:
-            continue
-        replacement = replacements[0].get("value")
-        if replacement is None:
-            continue
-        result = result[:offset] + replacement + result[offset + length :]
 
-    return result
+def languagetool_fr_corrected_with_matches(
+    text: str, languagetool_base_url: str | None = None
+) -> tuple[str, list[dict[str, Any]]]:
+    """Texte corrigé + suggestions LanguageTool (ordre d'offset croissant).
+
+    Une seule requête HTTP est effectuée. Même logique d'application que
+    ``corriger_texte_fr`` pour le texte corrigé.
+
+    Args:
+        text: Texte à analyser.
+        languagetool_base_url: URL de base du service (cf. ``languagetool_check_url``).
+
+    Returns:
+        Tuple ``(texte_corrigé, suggestions)`` ; texte vide en entrée → ``("", [])``.
+
+    Raises:
+        requests.RequestException: En cas de timeout ou d'erreur réseau.
+        ValueError: Si la réponse de l'API est invalide.
+    """
+    if not text or not text.strip():
+        return "", []
+
+    data = _languagetool_post_check_json(text, languagetool_base_url)
+    raw_matches = data.get("matches", [])
+    if not isinstance(raw_matches, list):
+        raw_matches = []
+    corrected = _apply_languagetool_matches(text, raw_matches)
+    suggestions: list[dict[str, Any]] = []
+    for m in sorted(
+        raw_matches,
+        key=lambda x: int(x.get("offset", 0)) if isinstance(x, dict) else 0,
+    ):
+        sug = _languagetool_match_to_suggestion(m)
+        if sug is not None:
+            suggestions.append(sug)
+    return corrected, suggestions
 
 
 def get_linguistic_insights(
