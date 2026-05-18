@@ -19,6 +19,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 from src.api_errors import (
+    ExportPayloadTooLargeError,
     TenantResourceOpaqueDenial,
     error_envelope_for_client,
     log_resolved_api_error,
@@ -172,6 +173,31 @@ class CuratorLanguageToolBody(BaseModel):
 def _cors_origins() -> list[str]:
     raw = (os.environ.get("WEBAPP_CORS_ORIGINS") or "http://localhost:8080").strip()
     return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _webapp_export_max_rows() -> int | None:
+    """Limite optionnelle (nombre de fiches exportables) via ``WEBAPP_EXPORT_MAX_ROWS``."""
+    raw = (os.environ.get("WEBAPP_EXPORT_MAX_ROWS") or "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        logger.warning("WEBAPP_EXPORT_MAX_ROWS ignoré (entier attendu): %s", raw)
+        return None
+    if n <= 0:
+        return None
+    return n
+
+
+def _enforce_export_row_cap(export_df: pd.DataFrame) -> None:
+    """Lève :exc:`ExportPayloadTooLargeError` si un plafond métier est configuré et dépassé."""
+    cap = _webapp_export_max_rows()
+    if cap is None:
+        return
+    n = len(export_df.index)
+    if n > cap:
+        raise ExportPayloadTooLargeError(row_count=n, max_rows=cap)
 
 
 def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
@@ -431,6 +457,13 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
         export_df = dataframe_for_export(df, scope)
+        try:
+            _enforce_export_row_cap(export_df)
+        except ExportPayloadTooLargeError as exc:
+            return JSONResponse(
+                status_code=413,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
         cols = [c for c in export_df.columns if not str(c).startswith("_")]
         text = export_df[cols].to_csv(index=False)
         return PlainTextResponse(
@@ -449,7 +482,20 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     ) -> Response:
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
-        payload = convert_to_jsonl(df, format=export_format, include_stylometry=False, scope=scope)
+        export_df = dataframe_for_export(df, scope)
+        try:
+            _enforce_export_row_cap(export_df)
+        except ExportPayloadTooLargeError as exc:
+            return JSONResponse(
+                status_code=413,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        payload = convert_to_jsonl(
+            df,
+            format=export_format,
+            include_stylometry=True,
+            scope=scope,
+        )
         return PlainTextResponse(
             content=payload,
             media_type="application/x-ndjson; charset=utf-8",

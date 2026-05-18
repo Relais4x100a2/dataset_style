@@ -61,14 +61,14 @@ Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaqu
 
 ## Slice vertical (issue-007 / GitHub #129)
 
-Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par défaut avec `make dev` / compose) : connexion invitation-only via SuperTokens, liste des projets **propriétaire** (`list_projects_for_user`), lecture/édition/création d’entrées via `load_project_entries` / `update_project_entries`, export **CSV** et **JSONL** via `dataframe_for_export` + `convert_to_jsonl` (mêmes périmètres `validated_only` / `full_dataset` que `export_utils`). Les erreurs JSON suivent `src/api_errors.py`. **Streamlit** reste sur **8501** en coexistence.
+Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par défaut avec `make dev` / compose) : connexion invitation-only via SuperTokens, liste des projets **propriétaire** (`list_projects_for_user`), lecture/édition/création d’entrées via `load_project_entries` / `update_project_entries`, export **CSV** et **JSONL** via `dataframe_for_export` + `convert_to_jsonl` (mêmes périmètres `validated_only` / `full_dataset` que `export_utils`, **même** `include_stylometry=True` que Streamlit, paramètre query `format` pour JSONL). Plafond optionnel d’export : variable **`WEBAPP_EXPORT_MAX_ROWS`** (réponse `413` + code `EXPORT_PAYLOAD_TOO_LARGE`). Onboarding projet vide / sans projet : textes injectés depuis `empty_project_onboarding` sur la page HTML du slice. Les erreurs JSON suivent `src/api_errors.py`. **Streamlit** reste sur **8501** en coexistence.
 
-| ID flux | Slice vertical (issue-007) |
+| ID flux | Slice vertical (issue-007 / issue-015) |
 | --- | --- |
 | SB-CTX | OK — jeton vérifié (`/recipe/session/verify`) + résolution `users.su_user_id` |
 | PRJ-VIEW | OK — `GET /api/projects` |
-| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès ; filtres édition optionnels sur `GET .../entries` (`edition_*`, alignés `edition_filters_service` + `filter_edition_entries_dataframe`) |
-| EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` |
+| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès ; filtres édition optionnels sur `GET .../entries` (`edition_*`) |
+| EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` (plafond `WEBAPP_EXPORT_MAX_ROWS`, JSONL stylométrie issue-015) |
 
 **Issue-010 (coquille curateur / webapp)** : navigation par onglets alignée sur `main_tab_labels` (`GET /api/me`), persistance du projet actif côté client (`sessionStorage` + `active_hint` sur `GET /api/projects`), création et suppression projet via `POST` / `DELETE /api/projects` (primitives `database.create_project`, `delete_project_as_admin`). Voir `src/webapp/index_template.py`, `src/webapp/workspace_payload.py`.
 
@@ -89,8 +89,8 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | SET-READ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SET-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DIM-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| EXP-SCOPE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| EXP-SCOPE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
+| EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
 | ENT-NEW-READ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-NEW-WRITE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-LLM | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
@@ -104,6 +104,8 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | SA-DETACH | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SA-DELETE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SA-REPLAY | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+
+**issue-015 (export slice + onboarding)** : le récap qualité pré-export Streamlit (`export_quality_recap_service.build_export_quality_recap`) n’est pas porté par le slice HTTP — **écart documenté** ; la parité « données exportées » repose sur `dataframe_for_export` + `convert_to_jsonl` uniquement.
 
 ---
 

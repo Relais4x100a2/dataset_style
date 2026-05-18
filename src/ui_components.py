@@ -59,6 +59,7 @@ from src.empty_project_onboarding import (
     SIDEBAR_CONTEXT_HINT_FR,
     STYLOMETRIC_VALUE_SENTENCE_FR,
     TAB_PROJECTS_ACTIONS_CREATE_FORM_KEY_PREFIX,
+    empty_dataset_curator_guidance_markdown_fr,
     invitation_account_link_email_intro_fr,
     is_self_service_project_creation_allowed,
     onboarding_steps_when_creation_allowed,
@@ -1420,6 +1421,7 @@ def render_tab_settings_export(
     st.markdown("### Export")
     if df.empty:
         st.info("Aucune donnée à exporter.")
+        st.markdown(empty_dataset_curator_guidance_markdown_fr())
         return
 
     _scope_labels: dict[ExportScope, str] = {
