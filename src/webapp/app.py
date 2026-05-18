@@ -6,9 +6,10 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import pandas as pd
+import requests
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,8 +37,8 @@ from src.services.edition_filters_service import build_edition_score_filter_spec
 from src.services.project_dataframe_view import prepare_for_edition_tab
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.tab_layout import main_tab_labels
+from src.webapp import curator_ai, entry_mutations
 from src.webapp import deps as webapp_deps
-from src.webapp import entry_mutations
 from src.webapp.errors import EnvelopeHttpError
 from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
 from src.webapp.workspace_payload import projects_list_response
@@ -137,6 +138,29 @@ class CreateProjectBody(BaseModel):
         if isinstance(value, str):
             return value.strip()
         return value
+
+
+class CuratorLlmBody(BaseModel):
+    """Paramètres génération IA (alignés sur l'onglet Nouvelle entrée Streamlit)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["draft_to_output", "output_to_draft"]
+    input: str = ""
+    output: str = ""
+    type: str = ""
+    structure: str = ""
+    ton: str = ""
+    format: str = ""
+    public: str = ""
+
+
+class CuratorLanguageToolBody(BaseModel):
+    """Texte output (ou extrait) à contrôler via LanguageTool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = ""
 
 
 def _cors_origins() -> list[str]:
@@ -402,6 +426,59 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             media_type="application/x-ndjson; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="export-{project_id}.jsonl"'},
         )
+
+    @app.get("/api/projects/{project_id}/curator/dimensions")
+    async def api_curator_dimensions(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Dimensions actives (profil projet) pour les aides curateur."""
+        eng = webapp_deps.get_engine(request)
+        return curator_ai.build_curator_dimensions_payload(eng, project_id, user_id)
+
+    @app.post("/api/projects/{project_id}/curator/llm-generate")
+    async def api_curator_llm_generate(
+        request: Request,
+        project_id: str,
+        body: CuratorLlmBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Génération assistée (serveur : clé API et timeouts projet)."""
+        eng = webapp_deps.get_engine(request)
+        return curator_ai.run_curator_llm_generate(
+            eng,
+            project_id,
+            user_id,
+            mode=body.mode,
+            input_text=body.input,
+            output_text=body.output,
+            type_=body.type,
+            structure=body.structure,
+            ton=body.ton,
+            format_=body.format,
+            public=body.public,
+        )
+
+    @app.post("/api/projects/{project_id}/curator/languagetool-check")
+    async def api_curator_languagetool_check(
+        request: Request,
+        project_id: str,
+        body: CuratorLanguageToolBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Contrôle LanguageTool : texte corrigé + liste de suggestions."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            return curator_ai.run_curator_languagetool_check(
+                eng, project_id, user_id, text=body.text
+            )
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("curator_languagetool_check failed: %s", exc, exc_info=True)
+            raise EnvelopeHttpError(
+                503,
+                curator_ai.curator_languagetool_unavailable_envelope(),
+            ) from exc
 
     return app
 
