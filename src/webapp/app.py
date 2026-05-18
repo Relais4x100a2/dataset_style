@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Body, Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict
@@ -20,7 +20,14 @@ from src.api_errors import (
     log_resolved_api_error,
 )
 from src.auth import persist_user_from_signin_ok
-from src.database import create_db_engine, list_projects_for_user, load_project_entries
+from src.database import (
+    count_active_memberships,
+    count_owned_projects,
+    create_db_engine,
+    get_user_email_display_name_by_id,
+    list_projects_for_user,
+    load_project_entries,
+)
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.webapp import deps as webapp_deps
@@ -45,6 +52,7 @@ class SignoutBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     access_token: str | None = None
+    redirect_after: str | None = None
 
 
 class NewEntryBody(BaseModel):
@@ -76,6 +84,25 @@ class EntryPatchBody(BaseModel):
 def _cors_origins() -> list[str]:
     raw = (os.environ.get("WEBAPP_CORS_ORIGINS") or "http://localhost:8080").strip()
     return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _signout_redirect_allowlist() -> list[str]:
+    """Chemins ou URLs autorisés après déconnexion (``WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST``)."""
+    raw = (os.environ.get("WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST") or "/").strip()
+    entries = [p.strip() for p in raw.split(",") if p.strip()]
+    return entries if entries else ["/"]
+
+
+def approved_post_signout_redirect(requested: str | None) -> str:
+    """Retourne une cible allow-listée ; refuse les redirections non listées ou avec schéma arbitraire."""
+    allow = _signout_redirect_allowlist()
+    default = allow[0]
+    if not requested or not requested.strip():
+        return default
+    candidate = requested.strip()
+    if candidate.startswith("//") or "://" in candidate:
+        return default
+    return candidate if candidate in allow else default
 
 
 def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
@@ -144,7 +171,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
 
     @app.post("/api/auth/signout")
     async def api_signout(
-        body: SignoutBody | None = None,
+        body: Annotated[SignoutBody | None, Body()] = None,
         authorization: Annotated[str | None, Header(alias="Authorization")] = None,
     ) -> dict[str, str]:
         token = (body.access_token if body and body.access_token else None) or ""
@@ -152,7 +179,29 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             token = authorization.removeprefix("Bearer ").strip()
         if token:
             try_revoke_access_token(token)
-        return {"status": "signed_out"}
+        redirect = approved_post_signout_redirect(body.redirect_after if body else None)
+        return {"status": "signed_out", "redirect": redirect}
+
+    @app.get("/api/account")
+    async def api_account(
+        request: Request,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Profil curateur whiteliste (issue-016) — pas de champs super-admin."""
+        eng = webapp_deps.get_engine(request)
+        row = get_user_email_display_name_by_id(eng, user_id)
+        if row is None:
+            raise TenantResourceOpaqueDenial()
+        email, display_name = row
+        return {
+            "appUserId": user_id,
+            "email": email,
+            "displayName": display_name,
+            "counts": {
+                "ownedProjects": count_owned_projects(eng, user_id),
+                "activeMemberships": count_active_memberships(eng, user_id),
+            },
+        }
 
     @app.get("/api/projects")
     async def api_projects(
@@ -265,11 +314,16 @@ _INDEX_HTML = """<!DOCTYPE html>
     .err { color: #a40000; white-space: pre-wrap; }
     .ok { color: #0b5; }
     code { font-size: 0.85rem; }
+    #shellNav { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
+    #shellNav button { width: auto; max-width: none; }
+    #shellNav button.tab-active { font-weight: 700; text-decoration: underline; }
+    .account-dl dt { font-weight: 600; margin-top: 0.5rem; }
+    .account-dl dd { margin: 0.15rem 0 0 0; }
   </style>
 </head>
 <body>
-  <h1>Slice vertical (issue-007)</h1>
-  <p>Parcours minimal : connexion, projet propriétaire, édition entrée, export CSV/JSONL.</p>
+  <h1>Coquille curateur (issue-010 / slice vertical)</h1>
+  <p>Parcours minimal : connexion, navigation shell, projet, édition, export ; <strong>Mon compte</strong> (issue-016).</p>
   <p>Streamlit reste sur le port <code>8501</code> ; cette coquille est servie sur le port du service <code>webapp</code>.</p>
 
   <section id="auth">
@@ -277,11 +331,16 @@ _INDEX_HTML = """<!DOCTYPE html>
     <label>Email <input type="email" id="email" autocomplete="username" /></label>
     <label>Mot de passe <input type="password" id="password" autocomplete="current-password" /></label>
     <div class="row"><button type="button" id="btnSignin">Se connecter</button></div>
-    <div class="row"><button type="button" id="btnSignout">Se déconnecter</button></div>
     <p id="authMsg" class="err" aria-live="polite"></p>
   </section>
 
-  <section id="workspace" hidden>
+  <div id="shellLoggedIn" hidden>
+    <nav id="shellNav" aria-label="Navigation principale">
+      <button type="button" id="tabWorkspace" class="tab-active">Espace de travail</button>
+      <button type="button" id="tabAccount">Mon compte</button>
+    </nav>
+
+    <section id="panelWorkspace">
     <h2>Projet</h2>
     <label>Projet sélectionné
       <select id="projectSel"></select>
@@ -309,17 +368,30 @@ _INDEX_HTML = """<!DOCTYPE html>
       <button type="button" id="btnCsv">Télécharger CSV</button>
       <button type="button" id="btnJsonl">Télécharger JSONL (LFM2)</button>
     </div>
-  </section>
+    </section>
+
+    <section id="panelAccount" hidden>
+      <h2>Mon compte</h2>
+      <p class="row">Informations visibles côté curateur (pas d’indicateurs d’administration).</p>
+      <div id="accountDetail" class="account-dl"></div>
+      <p id="accountLoadErr" class="err" aria-live="polite"></p>
+      <div class="row"><button type="button" id="btnSignout">Se déconnecter</button></div>
+    </section>
+  </div>
 
   <script>
     const LS = "slice_vertical_access_token";
     const authMsg = document.getElementById("authMsg");
-    const workspace = document.getElementById("workspace");
+    const shellLoggedIn = document.getElementById("shellLoggedIn");
+    const panelWorkspace = document.getElementById("panelWorkspace");
+    const panelAccount = document.getElementById("panelAccount");
+    const tabWorkspace = document.getElementById("tabWorkspace");
+    const tabAccount = document.getElementById("tabAccount");
 
     function token() { return localStorage.getItem(LS) || ""; }
     function setToken(t) {
       if (t) localStorage.setItem(LS, t); else localStorage.removeItem(LS);
-      workspace.hidden = !t;
+      shellLoggedIn.hidden = !t;
     }
     setToken(token());
 
@@ -348,6 +420,41 @@ _INDEX_HTML = """<!DOCTYPE html>
       return body;
     }
 
+    function showShellTab(which) {
+      const isWs = which === "workspace";
+      panelWorkspace.hidden = !isWs;
+      panelAccount.hidden = isWs;
+      tabWorkspace.classList.toggle("tab-active", isWs);
+      tabAccount.classList.toggle("tab-active", !isWs);
+      if (!isWs) loadAccountPanel();
+    }
+    tabWorkspace.onclick = () => showShellTab("workspace");
+    tabAccount.onclick = () => showShellTab("account");
+
+    async function loadAccountPanel() {
+      const errEl = document.getElementById("accountLoadErr");
+      const detail = document.getElementById("accountDetail");
+      errEl.textContent = "";
+      try {
+        const a = await api("/api/account");
+        detail.innerHTML =
+          "<dl>"
+          + "<dt>Identifiant applicatif</dt><dd><code>" + escapeHtml(a.appUserId) + "</code></dd>"
+          + "<dt>Email</dt><dd>" + escapeHtml(a.email) + "</dd>"
+          + "<dt>Nom affiché</dt><dd>" + escapeHtml(a.displayName) + "</dd>"
+          + "<dt>Projets possédés</dt><dd>" + a.counts.ownedProjects + "</dd>"
+          + "<dt>Memberships actives</dt><dd>" + a.counts.activeMemberships + "</dd>"
+          + "</dl>";
+      } catch (e) {
+        detail.innerHTML = "";
+        if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
+        else errEl.textContent = "Impossible de charger le profil.";
+      }
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;");
+    }
+
     document.getElementById("btnSignin").onclick = async () => {
       authMsg.textContent = "";
       const email = document.getElementById("email").value.trim();
@@ -360,22 +467,26 @@ _INDEX_HTML = """<!DOCTYPE html>
         });
         setToken(out.accessToken || "");
         showOk("Connecté.");
+        showShellTab("workspace");
         await loadProjects();
       } catch (e) { showErr(e); }
     };
 
-    document.getElementById("btnSignout").onclick = async () => {
+    async function performSignout() {
+      const t = token();
+      let target = "/";
       try {
-        const t = token();
-        await api("/api/auth/signout", {
+        const out = await api("/api/auth/signout", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + t },
-          body: JSON.stringify({ access_token: t }),
+          body: JSON.stringify({ access_token: t, redirect_after: "/" }),
         });
-      } catch (_) { /* ignore */ }
+        if (out && typeof out.redirect === "string" && out.redirect) target = out.redirect;
+      } catch (_) { /* jeton déjà invalide : on purge quand même */ }
       setToken("");
-      showOk("Déconnecté.");
-    };
+      window.location.assign(target);
+    }
+    document.getElementById("btnSignout").onclick = () => performSignout();
 
     async function loadProjects() {
       const data = await api("/api/projects");

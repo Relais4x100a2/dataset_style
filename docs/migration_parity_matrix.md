@@ -74,6 +74,17 @@ Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
 ---
 
+## Mon compte curateur (issue-016 / GitHub #138)
+
+Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `displayName`, `counts.ownedProjects`, `counts.activeMemberships`) ; `POST /api/auth/signout` renvoie `redirect` allow-listé (`WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST`, défaut `/`) ; coquille HTML : navigation shell + onglet **Mon compte** (issue-010).
+
+| ID flux | Slice (issue-016) |
+| --- | --- |
+| ACC-INFO | OK — `GET /api/account` + affichage shell |
+| ACC-DEL | Écart documenté — suppression compte (saga) hors scope du slice ; reste Streamlit |
+
+---
+
 ## Grille statut sprint backlog (issues issue-010 à issue-016)
 
 Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (pas le numéro GitHub — voir règle de synchronisation backlog / GitHub dans la doc projet).
@@ -96,8 +107,8 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | EDI-LT | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DASH-METRICS | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DASH-STYLO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| ACC-INFO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| ACC-DEL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| ACC-INFO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK |
+| ACC-DEL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | Écart documenté |
 | SA-LIST | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SA-DETACH | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SA-DELETE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |

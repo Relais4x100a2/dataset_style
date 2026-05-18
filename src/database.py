@@ -452,6 +452,32 @@ def get_user_record_by_su_user_id(engine: Engine, su_user_id: str) -> UserRecord
     )
 
 
+def get_user_email_display_name_by_id(engine: Engine, user_id: str) -> tuple[str, str] | None:
+    """Retourne ``(email, display_name)`` pour un compte actif, ou ``None`` si inconnu."""
+    if not user_id.strip():
+        return None
+    ensure_schema(engine)
+    with engine.begin() as conn:
+        row = (
+            conn.execute(
+                text(
+                    """
+                    SELECT email, display_name
+                    FROM users
+                    WHERE id = :uid AND disabled_at IS NULL
+                    LIMIT 1;
+                    """
+                ),
+                {"uid": user_id.strip()},
+            )
+            .mappings()
+            .first()
+        )
+    if not row:
+        return None
+    return (str(row["email"]), str(row["display_name"]))
+
+
 def require_super_admin(engine: Engine, actor_user_id: str) -> None:
     """Vérifie qu'un utilisateur est super admin global."""
     if not is_user_super_admin(engine, actor_user_id):
