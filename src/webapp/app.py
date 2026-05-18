@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal
 
 import pandas as pd
 import requests
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Body, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
@@ -28,9 +28,12 @@ from src.auth import persist_user_from_signin_ok
 from src.database import (
     STATUT_VALIDE,
     UserRecord,
+    count_active_memberships,
+    count_owned_projects,
     create_db_engine,
     create_project,
     delete_project_as_admin,
+    get_user_email_display_name_by_id,
     list_projects_for_user,
     load_project_entries,
 )
@@ -96,6 +99,7 @@ class SignoutBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     access_token: str | None = None
+    redirect_after: str | None = None
 
 
 class NewEntryBody(BaseModel):
@@ -200,6 +204,25 @@ def _enforce_export_row_cap(export_df: pd.DataFrame) -> None:
         raise ExportPayloadTooLargeError(row_count=n, max_rows=cap)
 
 
+def _signout_redirect_allowlist() -> list[str]:
+    """Chemins ou URLs autorisés après déconnexion (``WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST``)."""
+    raw = (os.environ.get("WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST") or "/").strip()
+    entries = [p.strip() for p in raw.split(",") if p.strip()]
+    return entries if entries else ["/"]
+
+
+def approved_post_signout_redirect(requested: str | None) -> str:
+    """Retourne une cible allow-listée ; refuse les redirections non listées ou avec schéma arbitraire."""
+    allow = _signout_redirect_allowlist()
+    default = allow[0]
+    if not requested or not requested.strip():
+        return default
+    candidate = requested.strip()
+    if candidate.startswith("//") or "://" in candidate:
+        return default
+    return candidate if candidate in allow else default
+
+
 def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     """Fabrique l'application ; ``engine`` injectable pour les tests."""
 
@@ -275,7 +298,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
 
     @app.post("/api/auth/signout")
     async def api_signout(
-        body: SignoutBody | None = None,
+        body: Annotated[SignoutBody | None, Body()] = None,
         authorization: Annotated[str | None, Header(alias="Authorization")] = None,
     ) -> dict[str, str]:
         token = (body.access_token if body and body.access_token else None) or ""
@@ -283,7 +306,29 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             token = authorization.removeprefix("Bearer ").strip()
         if token:
             try_revoke_access_token(token)
-        return {"status": "signed_out"}
+        redirect = approved_post_signout_redirect(body.redirect_after if body else None)
+        return {"status": "signed_out", "redirect": redirect}
+
+    @app.get("/api/account")
+    async def api_account(
+        request: Request,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Profil curateur whiteliste (issue-016) — pas de champs super-admin."""
+        eng = webapp_deps.get_engine(request)
+        row = get_user_email_display_name_by_id(eng, user_id)
+        if row is None:
+            raise TenantResourceOpaqueDenial()
+        email, display_name = row
+        return {
+            "appUserId": user_id,
+            "email": email,
+            "displayName": display_name,
+            "counts": {
+                "ownedProjects": count_owned_projects(eng, user_id),
+                "activeMemberships": count_active_memberships(eng, user_id),
+            },
+        }
 
     @app.get("/api/me")
     async def api_me(

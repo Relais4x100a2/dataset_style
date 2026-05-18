@@ -33,6 +33,8 @@ INDEX_HTML = """<!DOCTYPE html>
     h1 { font-size: 1.35rem; }
     h2 { font-size: 1.1rem; margin-top: 0; }
     .banner { font-size: 0.85rem; color: #444; margin-bottom: 1rem; }
+    .account-dl dt { font-weight: 600; margin-top: 0.5rem; }
+    .account-dl dd { margin: 0.15rem 0 0 0; }
   </style>
 </head>
 <body>
@@ -108,7 +110,9 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="5">
       <h2>Mon compte</h2>
-      <p class="muted">Placeholder — informations compte et actions : sprint dédié.</p>
+      <p class="muted">Profil curateur (issue-016) — pas d’indicateurs super-admin.</p>
+      <div id="accountDetail" class="account-dl"></div>
+      <p id="accountLoadErr" class="err" aria-live="polite"></p>
     </div>
     <div class="panel" data-tab-idx="6">
       <h2>Super Admin</h2>
@@ -176,12 +180,39 @@ INDEX_HTML = """<!DOCTYPE html>
       }
     }
 
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;");
+    }
+
+    async function loadAccountPanel() {
+      const errEl = document.getElementById("accountLoadErr");
+      const detail = document.getElementById("accountDetail");
+      if (!errEl || !detail) return;
+      errEl.textContent = "";
+      try {
+        const a = await api("/api/account");
+        detail.innerHTML =
+          "<dl>"
+          + "<dt>Identifiant applicatif</dt><dd><code>" + escapeHtml(a.appUserId) + "</code></dd>"
+          + "<dt>Email</dt><dd>" + escapeHtml(a.email) + "</dd>"
+          + "<dt>Nom affiché</dt><dd>" + escapeHtml(a.displayName) + "</dd>"
+          + "<dt>Projets possédés</dt><dd>" + a.counts.ownedProjects + "</dd>"
+          + "<dt>Memberships actives</dt><dd>" + a.counts.activeMemberships + "</dd>"
+          + "</dl>";
+      } catch (e) {
+        detail.innerHTML = "";
+        if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
+        else errEl.textContent = "Impossible de charger le profil.";
+      }
+    }
+
     function activateMainTab(idx) {
       mainNav.querySelectorAll("button").forEach((b, j) => b.classList.toggle("active", j === idx));
       panelsHost.querySelectorAll(".panel").forEach((p) => {
         const i = parseInt(p.getAttribute("data-tab-idx"), 10);
         p.classList.toggle("active", i === idx);
       });
+      if (mainTabLabels[idx] === "Mon compte") loadAccountPanel().catch(showErr);
     }
 
     function renderMainTabs(labels) {
@@ -249,17 +280,19 @@ INDEX_HTML = """<!DOCTYPE html>
     };
 
     document.getElementById("btnSignout").onclick = async () => {
+      const t = token();
+      let target = "/";
       try {
-        const t = token();
-        await api("/api/auth/signout", {
+        const out = await api("/api/auth/signout", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + t },
-          body: JSON.stringify({ access_token: t }),
+          body: JSON.stringify({ access_token: t, redirect_after: "/" }),
         });
-      } catch (_) { /* ignore */ }
+        if (out && typeof out.redirect === "string" && out.redirect) target = out.redirect;
+      } catch (_) { /* jeton déjà invalide : on purge quand même */ }
       setToken("");
       sessionStorage.removeItem(SS);
-      showOk("Déconnecté.");
+      window.location.assign(target);
     };
 
     async function loadProjects() {
