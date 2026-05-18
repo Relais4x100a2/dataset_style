@@ -71,6 +71,72 @@ def test_patch_entry_calls_update_project_entries() -> None:
     save_m.assert_called_once()
 
 
+def test_account_requires_bearer() -> None:
+    app = create_slice_app(engine=MagicMock())
+    with TestClient(app) as client:
+        r = client.get("/api/account")
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_SESSION_EXPIRED"
+
+
+def test_account_json_is_whitelisted_curator_fields() -> None:
+    """issue-016 / #138 : pas d'exposition ``is_super_admin`` ni ``su_user_id``."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u_cur"
+    with (
+        patch(
+            "src.webapp.app.get_user_email_display_name_by_id",
+            return_value=("me@example.com", "Me Display"),
+        ),
+        patch("src.webapp.app.count_owned_projects", return_value=2),
+        patch("src.webapp.app.count_active_memberships", return_value=1),
+    ):
+        with TestClient(app) as client:
+            r = client.get("/api/account", headers={"Authorization": "Bearer t"})
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) == {"appUserId", "email", "displayName", "counts"}
+    assert body["appUserId"] == "u_cur"
+    assert body["email"] == "me@example.com"
+    assert body["displayName"] == "Me Display"
+    assert body["counts"] == {"ownedProjects": 2, "activeMemberships": 1}
+    assert "is_super_admin" not in body
+    assert "su_user_id" not in body
+    assert "suUserId" not in body
+
+
+def test_account_unknown_profile_returns_opaque_404() -> None:
+    """Profil absent en base après auth (course rare) : déni opaque."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "ghost"
+    with patch("src.webapp.app.get_user_email_display_name_by_id", return_value=None):
+        with TestClient(app) as client:
+            r = client.get("/api/account", headers={"Authorization": "Bearer t"})
+    assert r.status_code == 404
+    assert "error" in r.json()
+
+
+def test_signout_returns_allowlisted_redirect_only() -> None:
+    """Cible post-déconnexion : valeur demandée ignorée si hors liste."""
+    app = create_slice_app(engine=MagicMock())
+    with patch.dict("os.environ", {"WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST": "/,/safe"}, clear=False):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/auth/signout",
+                json={"access_token": "x", "redirect_after": "https://evil.example/phish"},
+            )
+    assert r.status_code == 200
+    assert r.json()["status"] == "signed_out"
+    assert r.json()["redirect"] == "/"
+    with patch.dict("os.environ", {"WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST": "/,/safe"}, clear=False):
+        with TestClient(app) as client:
+            r2 = client.post(
+                "/api/auth/signout",
+                json={"access_token": "x", "redirect_after": "/safe"},
+            )
+    assert r2.json()["redirect"] == "/safe"
+
+
 def test_export_csv_uses_dataframe_for_export() -> None:
     engine = MagicMock()
     app = create_slice_app(engine=engine)
