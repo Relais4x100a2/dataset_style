@@ -36,6 +36,8 @@ INDEX_HTML = """<!DOCTYPE html>
     .banner { font-size: 0.85rem; color: #444; margin-bottom: 1rem; }
     .account-dl dt { font-weight: 600; margin-top: 0.5rem; }
     .account-dl dd { margin: 0.15rem 0 0 0; }
+    table.sa-accounts { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
+    table.sa-accounts th, table.sa-accounts td { border: 1px solid #ccd; padding: 0.35rem 0.5rem; text-align: left; }
   </style>
 </head>
 <body>
@@ -121,6 +123,22 @@ INDEX_HTML = """<!DOCTYPE html>
       <label>E-mail du collaborateur <input type="email" id="saInviteEmail" autocomplete="off" /></label>
       <div class="row"><button type="button" id="btnSaInvite">Envoyer l’invitation</button></div>
       <p id="saInviteMsg" class="muted" aria-live="polite"></p>
+      <h3>Comptes actifs</h3>
+      <p class="muted">Liste paginée via <code>GET /api/super-admin/accounts</code> : <code>page</code> ≥ 1 ;
+        <code>page_size</code> entre 10 et 100 (défaut 25).</p>
+      <label>Taille de page
+        <select id="saAccountsPageSize">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </label>
+      <label>Page <input type="number" id="saAccountsPage" min="1" value="1" /></label>
+      <div class="row"><button type="button" id="btnSaAccountsReload">Actualiser la liste</button></div>
+      <p id="saAccountsErr" class="err" aria-live="polite"></p>
+      <p id="saAccountsSummary" class="muted"></p>
+      <div id="saAccountsTableWrap"></div>
     </div>
   </template>
 
@@ -217,6 +235,7 @@ INDEX_HTML = """<!DOCTYPE html>
         p.classList.toggle("active", i === idx);
       });
       if (mainTabLabels[idx] === "Mon compte") loadAccountPanel().catch(showErr);
+      if (mainTabLabels[idx] === "Super Admin") loadSuperAdminAccounts().catch(showErr);
     }
 
     function renderMainTabs(labels) {
@@ -244,6 +263,44 @@ INDEX_HTML = """<!DOCTYPE html>
       wireProjectAndEntries();
     }
 
+    async function loadSuperAdminAccounts() {
+      const errEl = document.getElementById("saAccountsErr");
+      const sumEl = document.getElementById("saAccountsSummary");
+      const wrap = document.getElementById("saAccountsTableWrap");
+      if (!errEl || !sumEl || !wrap) return;
+      errEl.textContent = "";
+      const pgEl = document.getElementById("saAccountsPage");
+      const psEl = document.getElementById("saAccountsPageSize");
+      const page = Math.max(1, parseInt(pgEl && pgEl.value, 10) || 1);
+      const pageSize = parseInt(psEl && psEl.value, 10) || 25;
+      try {
+        const data = await api(
+          "/api/super-admin/accounts?page=" + encodeURIComponent(page) + "&page_size=" + encodeURIComponent(pageSize)
+        );
+        if (pgEl) pgEl.value = String(data.page);
+        sumEl.textContent =
+          "Comptes actifs : " + data.totalActiveAccounts + " — page " + data.page + " / " + data.totalPages
+          + " (" + data.pageSize + " par page).";
+        let html = "<table class='sa-accounts'><thead><tr>"
+          + "<th>Courriel</th><th>Nom affiché</th><th>Super admin</th><th>Projets</th>"
+          + "<th>Dernière connexion</th><th>Entrées (tot. / valid.)</th>"
+          + "</tr></thead><tbody>";
+        for (const a of data.accounts) {
+          const ll = a.lastLoginAt ? escapeHtml(a.lastLoginAt) : "—";
+          html += "<tr><td>" + escapeHtml(a.email) + "</td><td>" + escapeHtml(a.displayName) + "</td><td>"
+            + (a.isSuperAdmin ? "oui" : "non") + "</td><td>" + a.ownedProjects + "</td><td>" + ll + "</td><td>"
+            + a.entriesTotal + " / " + a.entriesValidated + "</td></tr>";
+        }
+        html += "</tbody></table>";
+        if (!data.accounts.length) html = "<p class='muted'>Aucun compte sur cette page.</p>";
+        wrap.innerHTML = html;
+      } catch (e) {
+        wrap.innerHTML = "";
+        if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
+        else errEl.textContent = "Impossible de charger l’annuaire.";
+      }
+    }
+
     function wireSuperAdminInvite() {
       const btn = document.getElementById("btnSaInvite");
       const msg = document.getElementById("saInviteMsg");
@@ -267,6 +324,7 @@ INDEX_HTML = """<!DOCTYPE html>
           });
           msg.textContent = out.message;
           msg.className = out.mailMode === "smtp" ? "ok" : "warn";
+          loadSuperAdminAccounts().catch(function() {});
         } catch (e) {
           if (e && e.error) {
             msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
@@ -278,6 +336,17 @@ INDEX_HTML = """<!DOCTYPE html>
         } finally {
           btn.disabled = false;
         }
+      };
+    }
+
+    function wireSuperAdminAccountsPanel() {
+      wireSuperAdminInvite();
+      const b = document.getElementById("btnSaAccountsReload");
+      if (b) b.onclick = function() { loadSuperAdminAccounts().catch(function() {}); };
+      const ps = document.getElementById("saAccountsPageSize");
+      if (ps) ps.onchange = function() {
+        const pg = document.getElementById("saAccountsPage");
+        if (pg) pg.value = "1";
       };
     }
 
@@ -298,7 +367,7 @@ INDEX_HTML = """<!DOCTYPE html>
       if (b6) b6.onclick = () => downloadCsv();
       const b7 = document.getElementById("btnJsonl");
       if (b7) b7.onclick = () => downloadJsonl();
-      wireSuperAdminInvite();
+      wireSuperAdminAccountsPanel();
     }
 
     document.getElementById("btnSignin").onclick = async () => {

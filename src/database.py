@@ -11,6 +11,7 @@ Modèle:
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 
@@ -23,6 +24,10 @@ from src.api_errors import TenantResourceOpaqueDenial
 logger = logging.getLogger(__name__)
 
 STATUT_VALIDE = "Fait et validé"
+
+# Annuaire super-admin (issue-018) : taille de page documentée pour l'API et Streamlit.
+SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN = 10
+SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX = 100
 
 PROJECT_ROLES = ("admin", "collaborator", "viewer")
 
@@ -91,11 +96,56 @@ class ProjectSettings:
 class AccountAdminRow:
     user_id: str
     email: str
+    display_name: str
     is_super_admin: bool
     project_count: int
     last_login_at: str
     entries_total: int
     entries_validated: int
+
+
+def validate_super_admin_accounts_list_params(
+    *, page: int, page_size: int, total_active_accounts: int
+) -> tuple[int, int]:
+    """Valide numéro de page et ``page_size`` pour la liste paginée super-admin.
+
+    ``page_size`` doit être dans ``[SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN,
+    SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX]``. Le numéro de page est borné par le
+    total de comptes actifs (page 1 seule si l'annuaire est vide).
+
+    Args:
+        page: Numéro de page (1-based).
+        page_size: Nombre de lignes par page.
+        total_active_accounts: Résultat de :func:`count_users_for_admin`.
+
+    Returns:
+        Paire ``(page, page_size)`` entière normalisée.
+
+    Raises:
+        ValueError: Si un paramètre est hors plage.
+    """
+    if page_size < SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN:
+        raise ValueError(
+            f"page_size doit être au moins {SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN} "
+            f"(plage documentée {SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN}–"
+            f"{SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX})."
+        )
+    if page_size > SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX:
+        raise ValueError(
+            f"page_size ne peut pas dépasser {SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX} "
+            f"(plage documentée {SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN}–"
+            f"{SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX})."
+        )
+    if page < 1:
+        raise ValueError("page doit être >= 1.")
+    if total_active_accounts <= 0:
+        if page > 1:
+            raise ValueError("page hors limites : aucun compte actif.")
+        return page, page_size
+    total_pages = max(1, math.ceil(total_active_accounts / page_size))
+    if page > total_pages:
+        raise ValueError("page hors limites pour le total de comptes actifs.")
+    return page, page_size
 
 
 @dataclass
@@ -313,6 +363,12 @@ def ensure_schema(engine: Engine) -> None:
         conn.execute(
             text(
                 "UPDATE user_deprovision_ops SET next_retry_at = NOW() WHERE next_retry_at IS NULL;"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_users_active_created_at_desc "
+                "ON users (created_at DESC) WHERE disabled_at IS NULL;"
             )
         )
     logger.debug("ensure_schema: schéma initialisé avec succès")
@@ -563,13 +619,23 @@ def list_accounts_for_super_admin(
     engine: Engine,
     actor_user_id: str,
     *,
-    limit: int,
-    offset: int,
+    page: int,
+    page_size: int,
 ) -> list[AccountAdminRow]:
-    """Liste paginée des comptes avec métriques globales."""
+    """Liste paginée des comptes actifs avec métriques globales (tri ``created_at`` décroissant).
+
+    ``page`` et ``page_size`` doivent avoir été validés via
+    :func:`validate_super_admin_accounts_list_params` pour un ``total`` cohérent ;
+    des bornes défensives sur ``page_size`` sont appliquées ici.
+    """
     require_super_admin(engine, actor_user_id)
-    safe_limit = max(1, min(limit, 200))
-    safe_offset = max(0, offset)
+    if (
+        page_size < SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN
+        or page_size > SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX
+        or page < 1
+    ):
+        raise ValueError("Paramètres de pagination super-admin hors plage.")
+    offset = (page - 1) * page_size
     sql = """
     WITH project_counts AS (
         SELECT created_by AS user_id, COUNT(*) AS project_count
@@ -590,6 +656,7 @@ def list_accounts_for_super_admin(
     SELECT
         u.id,
         u.email,
+        u.display_name,
         u.is_super_admin,
         COALESCE(pc.project_count, 0) AS project_count,
         u.last_login_at,
@@ -606,7 +673,11 @@ def list_accounts_for_super_admin(
         rows = (
             conn.execute(
                 text(sql),
-                {"valid_status": STATUT_VALIDE, "limit": safe_limit, "offset": safe_offset},
+                {
+                    "valid_status": STATUT_VALIDE,
+                    "limit": page_size,
+                    "offset": offset,
+                },
             )
             .mappings()
             .all()
@@ -617,6 +688,7 @@ def list_accounts_for_super_admin(
             AccountAdminRow(
                 user_id=str(row["id"]),
                 email=str(row["email"]),
+                display_name=str(row["display_name"] or ""),
                 is_super_admin=bool(row["is_super_admin"]),
                 project_count=int(row["project_count"]),
                 last_login_at="" if row["last_login_at"] is None else str(row["last_login_at"]),

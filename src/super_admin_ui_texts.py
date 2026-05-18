@@ -81,6 +81,7 @@ def super_admin_accounts_table_column_labels() -> dict[str, str]:
     """
     return {
         "user_id": "Identifiant (technique)",
+        "nom_affichage": "Nom affiché",
         "email": "Courriel",
         "super_admin": "Super administrateur",
         "nb_projets": "Projets actifs",
