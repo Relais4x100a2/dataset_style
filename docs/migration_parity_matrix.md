@@ -48,8 +48,8 @@ Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaqu
 | Nouvelle entrée | ENT-LLM | — | appel HTTP LLM (OpenRouter / local) | mise à jour champs session | *(pas de persistance directe LLM)* | `llm_generate.generate_*`, réglages `ProjectSettings` |
 | Gestion & édition | EDI-SAVE | `df` + fiche courante | `update_project_entries` | idem ENT-NEW-WRITE | `update_project_entries` | `services/edition_*`, `nlp_engine`, `services/project_dataframe_view` |
 | Gestion & édition | EDI-LT | texte output | correction LT | `st.rerun` widget | — | `nlp_engine.corriger_texte_fr` (LanguageTool) |
-| Tableau de bord | DASH-METRICS | agrégats sur `df` | — | — | *(lecture dataframe en mémoire)* | `services/project_dataframe_view.prepare_for_dashboard_tab`, métriques |
-| Tableau de bord | DASH-STYLO | stylométrie filtrée | — | — | colonnes `CACHE_COLUMNS` | `services/dashboard_stylometry_service` |
+| Tableau de bord | DASH-METRICS | agrégats sur `df` | — | — | *(lecture dataframe en mémoire)* | `services/project_dataframe_view.prepare_for_dashboard_tab`, métriques ; **API** `GET /api/projects/{id}/dashboard` (issue-014) |
+| Tableau de bord | DASH-STYLO | stylométrie filtrée | — | — | colonnes `CACHE_COLUMNS` | `services/dashboard_stylometry_service` ; **API** `GET /api/projects/{id}/dashboard?dashboard_scope=…` (issue-014) |
 | Mon compte | ACC-INFO | compte + compteurs | — | — | `count_owned_projects`, `count_active_memberships` | `render_tab_account` |
 | Mon compte | ACC-DEL | — | `revoke_account_with_saga` | `logout`, `st.rerun` | saga + `database` (opérations compte) | `src/auth.revoke_account_with_saga` |
 | Super Admin | SA-LIST | listes admin | — | — | `list_accounts_for_super_admin`, compteurs | `render_tab_super_admin` |
@@ -94,8 +94,8 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | ENT-LLM | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | EDI-SAVE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | EDI-LT | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| DASH-METRICS | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| DASH-STYLO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| DASH-METRICS | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ |
+| DASH-STYLO | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ |
 | ACC-INFO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | ACC-DEL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | SA-LIST | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
@@ -122,6 +122,7 @@ Chaîne **projet → entrée → export** à rejouer après chaque bascule majeu
 Exemples de commandes ciblées (à intégrer dans CI ou lancer localement) :
 
 ```bash
+python3 -m pytest tests/test_curator_dashboard_snapshot.py tests/test_webapp_vertical_slice.py -q
 python3 -m pytest tests/test_migration_parity_matrix_doc.py -q
 python3 -m pytest tests/test_tab_layout.py tests/test_export_utils.py tests/test_project_entries_cache.py -q
 python3 -m pytest tests/test_services.py tests/test_export_quality_recap_service.py -q
