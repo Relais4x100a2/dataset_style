@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from src.api_errors import (
     TenantResourceOpaqueDenial,
@@ -20,8 +21,17 @@ from src.api_errors import (
     log_resolved_api_error,
 )
 from src.auth import persist_user_from_signin_ok
-from src.database import create_db_engine, list_projects_for_user, load_project_entries
+from src.database import (
+    STATUT_VALIDE,
+    create_db_engine,
+    list_projects_for_user,
+    load_project_entries,
+)
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
+from src.services.curator_dashboard_snapshot import (
+    DashboardStylometryScope,
+    build_curator_dashboard_envelope,
+)
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.webapp import deps as webapp_deps
 from src.webapp import entry_mutations
@@ -177,6 +187,29 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         rows = df[cols].to_dict(orient="records")
         return {"entries": rows}
 
+    @app.get("/api/projects/{project_id}/dashboard")
+    async def api_project_dashboard(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        dashboard_scope: Annotated[DashboardStylometryScope, Query()] = "validated",
+    ) -> Any:
+        """Agrégats stylométrie / cohérence (issue-014) — aligné ``prepare_for_dashboard_tab``."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            df = load_project_entries(eng, project_id, user_id)
+        except OperationalError as exc:
+            log_resolved_api_error(logger, exc, extra_context={"route": "project_dashboard"})
+            return JSONResponse(
+                status_code=503,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        return build_curator_dashboard_envelope(
+            df,
+            scope=dashboard_scope,
+            validated_label=STATUT_VALIDE,
+        )
+
     @app.patch("/api/projects/{project_id}/entries/{entry_id}")
     async def api_patch_entry(
         request: Request,
@@ -289,6 +322,10 @@ _INDEX_HTML = """<!DOCTYPE html>
     <h2>Entrées</h2>
     <p><button type="button" id="btnReloadEntries">Recharger les entrées</button></p>
     <div id="entriesTable"></div>
+    <h3>Tableau de bord (agrégats)</h3>
+    <p><button type="button" id="btnDashboard">Charger le tableau de bord</button>
+    (rafraîchir après enregistrement : même contrat que rechargement des entrées)</p>
+    <pre id="dashBox" style="max-height:16rem;overflow:auto;background:#f6f6f6;padding:0.5rem;"></pre>
     <h3>Édition (id de fiche)</h3>
     <label>id <input type="text" id="entryId" /></label>
     <label>input <textarea id="fldInput"></textarea></label>
@@ -391,6 +428,15 @@ _INDEX_HTML = """<!DOCTYPE html>
 
     document.getElementById("projectSel").onchange = () => loadEntries();
     document.getElementById("btnReloadEntries").onclick = () => loadEntries();
+
+    document.getElementById("btnDashboard").onclick = async () => {
+      const pid = document.getElementById("projectSel").value;
+      if (!pid) return;
+      try {
+        const data = await api("/api/projects/" + encodeURIComponent(pid) + "/dashboard?dashboard_scope=validated");
+        document.getElementById("dashBox").textContent = JSON.stringify(data, null, 2);
+      } catch (e) { showErr(e); }
+    };
 
     async function loadEntries() {
       const pid = document.getElementById("projectSel").value;

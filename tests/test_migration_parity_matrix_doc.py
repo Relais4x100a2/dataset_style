@@ -48,3 +48,4 @@ def test_migration_parity_matrix_documents_issue007_vertical_slice() -> None:
     assert "## Slice vertical (issue-007" in text
     assert "webapp" in text.lower()
     assert "EXP-DL" in text
+    assert "/api/projects/{id}/dashboard" in text or "/dashboard" in text

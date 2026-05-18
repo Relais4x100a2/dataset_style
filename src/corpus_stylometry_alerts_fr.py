@@ -95,3 +95,68 @@ def dashboard_stylometry_glossary_markdown_fr() -> str:
         trivial_syntax_pair_block_help_fr(),
     ]
     return "\n".join(parts)
+
+
+def dashboard_stylometry_scope_caption_validated_fr() -> str:
+    """Caption when stylometry metrics use validated rows only (Streamlit / API)."""
+    return (
+        "Les métriques ci-dessous (sauf la variance par axe) utilisent uniquement les "
+        "fiches au statut validé, comme le fichier JSONL exporté."
+    )
+
+
+def dashboard_stylometry_scope_caption_all_fr() -> str:
+    """Caption when stylometry metrics include every status (Streamlit / API)."""
+    return (
+        "Vue « tout le projet » : les brouillons sont inclus — ne confondez pas cette "
+        "vue avec le périmètre exporté (validées seulement)."
+    )
+
+
+def coherence_distribution_sampling_caption_fr(*, n_scope: int, sample_size: int) -> str:
+    """Caption when coherence histogram / summary use a random subsample (FR)."""
+    return (
+        f"Performance : ce périmètre compte {n_scope} entrées ; la distribution et la "
+        f"synthèse ci-dessous sont calculées sur un échantillon aléatoire de {sample_size} "
+        "lignes (scores lus via le même parseur que l'export et les filtres)."
+    )
+
+
+def coherence_missing_scores_caption_fr(
+    missing: int,
+    *,
+    used_sample: bool,
+    work_row_count: int,
+    n_scope: int,
+) -> str:
+    """Caption for rows without parseable coherence on the active perimeter (FR)."""
+    scope_label = (
+        f"{work_row_count} lignes de l'échantillon"
+        if used_sample
+        else f"{n_scope} dans ce périmètre"
+    )
+    return f"{missing} entrée(s) sans score de cohérence exploitable sur {scope_label}."
+
+
+def signature_variance_unavailable_message_fr() -> str:
+    """Same copy as Streamlit ``st.info`` when ``signature_variance`` returns None."""
+    return (
+        "Variance par axe indisponible : il faut au moins deux signatures "
+        "stylométriques exploitables parmi les fiches validées."
+    )
+
+
+def no_numeric_coherence_scores_message_fr() -> str:
+    """Same copy as Streamlit when no parseable scores exist on the perimeter."""
+    return "Aucun score de cohérence numérique sur ce périmètre."
+
+
+def curator_dashboard_refetch_after_entry_mutation_fr() -> str:
+    """Documents client refetch after entry writes (parity with cache invalidation)."""
+    return (
+        "Après création ou modification d'une fiche, enchaîner un GET sur "
+        "`/api/projects/{id}/entries` puis un GET sur `/api/projects/{id}/dashboard` "
+        "(équivalent Streamlit : `invalidate_project_entries_cache`, relecture "
+        "`load_project_entries` / `cached_load_project_entries`, puis `st.rerun`) "
+        "pour éviter des agrégats périmés."
+    )
