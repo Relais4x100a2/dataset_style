@@ -9,6 +9,22 @@ on:
 jobs:
   lint-and-tests:
     runs-on: ubuntu-latest
+    env:
+      DATASET_STYLE_REGRESSION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/regression_test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: regression_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d regression_test"
+          --health-interval 4s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,4 +41,10 @@ jobs:
         with:
           args: "format --check ."
       - name: Run tests
-        run: pytest -q
+        run: pytest -q --junitxml=junit-report.xml
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: junit-report.xml

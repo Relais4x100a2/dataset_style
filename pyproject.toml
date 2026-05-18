@@ -24,6 +24,11 @@ src = ["src", "main.py", "scripts", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "W"]
 
+[tool.pytest.ini_options]
+markers = [
+    "postgres_regression: persistance PostgreSQL (issue-009 / matrice issue-004); nécessite DATASET_STYLE_REGRESSION_DATABASE_URL.",
+]
+
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["E402", "E501"]
 # Chaînes françaises longues et blocs Streamlit
