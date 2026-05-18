@@ -80,7 +80,10 @@ make dev
 `make dev` lance le stack complet via `compose.yaml`:
 - `postgres`
 - `supertokens`
-- `app` (Streamlit)
+- `app` (Streamlit, port **8501** par défaut)
+- `webapp` (slice vertical FastAPI issue-007, port **8080** par défaut — coquille HTML + API `/api/...`)
+
+Variables utiles : `WEBAPP_PORT`, `WEBAPP_CORS_ORIGINS` (voir `.env.example`).
 
 Commandes utiles:
 

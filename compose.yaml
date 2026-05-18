@@ -52,5 +52,39 @@ services:
     ports:
       - "${APP_PORT:-8501}:8501"
 
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      supertokens:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dataset_user}:${POSTGRES_PASSWORD:-change_me}@postgres:5432/${POSTGRES_DB:-dataset_style}
+      SUPERTOKENS_CONNECTION_URI: http://supertokens:3567
+      SUPERTOKENS_API_KEY: ${SUPERTOKENS_CORE_API_KEY:-change_me_core_key_2026_local_dev}
+      AUTH_ENFORCE_INVITATION_ONLY: ${AUTH_ENFORCE_INVITATION_ONLY:-true}
+      SUPERTOKENS_SIGNUP_DISABLED: ${SUPERTOKENS_SIGNUP_DISABLED:-true}
+      POSTGRES_HOST: postgres
+      SUPERTOKENS_HOST: supertokens
+      SUPERTOKENS_PORT: 3567
+      APP_ENV: development
+    ports:
+      - "${WEBAPP_PORT:-8080}:8080"
+    command:
+      [
+        "/app/.venv/bin/uvicorn",
+        "src.webapp.app:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+      ]
+
 volumes:
   postgres_data:
