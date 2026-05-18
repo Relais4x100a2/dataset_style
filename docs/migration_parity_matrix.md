@@ -30,7 +30,7 @@ Sans projet actif, les onglets workflow 2–5 affichent un message guidé ; la c
 
 Légende **Lecture / Écriture (cible API)** : noms indicatifs REST à figer dans l’OpenAPI ; l’implémentation peut différer (GraphQL, RPC) tant que le contrat fonctionnel reste équivalent.
 
-Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaque écriture qui change les lignes `entries` ou le contexte projet, l’UI appelle `invalidate_project_entries_cache()` (`src/project_entries_cache.py`) puis `st.rerun()` pour que `cached_load_project_entries` relise via `load_project_entries` (`database.py`). Toute API doit exposer un comportement cohérent (invalidation côté client, ETag, ou relecture explicite).
+Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaque écriture qui change les lignes `entries` ou le contexte projet, l’UI appelle `invalidate_project_entries_cache()` (`src/project_entries_cache.py`) puis `st.rerun()` pour que `cached_load_project_entries` relise via `load_project_entries` (`database.py`). Toute API doit exposer un comportement cohérent (invalidation côté client, ETag, ou relecture explicite). **Webapp (issue-012)** : les réponses `POST` / `PATCH` sur les entrées incluent un tableau `entries` issu d’un `load_project_entries` immédiat après succès ; le client peut rafraîchir sans logique dupliquée.
 
 | Onglet Streamlit | ID flux | Lecture (UI / service actuel) | Écriture (UI actuelle) | Post-mutation | Primitives `database.py` (indicatif) | Autres modules |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par 
 | --- | --- |
 | SB-CTX | OK — jeton vérifié (`/recipe/session/verify`) + résolution `users.su_user_id` |
 | PRJ-VIEW | OK — `GET /api/projects` |
-| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création minimale) |
+| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès ; filtres édition optionnels sur `GET .../entries` (`edition_*`, alignés `edition_filters_service` + `filter_edition_entries_dataframe`) |
 | EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` |
 
 Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
@@ -89,10 +89,10 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | DIM-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | EXP-SCOPE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| ENT-NEW-READ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| ENT-NEW-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| ENT-NEW-READ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
+| ENT-NEW-WRITE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-LLM | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| EDI-SAVE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| EDI-SAVE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | EDI-LT | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DASH-METRICS | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | DASH-STYLO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
@@ -136,4 +136,4 @@ python3 -m pytest tests/test_auth.py tests/test_super_admin_ui_texts.py -q
 
 ## invalidate_project_entries_cache (rappel contrat)
 
-Après **création projet**, **suppression projet**, **sauvegarde nouvelle entrée**, **sauvegarde édition**, et **suppression de compte côté Super Admin** (flux SA-DELETE), le code applicatif invalide le cache Streamlit des entrées avant `st.rerun()`. Toute couche API devra documenter l’équivalent (version de ressource, `Cache-Control`, ou réponse obligeant le client à refetch les `entries`).
+Après **création projet**, **suppression projet**, **sauvegarde nouvelle entrée**, **sauvegarde édition**, et **suppression de compte côté Super Admin** (flux SA-DELETE), le code applicatif invalide le cache Streamlit des entrées avant `st.rerun()`. Toute couche API devra documenter l’équivalent (version de ressource, `Cache-Control`, ou réponse obligeant le client à refetch les `entries`). **Webapp** : voir corps `entries` sur `POST`/`PATCH` entrées (`src/webapp/app.py`) + `GET .../entries` avec paramètres `edition_*` pour les filtres liste (équivalent onglet Gestion & édition). Les réponses JSON d’entrées **n’incluent pas** les colonnes internes dont le nom commence par `_` (cache NLP en base) — aligné export CSV slice (`export.csv`).
