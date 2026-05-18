@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.engine import Engine
 
-from src.database import get_project_settings, load_project_entries
+from src.database import get_project_settings, load_project_entries, require_role
 from src.presets import load_active_dimensions
 from src.services.entry_nlp_persist_service import (
     load_fr_core_nlp_for_webapp,
@@ -74,6 +74,7 @@ def append_minimal_entry(
     output_text: str,
 ) -> str:
     """Ajoute une fiche avec dimensions par défaut du preset actif (admin ou collaborateur)."""
+    require_role(engine, project_id, user_id, ("admin", "collaborator"))
     settings = get_project_settings(engine, project_id)
     _pk, _custom, dims = load_active_dimensions(settings)
     types = dims.get("types") or [""]

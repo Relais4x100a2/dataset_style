@@ -36,8 +36,11 @@ logger = logging.getLogger(__name__)
 
 
 def _serialize_entries_df(df: pd.DataFrame) -> list[Any]:
-    """Sérialise toutes les colonnes (y compris cache NLP ``_*``) pour le client."""
-    return jsonable_encoder(df.to_dict(orient="records"))
+    """Sérialise les colonnes « publiques » ; exclut le cache NLP et champs internes (préfixe ``_``)."""
+    cols = [c for c in df.columns if not str(c).startswith("_")]
+    if not cols:
+        return []
+    return jsonable_encoder(df[cols].to_dict(orient="records"))
 
 
 def _edition_filter_params_present(
