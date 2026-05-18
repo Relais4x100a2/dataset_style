@@ -6,8 +6,9 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
+import requests
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
@@ -23,8 +24,8 @@ from src.auth import persist_user_from_signin_ok
 from src.database import create_db_engine, list_projects_for_user, load_project_entries
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
+from src.webapp import curator_ai, entry_mutations
 from src.webapp import deps as webapp_deps
-from src.webapp import entry_mutations
 from src.webapp.errors import EnvelopeHttpError
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,29 @@ class EntryPatchBody(BaseModel):
     format: str | None = None
     public: str | None = None
     date: str | None = None
+
+
+class CuratorLlmBody(BaseModel):
+    """Paramètres génération IA (alignés sur l'onglet Nouvelle entrée Streamlit)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["draft_to_output", "output_to_draft"]
+    input: str = ""
+    output: str = ""
+    type: str = ""
+    structure: str = ""
+    ton: str = ""
+    format: str = ""
+    public: str = ""
+
+
+class CuratorLanguageToolBody(BaseModel):
+    """Texte output (ou extrait) à contrôler via LanguageTool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = ""
 
 
 def _cors_origins() -> list[str]:
@@ -245,6 +269,59 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             headers={"Content-Disposition": f'attachment; filename="export-{project_id}.jsonl"'},
         )
 
+    @app.get("/api/projects/{project_id}/curator/dimensions")
+    async def api_curator_dimensions(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Dimensions actives (profil projet) pour les aides curateur."""
+        eng = webapp_deps.get_engine(request)
+        return curator_ai.build_curator_dimensions_payload(eng, project_id, user_id)
+
+    @app.post("/api/projects/{project_id}/curator/llm-generate")
+    async def api_curator_llm_generate(
+        request: Request,
+        project_id: str,
+        body: CuratorLlmBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Génération assistée (serveur : clé API et timeouts projet)."""
+        eng = webapp_deps.get_engine(request)
+        return curator_ai.run_curator_llm_generate(
+            eng,
+            project_id,
+            user_id,
+            mode=body.mode,
+            input_text=body.input,
+            output_text=body.output,
+            type_=body.type,
+            structure=body.structure,
+            ton=body.ton,
+            format_=body.format,
+            public=body.public,
+        )
+
+    @app.post("/api/projects/{project_id}/curator/languagetool-check")
+    async def api_curator_languagetool_check(
+        request: Request,
+        project_id: str,
+        body: CuratorLanguageToolBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Contrôle LanguageTool : texte corrigé + liste de suggestions."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            return curator_ai.run_curator_languagetool_check(
+                eng, project_id, user_id, text=body.text
+            )
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("curator_languagetool_check failed: %s", exc, exc_info=True)
+            raise EnvelopeHttpError(
+                503,
+                curator_ai.curator_languagetool_unavailable_envelope(),
+            ) from exc
+
     return app
 
 
@@ -265,11 +342,14 @@ _INDEX_HTML = """<!DOCTYPE html>
     .err { color: #a40000; white-space: pre-wrap; }
     .ok { color: #0b5; }
     code { font-size: 0.85rem; }
+    .lt-results { margin-top: 0.75rem; font-size: 0.95rem; }
+    .lt-match { margin: 0.35rem 0; padding: 0.35rem; border-left: 3px solid #ccc; }
+    button:disabled { opacity: 0.65; cursor: wait; }
   </style>
 </head>
 <body>
-  <h1>Slice vertical (issue-007)</h1>
-  <p>Parcours minimal : connexion, projet propriétaire, édition entrée, export CSV/JSONL.</p>
+  <h1>Slice vertical (issue-007 + issue-013)</h1>
+  <p>Parcours minimal : connexion, projet propriétaire, édition entrée, export CSV/JSONL, aides curateur (génération assistée + LanguageTool).</p>
   <p>Streamlit reste sur le port <code>8501</code> ; cette coquille est servie sur le port du service <code>webapp</code>.</p>
 
   <section id="auth">
@@ -293,6 +373,18 @@ _INDEX_HTML = """<!DOCTYPE html>
     <label>id <input type="text" id="entryId" /></label>
     <label>input <textarea id="fldInput"></textarea></label>
     <label>output <textarea id="fldOutput"></textarea></label>
+    <h3>Aides curateur (issue-013)</h3>
+    <p><small>Les clés d'API et timeouts IA restent côté serveur (réglages projet), comme dans Streamlit.</small></p>
+    <label>Type de transformation <select id="dimType"></select></label>
+    <label>Structure textuelle <select id="dimStructure"></select></label>
+    <label>Tonalité textuelle <select id="dimTon"></select></label>
+    <label>Format de sortie <select id="dimFormat"></select></label>
+    <label>Public cible <select id="dimPublic"></select></label>
+    <div class="row"><button type="button" id="btnGenOut">Générer texte à partir du brouillon</button></div>
+    <div class="row"><button type="button" id="btnGenIn">Générer brouillon à partir du texte généré</button></div>
+    <div class="row"><button type="button" id="btnLtCheck">Vérifier l'output avec LanguageTool</button></div>
+    <div class="row"><button type="button" id="btnLtApply" hidden>Appliquer le texte corrigé dans output</button></div>
+    <div id="ltResults" class="lt-results" hidden></div>
     <div class="row"><button type="button" id="btnSave">Enregistrer</button></div>
     <h3>Création rapide</h3>
     <label>nouveau input <textarea id="newInput"></textarea></label>
@@ -322,6 +414,13 @@ _INDEX_HTML = """<!DOCTYPE html>
       workspace.hidden = !t;
     }
     setToken(token());
+
+    let lastLtCorrected = null;
+
+    function setBusy(btn, busy, busyLabel, idleLabel) {
+      btn.disabled = busy;
+      btn.textContent = busy ? busyLabel : idleLabel;
+    }
 
     function showErr(obj) {
       if (obj && obj.error) {
@@ -387,10 +486,48 @@ _INDEX_HTML = """<!DOCTYPE html>
         sel.appendChild(o);
       }
       await loadEntries();
+      await loadCuratorDimensions();
     }
 
-    document.getElementById("projectSel").onchange = () => loadEntries();
+    document.getElementById("projectSel").onchange = () => {
+      loadEntries();
+      loadCuratorDimensions();
+    };
     document.getElementById("btnReloadEntries").onclick = () => loadEntries();
+
+    async function loadCuratorDimensions() {
+      const pid = document.getElementById("projectSel").value;
+      if (!pid || !token()) return;
+      try {
+        const data = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/dimensions");
+        const dims = data.dimensions || {};
+        function fillSelect(id, key) {
+          const sel = document.getElementById(id);
+          const arr = dims[key] || [];
+          sel.innerHTML = "";
+          for (const x of arr) {
+            const o = document.createElement("option");
+            o.value = x; o.textContent = x;
+            sel.appendChild(o);
+          }
+        }
+        fillSelect("dimType", "types");
+        fillSelect("dimStructure", "structures");
+        fillSelect("dimTon", "tons");
+        fillSelect("dimFormat", "formats");
+        fillSelect("dimPublic", "publics");
+      } catch (e) { showErr(e); }
+    }
+
+    function curatorStylePayload() {
+      return {
+        type: document.getElementById("dimType").value,
+        structure: document.getElementById("dimStructure").value,
+        ton: document.getElementById("dimTon").value,
+        format: document.getElementById("dimFormat").value,
+        public: document.getElementById("dimPublic").value,
+      };
+    }
 
     async function loadEntries() {
       const pid = document.getElementById("projectSel").value;
@@ -412,6 +549,108 @@ _INDEX_HTML = """<!DOCTYPE html>
       div.innerHTML = "";
       div.appendChild(t);
     }
+
+    document.getElementById("btnGenOut").onclick = async () => {
+      const pid = document.getElementById("projectSel").value;
+      const b = document.getElementById("btnGenOut");
+      const idle = "Générer texte à partir du brouillon";
+      setBusy(b, true, "Génération en cours…", idle);
+      try {
+        const payload = Object.assign(
+          { mode: "draft_to_output", input: document.getElementById("fldInput").value, output: document.getElementById("fldOutput").value },
+          curatorStylePayload()
+        );
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/llm-generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (out.status === "ok") {
+          document.getElementById("fldOutput").value = out.text;
+          showOk("Texte généré.");
+        } else if (out.status === "validation_error" && out.message) {
+          showErr({ error: { title: "Génération assistée", message: out.message } });
+        } else if (out.status === "failed" && out.message) {
+          showErr({ error: { title: "Génération assistée", message: out.message } });
+        } else {
+          showErr({ error: { title: "Génération assistée", message: "Réponse inattendue du serveur." } });
+        }
+      } catch (e) { showErr(e); }
+      finally { setBusy(b, false, "Génération en cours…", idle); }
+    };
+
+    document.getElementById("btnGenIn").onclick = async () => {
+      const pid = document.getElementById("projectSel").value;
+      const b = document.getElementById("btnGenIn");
+      const idle = "Générer brouillon à partir du texte généré";
+      setBusy(b, true, "Génération en cours…", idle);
+      try {
+        const payload = Object.assign(
+          { mode: "output_to_draft", input: document.getElementById("fldInput").value, output: document.getElementById("fldOutput").value },
+          curatorStylePayload()
+        );
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/llm-generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (out.status === "ok") {
+          document.getElementById("fldInput").value = out.text;
+          showOk("Brouillon généré.");
+        } else if (out.status === "validation_error" && out.message) {
+          showErr({ error: { title: "Génération assistée", message: out.message } });
+        } else if (out.status === "failed" && out.message) {
+          showErr({ error: { title: "Génération assistée", message: out.message } });
+        } else {
+          showErr({ error: { title: "Génération assistée", message: "Réponse inattendue du serveur." } });
+        }
+      } catch (e) { showErr(e); }
+      finally { setBusy(b, false, "Génération en cours…", idle); }
+    };
+
+    document.getElementById("btnLtCheck").onclick = async () => {
+      const pid = document.getElementById("projectSel").value;
+      const b = document.getElementById("btnLtCheck");
+      const idle = "Vérifier l'output avec LanguageTool";
+      setBusy(b, true, "Analyse LanguageTool…", idle);
+      document.getElementById("ltResults").hidden = true;
+      lastLtCorrected = null;
+      document.getElementById("btnLtApply").hidden = true;
+      try {
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/languagetool-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: document.getElementById("fldOutput").value }),
+        });
+        lastLtCorrected = out.corrected;
+        const box = document.getElementById("ltResults");
+        box.hidden = false;
+        box.innerHTML = "";
+        const head = document.createElement("p");
+        head.textContent = out.matches && out.matches.length
+          ? (out.matches.length + " suggestion(s) LanguageTool :")
+          : "Aucune suggestion LanguageTool.";
+        box.appendChild(head);
+        for (const m of out.matches || []) {
+          const p = document.createElement("div");
+          p.className = "lt-match";
+          const rep0 = m.replacements && m.replacements[0] ? m.replacements[0].value : "";
+          p.textContent = (m.message || "") + (rep0 ? " → « " + rep0 + " »" : "");
+          box.appendChild(p);
+        }
+        const cur = document.getElementById("fldOutput").value;
+        document.getElementById("btnLtApply").hidden = (out.corrected === cur);
+        showOk("LanguageTool : analyse terminée.");
+      } catch (e) { showErr(e); }
+      finally { setBusy(b, false, "Analyse LanguageTool…", idle); }
+    };
+
+    document.getElementById("btnLtApply").onclick = () => {
+      if (lastLtCorrected == null) return;
+      document.getElementById("fldOutput").value = lastLtCorrected;
+      showOk("Texte corrigé appliqué dans le champ output.");
+      document.getElementById("btnLtApply").hidden = true;
+    };
 
     document.getElementById("btnSave").onclick = async () => {
       const pid = document.getElementById("projectSel").value;
