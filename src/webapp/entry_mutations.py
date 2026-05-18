@@ -10,6 +10,7 @@ import pandas as pd
 from sqlalchemy.engine import Engine
 
 from src.database import (
+    CACHE_COLUMNS,
     get_project_settings,
     load_project_entries,
     require_admin,
@@ -86,6 +87,8 @@ def append_minimal_entry(
         "statut": str(statuts[0]),
         "notes": "",
     }
+    for col in CACHE_COLUMNS:
+        row[col] = ""
     df = load_project_entries(engine, project_id, user_id)
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
     update_project_entries(engine, project_id, df, user_id)

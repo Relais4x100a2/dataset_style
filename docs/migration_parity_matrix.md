@@ -105,6 +105,12 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 
 ---
 
+## Comparaison coexistence Streamlit vs webapp
+
+Pendant la double exposition (**Streamlit** port **8501**, **webapp** slice vertical port **8080** par défaut), rejouer la même séquence sur les deux interfaces avec le même compte et le même projet : **PRJ-CREATE** (ou sélection), **ENT-NEW-WRITE** / **EDI-SAVE**, puis **EXP-SCOPE** + **EXP-DL** (CSV et JSONL). Les téléchargements côté webapp appliquent **`export_utils`** (périmètres `validated_only` / `full_dataset`) et la règle **CSV sans colonnes préfixées `_`** (alignée sur la sérialisation API des entrées). Toute divergence volontaire ou constatée avec Streamlit doit être notée en **Écart documenté** dans la matrice ou la recette associée.
+
+---
+
 ## Checklist recette minimale (manuelle)
 
 Chaîne **projet → entrée → export** à rejouer après chaque bascule majeure UI / API :
@@ -123,6 +129,9 @@ Exemples de commandes ciblées (à intégrer dans CI ou lancer localement) :
 
 ```bash
 python3 -m pytest tests/test_migration_parity_matrix_doc.py -q
+# issue-009 / GitHub #131 : persistance Postgres + export (PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL)
+# Exporter DATASET_STYLE_REGRESSION_DATABASE_URL (postgresql://…) — en CI la variable est définie par .github/workflows/ci.yml
+python3 -m pytest tests/test_curation_chain_postgres_regression.py -q
 python3 -m pytest tests/test_tab_layout.py tests/test_export_utils.py tests/test_project_entries_cache.py -q
 python3 -m pytest tests/test_services.py tests/test_export_quality_recap_service.py -q
 python3 -m pytest tests/test_nlp_engine.py tests/test_ui_components_new_entry.py tests/test_ui_components_edition.py -q
