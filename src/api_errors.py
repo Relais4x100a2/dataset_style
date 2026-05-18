@@ -24,6 +24,7 @@ DB_UNAVAILABLE: Final = "DB_UNAVAILABLE"
 FORBIDDEN: Final = "FORBIDDEN"
 NOT_FOUND_GENERIC: Final = "NOT_FOUND_GENERIC"
 INTERNAL_ERROR: Final = "INTERNAL_ERROR"
+EXPORT_PAYLOAD_TOO_LARGE: Final = "EXPORT_PAYLOAD_TOO_LARGE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,15 @@ class AuthSessionExpiredError(Exception):
 
 class TenantResourceOpaqueDenial(Exception):
     """Accès à une ressource tenantée refusé : réponse identique à « introuvable » (anti-IDOR)."""
+
+
+class ExportPayloadTooLargeError(Exception):
+    """Export refusé : le périmètre dépasse la limite ``WEBAPP_EXPORT_MAX_ROWS`` (issue-015)."""
+
+    def __init__(self, row_count: int, max_rows: int) -> None:
+        self.row_count = row_count
+        self.max_rows = max_rows
+        super().__init__(f"export rows {row_count} > cap {max_rows}")
 
 
 _CATALOG: dict[str, ResolvedApiError] = {
@@ -78,6 +88,19 @@ _CATALOG: dict[str, ResolvedApiError] = {
             "Cette ressource n'existe pas, n'est plus disponible, ou vous n'y avez pas accès."
         ),
         suggested_action_fr="Vérifiez votre sélection ou l'URL ; reconnectez-vous si besoin.",
+    ),
+    EXPORT_PAYLOAD_TOO_LARGE: ResolvedApiError(
+        code=EXPORT_PAYLOAD_TOO_LARGE,
+        http_status=413,
+        title_fr="Export trop volumineux",
+        message_fr=(
+            "Le nombre de fiches dans ce périmètre dépasse la limite configurée pour ce service. "
+            "Réduisez le périmètre (validées seulement) ou fractionnez l’export."
+        ),
+        suggested_action_fr=(
+            "Contactez l’administrateur pour relever la limite ``WEBAPP_EXPORT_MAX_ROWS`` "
+            "ou exportez depuis le studio Streamlit."
+        ),
     ),
     INTERNAL_ERROR: ResolvedApiError(
         code=INTERNAL_ERROR,
@@ -115,6 +138,17 @@ def resolve_exception_for_api(
         return _catalog_entry(AUTH_SESSION_EXPIRED)
     if isinstance(exc, TenantResourceOpaqueDenial):
         return _catalog_entry(NOT_FOUND_GENERIC)
+    if isinstance(exc, ExportPayloadTooLargeError):
+        base = _catalog_entry(EXPORT_PAYLOAD_TOO_LARGE)
+        return ResolvedApiError(
+            code=base.code,
+            http_status=base.http_status,
+            title_fr=base.title_fr,
+            message_fr=(
+                f"{base.message_fr} (ici : {exc.row_count} fiches, limite {exc.max_rows})."
+            ),
+            suggested_action_fr=base.suggested_action_fr,
+        )
     if isinstance(exc, OperationalError):
         return _catalog_entry(DB_UNAVAILABLE)
     if isinstance(exc, PermissionError):
