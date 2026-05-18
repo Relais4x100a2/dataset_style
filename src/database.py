@@ -29,6 +29,11 @@ STATUT_VALIDE = "Fait et validé"
 SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MIN = 10
 SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX = 100
 
+# Panneau technique saga (issue-019) : mêmes fenêtres que le suivi Streamlit.
+SUPER_ADMIN_SAGA_RECENT_OPS_LIMIT = 100
+SUPER_ADMIN_SAGA_DLQ_PREVIEW_LIMIT = 50
+SUPER_ADMIN_SAGA_RETRY_QUEUE_PREVIEW_LIMIT = 50
+
 PROJECT_ROLES = ("admin", "collaborator", "viewer")
 
 CACHE_COLUMNS = [
@@ -951,6 +956,33 @@ def record_deprovision_failure(
     return op
 
 
+def count_deprovision_ops_by_state(engine: Engine, actor_user_id: str) -> dict[str, int]:
+    """Compte toutes les sagas de révocation par état (vue globale en base)."""
+    require_super_admin(engine, actor_user_id)
+    counts: dict[str, int] = {st: 0 for st in DEPROVISION_STATES}
+    with engine.begin() as conn:
+        rows = (
+            conn.execute(
+                text("SELECT state, COUNT(*)::bigint AS n FROM user_deprovision_ops GROUP BY state")
+            )
+            .mappings()
+            .all()
+        )
+    for row in rows:
+        st = str(row["state"])
+        if st in counts:
+            counts[st] = int(row["n"])
+    return counts
+
+
+def list_retryable_deprovision_ops_for_super_admin(
+    engine: Engine, actor_user_id: str, *, limit: int = SUPER_ADMIN_SAGA_RETRY_QUEUE_PREVIEW_LIMIT
+) -> list[DeprovisionOp]:
+    """Même lecture que le worker ``list_retryable_deprovision_ops`` avec garde ``require_super_admin``."""
+    require_super_admin(engine, actor_user_id)
+    return list_retryable_deprovision_ops(engine, limit=limit)
+
+
 def list_retryable_deprovision_ops(engine: Engine, *, limit: int = 50) -> list[DeprovisionOp]:
     """Liste les opérations à reprendre par le worker planifié."""
     safe_limit = max(1, min(limit, 500))
@@ -992,7 +1024,7 @@ def list_retryable_deprovision_ops(engine: Engine, *, limit: int = 50) -> list[D
 
 
 def list_recent_deprovision_ops(
-    engine: Engine, actor_user_id: str, *, limit: int = 100
+    engine: Engine, actor_user_id: str, *, limit: int = SUPER_ADMIN_SAGA_RECENT_OPS_LIMIT
 ) -> list[DeprovisionOp]:
     """Retourne les opérations de saga récentes pour monitoring super admin."""
     require_super_admin(engine, actor_user_id)
@@ -1033,7 +1065,7 @@ def list_recent_deprovision_ops(
 
 
 def list_quarantined_deprovision_ops(
-    engine: Engine, actor_user_id: str, *, limit: int = 50
+    engine: Engine, actor_user_id: str, *, limit: int = SUPER_ADMIN_SAGA_DLQ_PREVIEW_LIMIT
 ) -> list[DeprovisionOp]:
     """Liste les opérations en quarantaine (DLQ)."""
     require_super_admin(engine, actor_user_id)

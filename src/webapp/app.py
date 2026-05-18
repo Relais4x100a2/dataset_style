@@ -15,7 +15,7 @@ from fastapi import Body, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
@@ -41,6 +41,7 @@ from src.database import (
     list_accounts_for_super_admin,
     list_projects_for_user,
     load_project_entries,
+    replay_quarantined_operation,
     validate_super_admin_accounts_list_params,
 )
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
@@ -58,6 +59,7 @@ from src.webapp import deps as webapp_deps
 from src.webapp.errors import EnvelopeHttpError
 from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
 from src.webapp.super_admin_invite import invite_collaborator_by_email
+from src.webapp.super_admin_saga import build_deprovision_telemetry_payload
 from src.webapp.workspace_payload import projects_list_response
 
 logger = logging.getLogger(__name__)
@@ -202,6 +204,26 @@ class SuperAdminInviteBody(BaseModel):
         if "@" not in em:
             raise ValueError("Adresse e-mail invalide.")
         return em
+
+
+class SuperAdminSagaReplayBody(BaseModel):
+    """Relance d'une opération saga en quarantaine : ``confirm: true`` obligatoire (issue-019)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    confirm: bool
+    operation_id: str = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("operationId", "operation_id"),
+    )
+
+    @field_validator("confirm")
+    @classmethod
+    def _must_confirm(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("La relance nécessite confirm: true.")
+        return value
 
 
 def _cors_origins() -> list[str]:
@@ -714,6 +736,79 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             "pageSize": s,
             "totalPages": total_pages,
             "accounts": accounts,
+        }
+
+    @app.get("/api/super-admin/saga/telemetry")
+    async def api_super_admin_saga_telemetry(
+        request: Request,
+        user: Annotated[UserRecord, Depends(webapp_deps.require_super_admin_app_user)],
+    ) -> Any:
+        """Télémétrie saga, file de retry et DLQ (issue-019)."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            return build_deprovision_telemetry_payload(eng, user.user_id)
+        except Exception as exc:  # noqa: BLE001
+            log_resolved_api_error(
+                logger, exc, extra_context={"route": "super_admin_saga_telemetry"}
+            )
+            return JSONResponse(
+                status_code=500,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+
+    @app.post("/api/super-admin/saga/replay-quarantined")
+    async def api_super_admin_saga_replay_quarantined(
+        request: Request,
+        user: Annotated[UserRecord, Depends(webapp_deps.require_super_admin_app_user)],
+        body: SuperAdminSagaReplayBody,
+    ) -> Any:
+        """Relance une opération DLQ ; la réponse inclut la télémétrie rafraîchie (issue-019)."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            replay_quarantined_operation(eng, user.user_id, body.operation_id)
+        except RuntimeError as exc:
+            raise EnvelopeHttpError(
+                400,
+                {
+                    "error": {
+                        "code": "BAD_REQUEST",
+                        "title": "Relance impossible",
+                        "message": str(exc),
+                        "suggested_action": (
+                            "Vérifiez qu'une opération en quarantaine est sélectionnée et qu'aucune autre saga "
+                            "n'est en cours pour le même utilisateur cible."
+                        ),
+                        "detail": None,
+                    }
+                },
+            ) from exc
+        except PermissionError as exc:
+            raise EnvelopeHttpError(
+                403,
+                error_envelope_for_client(exc, include_technical_detail=False),
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            log_resolved_api_error(
+                logger, exc, extra_context={"route": "super_admin_saga_replay_quarantined"}
+            )
+            return JSONResponse(
+                status_code=500,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        try:
+            telemetry = build_deprovision_telemetry_payload(eng, user.user_id)
+        except Exception as exc:  # noqa: BLE001
+            log_resolved_api_error(
+                logger, exc, extra_context={"route": "super_admin_saga_replay_telemetry"}
+            )
+            return JSONResponse(
+                status_code=500,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        return {
+            "status": "ok",
+            "message": "Opération remise en file d'attente.",
+            "telemetry": telemetry,
         }
 
     return app
