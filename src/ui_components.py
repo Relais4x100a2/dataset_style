@@ -22,7 +22,12 @@ from sqlalchemy.engine import Engine
 from src.auth import CurrentUser, create_invitation_link, logout, revoke_account_with_saga
 from src.corpus_stylometry_alerts_fr import (
     TRIVIAL_SYNTAX_PAIR_BUSINESS_LABEL_FR,
+    coherence_distribution_sampling_caption_fr,
+    coherence_missing_scores_caption_fr,
     dashboard_stylometry_glossary_markdown_fr,
+    dashboard_stylometry_scope_caption_all_fr,
+    dashboard_stylometry_scope_caption_validated_fr,
+    signature_variance_unavailable_message_fr,
     trivial_syntax_contrast_missing_cache_caption_fr,
     trivial_syntax_pair_curator_warning_fr,
     trivial_syntax_pair_threshold_rule_sentence_fr,
@@ -2189,15 +2194,9 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
     )
 
     if validated_only:
-        st.caption(
-            "Les métriques ci-dessous (sauf la variance par axe) utilisent uniquement les "
-            "fiches au statut validé, comme le fichier JSONL exporté."
-        )
+        st.caption(dashboard_stylometry_scope_caption_validated_fr())
     else:
-        st.caption(
-            "Vue « tout le projet » : les brouillons sont inclus — ne confondez pas cette "
-            "vue avec le périmètre exporté (validées seulement)."
-        )
+        st.caption(dashboard_stylometry_scope_caption_all_fr())
 
     with st.expander(
         "Seuils et définitions (stylométrie du corpus)",
@@ -2212,9 +2211,10 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
     )
     if used_sample and n_scope > 0:
         st.caption(
-            f"Performance : ce périmètre compte {n_scope} entrées ; la distribution et la "
-            f"synthèse ci-dessous sont calculées sur un échantillon aléatoire de {len(work_df)} "
-            "lignes (scores lus via le même parseur que l'export et les filtres)."
+            coherence_distribution_sampling_caption_fr(
+                n_scope=n_scope,
+                sample_size=len(work_df),
+            )
         )
     scores = list_parsed_coherence_scores(work_df)
     missing_scores = count_rows_missing_parseable_coherence_score(work_df)
@@ -2230,13 +2230,13 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
         bucket_df = coherence_score_bucket_table(scores)
         st.bar_chart(bucket_df.set_index("Tranche (score)"), width="stretch", horizontal=False)
         if missing_scores:
-            scope_label = (
-                f"{len(work_df)} lignes de l'échantillon"
-                if used_sample
-                else f"{n_scope} dans ce périmètre"
-            )
             st.caption(
-                f"{missing_scores} entrée(s) sans score de cohérence exploitable sur {scope_label}."
+                coherence_missing_scores_caption_fr(
+                    missing_scores,
+                    used_sample=used_sample,
+                    work_row_count=len(work_df),
+                    n_scope=n_scope,
+                )
             )
 
     st.markdown("#### Écart-type par axe stylistique (fiches validées)")
@@ -2247,10 +2247,7 @@ def render_tab_dashboard(df: pd.DataFrame, role: str) -> None:
     )
     var_axes = signature_variance(df_valid)
     if var_axes is None:
-        st.info(
-            "Variance par axe indisponible : il faut au moins deux signatures "
-            "stylométriques exploitables parmi les fiches validées."
-        )
+        st.info(signature_variance_unavailable_message_fr())
     else:
         st.caption(
             "Indicateur calculé exclusivement sur les fiches validées, conformément au "

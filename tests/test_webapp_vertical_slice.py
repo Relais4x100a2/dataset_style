@@ -278,3 +278,42 @@ def test_list_entries_json_omits_leading_underscore_columns() -> None:
     row = r.json()["entries"][0]
     assert row["id"] == "e1"
     assert "_coherence_score" not in row
+
+
+def test_dashboard_endpoint_returns_dataset_quality_envelope() -> None:
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df = pd.DataFrame(
+        [
+            {
+                "id": "e1",
+                "project_id": "p1",
+                "date": "",
+                "type": "T",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "i",
+                "output": "o",
+                "statut": "En cours",
+                "notes": "",
+                "_coherence_score": "70",
+                "_syntax_contrast": "0.5",
+            }
+        ]
+    )
+    with patch("src.webapp.app.load_project_entries", return_value=df):
+        with TestClient(app) as client:
+            r = client.get(
+                "/api/projects/p1/dashboard",
+                params={"dashboard_scope": "all"},
+                headers={"Authorization": "Bearer t"},
+            )
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("technical") is None
+    assert "dataset_quality" in body
+    assert body["dataset_quality"]["headline"]["total_rows"] == 1
+    assert "client_contract" in body

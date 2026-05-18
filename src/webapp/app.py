@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from src.api_errors import (
     TenantResourceOpaqueDenial,
@@ -24,6 +25,7 @@ from src.api_errors import (
 )
 from src.auth import persist_user_from_signin_ok
 from src.database import (
+    STATUT_VALIDE,
     UserRecord,
     create_db_engine,
     create_project,
@@ -33,6 +35,10 @@ from src.database import (
 )
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
 from src.nlp_engine import filter_edition_entries_dataframe
+from src.services.curator_dashboard_snapshot import (
+    DashboardStylometryScope,
+    build_curator_dashboard_envelope,
+)
 from src.services.edition_filters_service import build_edition_score_filter_spec
 from src.services.project_dataframe_view import prepare_for_edition_tab
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
@@ -356,6 +362,29 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             )
         rows = _serialize_entries_df(df)
         return {"entries": rows}
+
+    @app.get("/api/projects/{project_id}/dashboard")
+    async def api_project_dashboard(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        dashboard_scope: Annotated[DashboardStylometryScope, Query()] = "validated",
+    ) -> Any:
+        """Agrégats stylométrie / cohérence (issue-014) — aligné ``prepare_for_dashboard_tab``."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            df = load_project_entries(eng, project_id, user_id)
+        except OperationalError as exc:
+            log_resolved_api_error(logger, exc, extra_context={"route": "project_dashboard"})
+            return JSONResponse(
+                status_code=503,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        return build_curator_dashboard_envelope(
+            df,
+            scope=dashboard_scope,
+            validated_label=STATUT_VALIDE,
+        )
 
     @app.patch("/api/projects/{project_id}/entries/{entry_id}")
     async def api_patch_entry(
