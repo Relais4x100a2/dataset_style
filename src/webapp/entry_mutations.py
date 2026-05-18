@@ -9,13 +9,13 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.engine import Engine
 
-from src.database import (
-    get_project_settings,
-    load_project_entries,
-    require_admin,
-    update_project_entries,
-)
+from src.database import get_project_settings, load_project_entries
 from src.presets import load_active_dimensions
+from src.services.entry_nlp_persist_service import (
+    load_fr_core_nlp_for_webapp,
+    persist_edited_entry_with_nlp_cache,
+    persist_new_entry_with_nlp_cache,
+)
 
 _PATCHABLE: frozenset[str] = frozenset(
     {
@@ -51,7 +51,18 @@ def apply_entry_field_updates(
         if key not in df.columns:
             continue
         df.loc[mask, key] = str(raw)
-    update_project_entries(engine, project_id, df, user_id)
+    input_text = str(df.loc[mask, "input"].iloc[0])
+    output_text = str(df.loc[mask, "output"].iloc[0])
+    persist_edited_entry_with_nlp_cache(
+        engine,
+        project_id,
+        user_id,
+        df_full=df,
+        entry_id=entry_id,
+        input_text=input_text,
+        output_text=output_text,
+        nlp=load_fr_core_nlp_for_webapp(),
+    )
 
 
 def append_minimal_entry(
@@ -62,8 +73,7 @@ def append_minimal_entry(
     input_text: str,
     output_text: str,
 ) -> str:
-    """Ajoute une fiche avec dimensions par défaut du preset actif (propriétaire / admin)."""
-    require_admin(engine, project_id, user_id)
+    """Ajoute une fiche avec dimensions par défaut du preset actif (admin ou collaborateur)."""
     settings = get_project_settings(engine, project_id)
     _pk, _custom, dims = load_active_dimensions(settings)
     types = dims.get("types") or [""]
@@ -87,6 +97,15 @@ def append_minimal_entry(
         "notes": "",
     }
     df = load_project_entries(engine, project_id, user_id)
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    update_project_entries(engine, project_id, df, user_id)
+    new_row_df = pd.DataFrame([row])
+    persist_new_entry_with_nlp_cache(
+        engine,
+        project_id,
+        user_id,
+        df_existing=df,
+        new_row_df=new_row_df,
+        input_text=input_text,
+        output_text=output_text,
+        nlp=load_fr_core_nlp_for_webapp(),
+    )
     return new_id

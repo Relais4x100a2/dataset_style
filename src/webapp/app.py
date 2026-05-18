@@ -8,7 +8,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
+import pandas as pd
 from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict
@@ -22,12 +24,40 @@ from src.api_errors import (
 from src.auth import persist_user_from_signin_ok
 from src.database import create_db_engine, list_projects_for_user, load_project_entries
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
+from src.nlp_engine import filter_edition_entries_dataframe
+from src.services.edition_filters_service import build_edition_score_filter_spec
+from src.services.project_dataframe_view import prepare_for_edition_tab
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.webapp import deps as webapp_deps
 from src.webapp import entry_mutations
 from src.webapp.errors import EnvelopeHttpError
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_entries_df(df: pd.DataFrame) -> list[Any]:
+    """Sérialise toutes les colonnes (y compris cache NLP ``_*``) pour le client."""
+    return jsonable_encoder(df.to_dict(orient="records"))
+
+
+def _edition_filter_params_present(
+    edition_statut: str | None,
+    edition_score_mode: str | None,
+    edition_score_threshold_lt: int | None,
+    edition_score_bucket_decile: int | None,
+    edition_score_include_na: bool | None,
+) -> bool:
+    """Vrai si au moins un paramètre de filtre édition a été fourni dans la query string."""
+    return any(
+        v is not None
+        for v in (
+            edition_statut,
+            edition_score_mode,
+            edition_score_threshold_lt,
+            edition_score_bucket_decile,
+            edition_score_include_na,
+        )
+    )
 
 
 class SigninBody(BaseModel):
@@ -170,11 +200,55 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         request: Request,
         project_id: str,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        edition_statut: Annotated[str | None, Query(alias="edition_statut")] = None,
+        edition_score_mode: Annotated[str | None, Query(alias="edition_score_mode")] = None,
+        edition_score_threshold_lt: Annotated[
+            int | None, Query(alias="edition_score_threshold_lt", ge=0, le=100)
+        ] = None,
+        edition_score_bucket_decile: Annotated[
+            int | None, Query(alias="edition_score_bucket_decile", ge=0, le=9)
+        ] = None,
+        edition_score_include_na: Annotated[
+            bool | None, Query(alias="edition_score_include_na")
+        ] = None,
     ) -> dict[str, Any]:
+        """Liste les entrées ; paramètres ``edition_*`` optionnels = mêmes filtres que Streamlit."""
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
-        cols = [c for c in df.columns if not str(c).startswith("_")]
-        rows = df[cols].to_dict(orient="records")
+        if _edition_filter_params_present(
+            edition_statut,
+            edition_score_mode,
+            edition_score_threshold_lt,
+            edition_score_bucket_decile,
+            edition_score_include_na,
+        ):
+            statut_filter = (edition_statut or "").strip() or None
+            mode = edition_score_mode or "all"
+            try:
+                score_spec = build_edition_score_filter_spec(
+                    mode,
+                    threshold_lt=edition_score_threshold_lt
+                    if edition_score_threshold_lt is not None
+                    else 50,
+                    bucket_decile=edition_score_bucket_decile
+                    if edition_score_bucket_decile is not None
+                    else 0,
+                    include_na=edition_score_include_na
+                    if edition_score_include_na is not None
+                    else False,
+                )
+            except ValueError as exc:
+                raise EnvelopeHttpError(
+                    400,
+                    error_envelope_for_client(exc, include_technical_detail=False),
+                ) from exc
+            basis = prepare_for_edition_tab(df)
+            df = filter_edition_entries_dataframe(
+                basis,
+                statut_label=statut_filter,
+                score_spec=score_spec,
+            )
+        rows = _serialize_entries_df(df)
         return {"entries": rows}
 
     @app.patch("/api/projects/{project_id}/entries/{entry_id}")
@@ -184,14 +258,15 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         entry_id: str,
         body: EntryPatchBody,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         updates = {k: v for k, v in body.model_dump(exclude_none=True).items()}
         try:
             entry_mutations.apply_entry_field_updates(eng, project_id, user_id, entry_id, updates)
         except KeyError as exc:
             raise TenantResourceOpaqueDenial() from exc
-        return {"status": "ok"}
+        df = load_project_entries(eng, project_id, user_id)
+        return {"status": "ok", "entries": _serialize_entries_df(df)}
 
     @app.post("/api/projects/{project_id}/entries")
     async def api_create_entry(
@@ -199,7 +274,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         project_id: str,
         body: NewEntryBody,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         new_id = entry_mutations.append_minimal_entry(
             eng,
@@ -208,7 +283,8 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             input_text=body.input,
             output_text=body.output,
         )
-        return {"id": new_id, "status": "ok"}
+        df = load_project_entries(eng, project_id, user_id)
+        return {"id": new_id, "status": "ok", "entries": _serialize_entries_df(df)}
 
     @app.get("/api/projects/{project_id}/export.csv")
     async def api_export_csv(
@@ -392,10 +468,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     document.getElementById("projectSel").onchange = () => loadEntries();
     document.getElementById("btnReloadEntries").onclick = () => loadEntries();
 
-    async function loadEntries() {
-      const pid = document.getElementById("projectSel").value;
-      if (!pid) return;
-      const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries");
+    function renderEntriesTable(data) {
       const div = document.getElementById("entriesTable");
       if (!data.entries.length) { div.textContent = "(aucune fiche)"; return; }
       const t = document.createElement("table");
@@ -413,19 +486,26 @@ _INDEX_HTML = """<!DOCTYPE html>
       div.appendChild(t);
     }
 
+    async function loadEntries() {
+      const pid = document.getElementById("projectSel").value;
+      if (!pid) return;
+      const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries");
+      renderEntriesTable(data);
+    }
+
     document.getElementById("btnSave").onclick = async () => {
       const pid = document.getElementById("projectSel").value;
       const eid = document.getElementById("entryId").value.trim();
       const input = document.getElementById("fldInput").value;
       const output = document.getElementById("fldOutput").value;
       try {
-        await api("/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid), {
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ input, output }),
         });
         showOk("Fiche enregistrée.");
-        await loadEntries();
+        if (out.entries) renderEntriesTable(out); else await loadEntries();
       } catch (e) { showErr(e); }
     };
 
@@ -441,7 +521,7 @@ _INDEX_HTML = """<!DOCTYPE html>
         });
         document.getElementById("entryId").value = out.id;
         showOk("Fiche créée : " + out.id);
-        await loadEntries();
+        if (out.entries) renderEntriesTable(out); else await loadEntries();
       } catch (e) { showErr(e); }
     };
 

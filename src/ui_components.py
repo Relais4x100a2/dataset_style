@@ -44,7 +44,6 @@ from src.database import (
     list_recent_deprovision_ops,
     replay_quarantined_operation,
     require_role,
-    update_project_entries,
     update_project_settings_as_admin,
 )
 from src.empty_project_onboarding import (
@@ -70,9 +69,7 @@ from src.nlp_engine import (
     EXPORT_PERIMETER_COHERENCE_MEAN_ALERT_LT,
     EXPORT_PERIMETER_LOW_COHERENCE_OUTLIER_COUNT_THRESHOLD_LT,
     RowNlpCacheResult,
-    avg_signature_from_cache,
     coherence_score_bucket_table,
-    compute_row_cache,
     corriger_texte_fr,
     count_trivial_syntax_contrast_entries,
     dataframe_for_coherence_distribution_scan,
@@ -123,6 +120,11 @@ from src.services.edition_sequential_navigation import (
     edition_nav_boundary_caption_fr,
     edition_nav_singleton_filtered_caption_fr,
     edition_nav_unsaved_changes_notice_fr,
+)
+from src.services.entry_nlp_persist_service import (
+    load_fr_core_nlp_optional,
+    persist_edited_entry_with_nlp_cache,
+    persist_new_entry_with_nlp_cache,
 )
 from src.services.export_quality_recap_service import build_export_quality_recap
 from src.services.export_scope_service import summarize_export_perimeter
@@ -225,13 +227,7 @@ def _load_fr_core_nlp():
     Streamlit : les appels depuis plusieurs onglets ou actions réutilisent la même
     instance en mémoire.
     """
-    try:
-        import spacy
-
-        return spacy.load("fr_core_news_sm")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Impossible de charger fr_core_news_sm: %s", exc)
-        return None
+    return load_fr_core_nlp_optional()
 
 
 def _ensure_cache_columns_on_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1716,27 +1712,21 @@ def render_tab_ajout(
             ]
         )
         require_role(engine, project_id, user.user_id, ("admin", "collaborator"))
-        df_base = _ensure_cache_columns_on_df(df)
         new_row = _ensure_cache_columns_on_df(new_row)
-        combined = pd.concat([df_base, new_row], ignore_index=True)
         row_id = str(new_row.iloc[0]["id"])
-        to_persist: pd.DataFrame
         try:
             with st.spinner("Analyse linguistique et enregistrement en base…"):
                 nlp_model = _load_fr_core_nlp()
-                pkg = compute_row_cache(
-                    input_save,
-                    output_save,
-                    nlp_model,
-                    combined,
-                    row_id,
-                    CACHE_COLUMNS,
-                    avg_signature_from_cache,
+                persist_new_entry_with_nlp_cache(
+                    engine,
+                    project_id,
+                    user.user_id,
+                    df_existing=df,
+                    new_row_df=new_row,
+                    input_text=input_save,
+                    output_text=output_save,
+                    nlp=nlp_model,
                 )
-                for col, val in pkg.cache.items():
-                    new_row.at[0, col] = val
-                to_persist = pd.concat([df_base, new_row], ignore_index=True)
-                update_project_entries(engine, project_id, to_persist, user.user_id)
                 invalidate_project_entries_cache()
                 df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
                 fb = row_nlp_feedback_bundle_after_persist(
@@ -2136,18 +2126,16 @@ def render_tab_edition(
         try:
             with st.spinner("Analyse linguistique et enregistrement en base…"):
                 nlp_model = _load_fr_core_nlp()
-                pkg = compute_row_cache(
-                    str(row["input"]),
-                    str(row["output"]),
-                    nlp_model,
-                    out,
-                    str(row["id"]),
-                    CACHE_COLUMNS,
-                    avg_signature_from_cache,
+                persist_edited_entry_with_nlp_cache(
+                    engine,
+                    project_id,
+                    user.user_id,
+                    df_full=out,
+                    entry_id=str(row["id"]),
+                    input_text=str(row["input"]),
+                    output_text=str(row["output"]),
+                    nlp=nlp_model,
                 )
-                for col, val in pkg.cache.items():
-                    out.loc[out["id"].astype(str) == str(row["id"]), col] = val
-                update_project_entries(engine, project_id, out, user.user_id)
                 invalidate_project_entries_cache()
                 df_loaded = cached_load_project_entries(engine, project_id, user.user_id)
                 fb = row_nlp_feedback_bundle_after_persist(
