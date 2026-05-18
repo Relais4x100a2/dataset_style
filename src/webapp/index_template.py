@@ -16,6 +16,7 @@ INDEX_HTML = """<!DOCTYPE html>
     .row { margin: 0.75rem 0; }
     .err { color: #a40000; white-space: pre-wrap; }
     .ok { color: #0b5; }
+    .warn { color: #964; white-space: pre-wrap; }
     code { font-size: 0.85rem; }
     nav#mainNav {
       display: flex; flex-wrap: wrap; gap: 0.25rem; border-bottom: 1px solid #ccd; margin: 0.5rem 0 1rem;
@@ -116,7 +117,10 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="6">
       <h2>Super Admin</h2>
-      <p class="muted">Placeholder — gouvernance globale : sprint dédié.</p>
+      <p class="muted">Invitation d’un collaborateur (invitation-only). Aucune inscription publique.</p>
+      <label>E-mail du collaborateur <input type="email" id="saInviteEmail" autocomplete="off" /></label>
+      <div class="row"><button type="button" id="btnSaInvite">Envoyer l’invitation</button></div>
+      <p id="saInviteMsg" class="muted" aria-live="polite"></p>
     </div>
   </template>
 
@@ -240,6 +244,43 @@ INDEX_HTML = """<!DOCTYPE html>
       wireProjectAndEntries();
     }
 
+    function wireSuperAdminInvite() {
+      const btn = document.getElementById("btnSaInvite");
+      const msg = document.getElementById("saInviteMsg");
+      const inp = document.getElementById("saInviteEmail");
+      if (!btn || !msg || !inp) return;
+      btn.onclick = async () => {
+        msg.textContent = "";
+        msg.className = "muted";
+        const email = inp.value.trim();
+        if (!email) {
+          msg.textContent = "Saisis une adresse e-mail.";
+          msg.className = "err";
+          return;
+        }
+        btn.disabled = true;
+        try {
+          const out = await api("/api/super-admin/invite", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          });
+          msg.textContent = out.message;
+          msg.className = out.mailMode === "smtp" ? "ok" : "warn";
+        } catch (e) {
+          if (e && e.error) {
+            msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
+            msg.className = "err";
+          } else {
+            msg.textContent = "Erreur inattendue.";
+            msg.className = "err";
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    }
+
     function wireProjectAndEntries() {
       const ps = document.getElementById("projectSel");
       if (ps) ps.onchange = onProjectChanged;
@@ -257,6 +298,7 @@ INDEX_HTML = """<!DOCTYPE html>
       if (b6) b6.onclick = () => downloadCsv();
       const b7 = document.getElementById("btnJsonl");
       if (b7) b7.onclick = () => downloadJsonl();
+      wireSuperAdminInvite();
     }
 
     document.getElementById("btnSignin").onclick = async () => {

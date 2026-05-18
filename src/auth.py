@@ -207,32 +207,35 @@ def bootstrap_first_admin(engine: Engine) -> None:
         logger.exception("bootstrap_first_admin: erreur lors de la création du compte.")
 
 
+def _auth_env_flag_true(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def verify_invitation_only_contract() -> None:
+    """Vérifie ``AUTH_ENFORCE_INVITATION_ONLY`` ⇒ ``SUPERTOKENS_SIGNUP_DISABLED`` (sans Streamlit).
+
+    Utilisable au démarrage FastAPI ; :func:`ensure_invitation_only_policy` réutilise la même
+    règle avec mémoisation ``st.session_state`` côté Streamlit.
+    """
+    if not _auth_env_flag_true("AUTH_ENFORCE_INVITATION_ONLY"):
+        return
+    if not _auth_env_flag_true("SUPERTOKENS_SIGNUP_DISABLED"):
+        raise RuntimeError(
+            "AUTH_ENFORCE_INVITATION_ONLY=true exige SUPERTOKENS_SIGNUP_DISABLED=true."
+        )
+
+
 def ensure_invitation_only_policy() -> None:
     """
     Vérifie contractuellement que le signup provider est bloqué.
 
     Vérification non destructive activée seulement si AUTH_ENFORCE_INVITATION_ONLY=true.
     """
-    enforce = (os.environ.get("AUTH_ENFORCE_INVITATION_ONLY") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not enforce:
+    if not _auth_env_flag_true("AUTH_ENFORCE_INVITATION_ONLY"):
         return
     if st.session_state.get("auth_invitation_policy_checked"):
         return
-    signup_disabled = (os.environ.get("SUPERTOKENS_SIGNUP_DISABLED") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not signup_disabled:
-        raise RuntimeError(
-            "AUTH_ENFORCE_INVITATION_ONLY=true exige SUPERTOKENS_SIGNUP_DISABLED=true."
-        )
+    verify_invitation_only_contract()
     st.session_state["auth_invitation_policy_checked"] = True
 
 

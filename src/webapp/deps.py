@@ -72,3 +72,18 @@ def require_app_user(
 def require_app_user_id(user: Annotated[UserRecord, Depends(require_app_user)]) -> str:
     """Identifiant applicatif dérivé de :func:`require_app_user`."""
     return user.user_id
+
+
+def require_super_admin_app_user(
+    user: Annotated[UserRecord, Depends(require_app_user)],
+) -> UserRecord:
+    """Refuse avec 403 si l'utilisateur n'est pas super-admin global."""
+    if not user.is_super_admin:
+        raise EnvelopeHttpError(
+            403,
+            error_envelope_for_client(
+                PermissionError("Droits super admin requis."),
+                include_technical_detail=False,
+            ),
+        )
+    return user

@@ -51,6 +51,27 @@ class AuthSecurityTests(unittest.TestCase):
                     self.assertTrue(state.get("auth_invitation_policy_checked"))
                     signup_mock.assert_not_called()
 
+    def test_verify_invitation_only_contract_raises_if_signup_flag_missing(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"AUTH_ENFORCE_INVITATION_ONLY": "true", "SUPERTOKENS_SIGNUP_DISABLED": "false"},
+            clear=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                auth.verify_invitation_only_contract()
+
+    def test_verify_invitation_only_contract_noop_if_disabled(self) -> None:
+        with patch.dict(os.environ, {"AUTH_ENFORCE_INVITATION_ONLY": "false"}, clear=False):
+            auth.verify_invitation_only_contract()
+
+    def test_verify_invitation_only_contract_ok_when_aligned(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"AUTH_ENFORCE_INVITATION_ONLY": "true", "SUPERTOKENS_SIGNUP_DISABLED": "true"},
+            clear=False,
+        ):
+            auth.verify_invitation_only_contract()
+
     def test_saga_provider_done_error_increments_retry(self) -> None:
         op = SimpleNamespace(state="provider_done", retry_count=0)
         engine = object()

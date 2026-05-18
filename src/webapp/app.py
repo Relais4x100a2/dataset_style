@@ -24,7 +24,7 @@ from src.api_errors import (
     error_envelope_for_client,
     log_resolved_api_error,
 )
-from src.auth import persist_user_from_signin_ok
+from src.auth import persist_user_from_signin_ok, verify_invitation_only_contract
 from src.database import (
     STATUT_VALIDE,
     UserRecord,
@@ -51,6 +51,7 @@ from src.webapp import curator_ai, entry_mutations
 from src.webapp import deps as webapp_deps
 from src.webapp.errors import EnvelopeHttpError
 from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
+from src.webapp.super_admin_invite import invite_collaborator_by_email
 from src.webapp.workspace_payload import projects_list_response
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,29 @@ class CuratorLanguageToolBody(BaseModel):
     text: str = ""
 
 
+class SuperAdminInviteBody(BaseModel):
+    """Corps d'invitation super-admin (e-mail collaborateur)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(..., min_length=1, max_length=320)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _strip_email(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str) -> str:
+        em = value.lower()
+        if "@" not in em:
+            raise ValueError("Adresse e-mail invalide.")
+        return em
+
+
 def _cors_origins() -> list[str]:
     raw = (os.environ.get("WEBAPP_CORS_ORIGINS") or "http://localhost:8080").strip()
     return [o.strip() for o in raw.split(",") if o.strip()]
@@ -235,6 +259,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             if not url:
                 raise RuntimeError("DATABASE_URL requis pour le slice web.")
             app.state.engine = create_db_engine(url)
+        verify_invitation_only_contract()
         yield
 
     app = FastAPI(title="Dataset Style — slice vertical", lifespan=lifespan)
@@ -599,6 +624,33 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 503,
                 curator_ai.curator_languagetool_unavailable_envelope(),
             ) from exc
+
+    @app.post("/api/super-admin/invite")
+    async def api_super_admin_invite(
+        request: Request,
+        body: SuperAdminInviteBody,
+        user: Annotated[UserRecord, Depends(webapp_deps.require_super_admin_app_user)],
+    ) -> Any:
+        """Invitation collaborateur (même chaîne que Streamlit : lien + mailer)."""
+        eng = webapp_deps.get_engine(request)
+        try:
+            outcome = invite_collaborator_by_email(eng, user.user_id, body.email)
+        except PermissionError as exc:
+            raise EnvelopeHttpError(
+                403,
+                error_envelope_for_client(exc, include_technical_detail=False),
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            log_resolved_api_error(logger, exc, extra_context={"route": "super_admin_invite"})
+            return JSONResponse(
+                status_code=500,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        return {
+            "status": "ok",
+            "mailMode": outcome.mail_mode,
+            "message": outcome.message_fr,
+        }
 
     return app
 
