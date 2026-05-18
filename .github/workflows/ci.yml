@@ -24,5 +24,7 @@ jobs:
       - uses: astral-sh/ruff-action@248b6d6da365ac08f8a75f97a45e47c1f9d193d2 # v2
         with:
           args: "format --check ."
+      - name: Healthcheck HTTP FastAPI (issue-008)
+        run: pytest -q tests/test_webapp_health_issue008.py
       - name: Run tests
         run: pytest -q

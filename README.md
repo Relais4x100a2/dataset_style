@@ -83,6 +83,8 @@ make dev
 - `app` (Streamlit, port **8501** par défaut)
 - `webapp` (slice vertical FastAPI issue-007, port **8080** par défaut — coquille HTML + API `/api/...`)
 
+Pour **Streamlit + FastAPI** : `make dev`. Pour **FastAPI seul** (postgres + supertokens + webapp) : `make dev-web` ou voir **`docs/dev_new_frontend.md`**.
+
 Variables utiles : `WEBAPP_PORT`, `WEBAPP_CORS_ORIGINS` (voir `.env.example`).
 
 Commandes utiles:
