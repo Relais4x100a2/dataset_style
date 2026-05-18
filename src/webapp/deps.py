@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import Header, Request
+from fastapi import Depends, Header, Request
 from sqlalchemy.engine import Engine
 
 from src.api_errors import AuthSessionExpiredError, error_envelope_for_client
-from src.database import get_user_record_by_su_user_id
+from src.database import UserRecord, get_user_record_by_su_user_id
 from src.supertokens_recipe_client import (
     extract_su_user_id_from_verify_payload,
     verify_access_token,
@@ -36,11 +36,11 @@ def _parse_bearer(authorization: str | None) -> str:
     return token
 
 
-def require_app_user_id(
+def require_app_user(
     request: Request,
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
-) -> str:
-    """Vérifie le jeton SuperTokens et retourne l'``user_id`` applicatif."""
+) -> UserRecord:
+    """Vérifie le jeton SuperTokens et retourne l'enregistrement utilisateur applicatif."""
     try:
         token = _parse_bearer(authorization)
     except AuthSessionExpiredError as exc:
@@ -60,10 +60,15 @@ def require_app_user_id(
             raise AuthSessionExpiredError()
         if (record.disabled_at or "").strip():
             raise AuthSessionExpiredError()
-        return record.user_id
+        return record
     except AuthSessionExpiredError as exc:
         logger.info("Session refusée ou expirée.")
         raise EnvelopeHttpError(
             401,
             error_envelope_for_client(exc, include_technical_detail=False),
         ) from exc
+
+
+def require_app_user_id(user: Annotated[UserRecord, Depends(require_app_user)]) -> str:
+    """Identifiant applicatif dérivé de :func:`require_app_user`."""
+    return user.user_id
