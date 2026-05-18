@@ -19,6 +19,14 @@ def test_onboarding_steps_reference_workflow_tab_labels() -> None:
     assert EXPECTED_WORKFLOW_TAB_ORDER[2] in labels
 
 
+def test_empty_dataset_curator_guidance_names_settings_and_new_entry_tabs() -> None:
+    """issue-015: empty project onboarding CTAs use ``EXPECTED_WORKFLOW_TAB_ORDER``."""
+    text = ep.empty_dataset_curator_guidance_markdown_fr()
+    assert EXPECTED_WORKFLOW_TAB_ORDER[1] in text
+    assert EXPECTED_WORKFLOW_TAB_ORDER[2] in text
+    assert len(text) >= 40
+
+
 def test_onboarding_step_one_points_to_projects_tab_for_first_project() -> None:
     """Issue-028: premier projet se crée dans l'onglet Projets, pas depuis la sidebar."""
     joined = ep.onboarding_steps_when_creation_allowed()[0].body_markdown

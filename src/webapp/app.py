@@ -1,4 +1,4 @@
-"""Application FastAPI — slice vertical issue-007 (auth, projets, entrées, export)."""
+"""Application FastAPI — slice vertical (issue-007, issue-015 export & onboarding)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
+import pandas as pd
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
@@ -15,12 +16,17 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.engine import Engine
 
 from src.api_errors import (
+    ExportPayloadTooLargeError,
     TenantResourceOpaqueDenial,
     error_envelope_for_client,
     log_resolved_api_error,
 )
 from src.auth import persist_user_from_signin_ok
 from src.database import create_db_engine, list_projects_for_user, load_project_entries
+from src.empty_project_onboarding import (
+    empty_dataset_curator_guidance_html_fr,
+    no_projects_slice_guidance_html_fr,
+)
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.webapp import deps as webapp_deps
@@ -78,6 +84,31 @@ def _cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
+def _webapp_export_max_rows() -> int | None:
+    """Limite optionnelle (nombre de fiches exportables) via ``WEBAPP_EXPORT_MAX_ROWS``."""
+    raw = (os.environ.get("WEBAPP_EXPORT_MAX_ROWS") or "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        logger.warning("WEBAPP_EXPORT_MAX_ROWS ignoré (entier attendu): %s", raw)
+        return None
+    if n <= 0:
+        return None
+    return n
+
+
+def _enforce_export_row_cap(export_df: pd.DataFrame) -> None:
+    """Lève :exc:`ExportPayloadTooLargeError` si un plafond métier est configuré et dépassé."""
+    cap = _webapp_export_max_rows()
+    if cap is None:
+        return
+    n = len(export_df.index)
+    if n > cap:
+        raise ExportPayloadTooLargeError(row_count=n, max_rows=cap)
+
+
 def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     """Fabrique l'application ; ``engine`` injectable pour les tests."""
 
@@ -115,7 +146,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index() -> str:
-        return _INDEX_HTML
+        return build_slice_index_html()
 
     @app.post("/api/auth/signin", response_model=None)
     async def api_signin(request: Request, body: SigninBody) -> Any:
@@ -220,6 +251,13 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
         export_df = dataframe_for_export(df, scope)
+        try:
+            _enforce_export_row_cap(export_df)
+        except ExportPayloadTooLargeError as exc:
+            return JSONResponse(
+                status_code=413,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
         cols = [c for c in export_df.columns if not str(c).startswith("_")]
         text = export_df[cols].to_csv(index=False)
         return PlainTextResponse(
@@ -238,7 +276,20 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     ) -> Response:
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
-        payload = convert_to_jsonl(df, format=export_format, include_stylometry=False, scope=scope)
+        export_df = dataframe_for_export(df, scope)
+        try:
+            _enforce_export_row_cap(export_df)
+        except ExportPayloadTooLargeError as exc:
+            return JSONResponse(
+                status_code=413,
+                content=error_envelope_for_client(exc, include_technical_detail=None),
+            )
+        payload = convert_to_jsonl(
+            df,
+            format=export_format,
+            include_stylometry=True,
+            scope=scope,
+        )
         return PlainTextResponse(
             content=payload,
             media_type="application/x-ndjson; charset=utf-8",
@@ -248,9 +299,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     return app
 
 
-app = create_slice_app()
-
-_INDEX_HTML = """<!DOCTYPE html>
+_INDEX_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
@@ -265,12 +314,14 @@ _INDEX_HTML = """<!DOCTYPE html>
     .err { color: #a40000; white-space: pre-wrap; }
     .ok { color: #0b5; }
     code { font-size: 0.85rem; }
+    .onboarding-empty { background: #f0f7ff; border: 1px solid #c9d7e8; padding: 0.75rem 1rem; margin: 0.75rem 0; border-radius: 6px; font-size: 0.95rem; }
   </style>
 </head>
 <body>
   <h1>Slice vertical (issue-007)</h1>
-  <p>Parcours minimal : connexion, projet propriétaire, édition entrée, export CSV/JSONL.</p>
+  <p>Parcours minimal : connexion, projet propriétaire, édition entrée, export CSV/JSONL (issue-015).</p>
   <p>Streamlit reste sur le port <code>8501</code> ; cette coquille est servie sur le port du service <code>webapp</code>.</p>
+  <!-- Limite optionnelle côté serveur : variable d'environnement WEBAPP_EXPORT_MAX_ROWS (entier > 0). -->
 
   <section id="auth">
     <h2>Connexion</h2>
@@ -286,8 +337,10 @@ _INDEX_HTML = """<!DOCTYPE html>
     <label>Projet sélectionné
       <select id="projectSel"></select>
     </label>
+    <div id="noProjectsHint" class="onboarding-empty" hidden>__NO_PROJECTS_GUIDANCE__</div>
     <h2>Entrées</h2>
     <p><button type="button" id="btnReloadEntries">Recharger les entrées</button></p>
+    <div id="emptyEntriesOnboarding" class="onboarding-empty" hidden>__EMPTY_DATASET_GUIDANCE__</div>
     <div id="entriesTable"></div>
     <h3>Édition (id de fiche)</h3>
     <label>id <input type="text" id="entryId" /></label>
@@ -305,9 +358,16 @@ _INDEX_HTML = """<!DOCTYPE html>
         <option value="full_dataset">Tout le dataset</option>
       </select>
     </label>
+    <label>Format JSONL
+      <select id="exportFormat">
+        <option value="lfm2">lfm2</option>
+        <option value="baguettotron">baguettotron</option>
+        <option value="mistral">mistral</option>
+      </select>
+    </label>
     <div class="row">
       <button type="button" id="btnCsv">Télécharger CSV</button>
-      <button type="button" id="btnJsonl">Télécharger JSONL (LFM2)</button>
+      <button type="button" id="btnJsonl">Télécharger JSONL</button>
     </div>
   </section>
 
@@ -380,7 +440,15 @@ _INDEX_HTML = """<!DOCTYPE html>
     async function loadProjects() {
       const data = await api("/api/projects");
       const sel = document.getElementById("projectSel");
+      const noProj = document.getElementById("noProjectsHint");
       sel.innerHTML = "";
+      if (!data.projects.length) {
+        noProj.hidden = false;
+        document.getElementById("entriesTable").textContent = "";
+        document.getElementById("emptyEntriesOnboarding").hidden = true;
+        return;
+      }
+      noProj.hidden = true;
       for (const p of data.projects) {
         const o = document.createElement("option");
         o.value = p.id; o.textContent = p.name + " (" + p.role + ")";
@@ -394,10 +462,16 @@ _INDEX_HTML = """<!DOCTYPE html>
 
     async function loadEntries() {
       const pid = document.getElementById("projectSel").value;
-      if (!pid) return;
+      const emptyOb = document.getElementById("emptyEntriesOnboarding");
+      if (!pid) { emptyOb.hidden = true; return; }
       const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries");
       const div = document.getElementById("entriesTable");
-      if (!data.entries.length) { div.textContent = "(aucune fiche)"; return; }
+      if (!data.entries.length) {
+        div.textContent = "(aucune fiche)";
+        emptyOb.hidden = false;
+        return;
+      }
+      emptyOb.hidden = true;
       const t = document.createElement("table");
       t.border = "1";
       const keys = Object.keys(data.entries[0]).filter(k => !k.startsWith("_"));
@@ -445,13 +519,19 @@ _INDEX_HTML = """<!DOCTYPE html>
       } catch (e) { showErr(e); }
     };
 
-    function scopeParam() {
+    function exportCsvQuery() {
       return "?scope=" + encodeURIComponent(document.getElementById("exportScope").value);
+    }
+
+    function exportJsonlQuery() {
+      const scope = document.getElementById("exportScope").value;
+      const fmt = document.getElementById("exportFormat").value;
+      return "?scope=" + encodeURIComponent(scope) + "&format=" + encodeURIComponent(fmt);
     }
 
     document.getElementById("btnCsv").onclick = async () => {
       const pid = document.getElementById("projectSel").value;
-      const r = await fetch("/api/projects/" + encodeURIComponent(pid) + "/export.csv" + scopeParam(), {
+      const r = await fetch("/api/projects/" + encodeURIComponent(pid) + "/export.csv" + exportCsvQuery(), {
         headers: { "Authorization": "Bearer " + token() },
       });
       if (!r.ok) { showErr(await r.json()); return; }
@@ -464,17 +544,28 @@ _INDEX_HTML = """<!DOCTYPE html>
 
     document.getElementById("btnJsonl").onclick = async () => {
       const pid = document.getElementById("projectSel").value;
-      const r = await fetch("/api/projects/" + encodeURIComponent(pid) + "/export.jsonl" + scopeParam(), {
+      const r = await fetch("/api/projects/" + encodeURIComponent(pid) + "/export.jsonl" + exportJsonlQuery(), {
         headers: { "Authorization": "Bearer " + token() },
       });
       if (!r.ok) { showErr(await r.json()); return; }
       const blob = await r.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = "export.jsonl";
+      const fmt = document.getElementById("exportFormat").value;
+      a.download = "export_" + fmt + ".jsonl";
       a.click();
     };
   </script>
 </body>
 </html>
 """
+
+
+def build_slice_index_html() -> str:
+    """Page HTML du slice : textes d’onboarding injectés depuis ``empty_project_onboarding``."""
+    return _INDEX_HTML_TEMPLATE.replace(
+        "__EMPTY_DATASET_GUIDANCE__", empty_dataset_curator_guidance_html_fr()
+    ).replace("__NO_PROJECTS_GUIDANCE__", no_projects_slice_guidance_html_fr())
+
+
+app = create_slice_app()
