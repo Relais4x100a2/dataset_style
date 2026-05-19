@@ -22,6 +22,25 @@ from src.services.entry_nlp_persist_service import (
     persist_new_entry_with_nlp_cache,
 )
 
+
+def _resolve_closed_dimension_value(
+    dims: dict[str, list[str]],
+    dim_key: str,
+    override: str | None,
+) -> str:
+    """Retourne une valeur de dimension ; ``override`` doit être dans la liste projet si fourni."""
+    raw = dims.get(dim_key) or [""]
+    allowed = [str(x) for x in raw]
+    default = str(allowed[0]) if allowed else ""
+    if override is None:
+        return default
+    choice = str(override).strip()
+    if choice not in allowed:
+        msg = f"Dimension « {dim_key} » : valeur non autorisée pour ce projet."
+        raise ValueError(msg)
+    return choice
+
+
 _PATCHABLE: frozenset[str] = frozenset(
     {
         "input",
@@ -77,30 +96,36 @@ def append_minimal_entry(
     *,
     input_text: str,
     output_text: str,
+    type_: str | None = None,
+    structure: str | None = None,
+    ton: str | None = None,
+    format_: str | None = None,
+    public: str | None = None,
+    statut: str | None = None,
+    notes: str | None = None,
 ) -> str:
-    """Ajoute une fiche avec dimensions par défaut du preset actif (admin ou collaborateur)."""
+    """Ajoute une fiche avec dimensions du preset actif (admin ou collaborateur).
+
+    Les champs de dimension fermée non fournis prennent la première valeur du preset.
+    Une valeur fournie doit appartenir à la liste active du projet.
+    """
     require_role(engine, project_id, user_id, ("admin", "collaborator"))
     settings = get_project_settings(engine, project_id)
     _pk, _custom, dims = load_active_dimensions(settings)
-    types = dims.get("types") or [""]
-    structures = dims.get("structures") or [""]
-    tons = dims.get("tons") or [""]
-    formats = dims.get("formats") or [""]
-    publics = dims.get("publics") or [""]
-    statuts = dims.get("statuts") or ["En cours"]
     new_id = f"e_{uuid.uuid4().hex[:12]}"
+    notes_val = "" if notes is None else str(notes)
     row = {
         "id": new_id,
         "date": date.today().isoformat(),
-        "type": str(types[0]),
-        "structure": str(structures[0]),
-        "ton": str(tons[0]),
-        "format": str(formats[0]),
-        "public": str(publics[0]),
+        "type": _resolve_closed_dimension_value(dims, "types", type_),
+        "structure": _resolve_closed_dimension_value(dims, "structures", structure),
+        "ton": _resolve_closed_dimension_value(dims, "tons", ton),
+        "format": _resolve_closed_dimension_value(dims, "formats", format_),
+        "public": _resolve_closed_dimension_value(dims, "publics", public),
         "input": input_text,
         "output": output_text,
-        "statut": str(statuts[0]),
-        "notes": "",
+        "statut": _resolve_closed_dimension_value(dims, "statuts", statut),
+        "notes": notes_val,
     }
     for col in CACHE_COLUMNS:
         row[col] = ""
