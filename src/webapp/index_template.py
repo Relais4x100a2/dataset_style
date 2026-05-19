@@ -82,7 +82,29 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="1">
       <h2>Réglages &amp; Export</h2>
-      <p class="muted">Réglages détaillés : parité sprint ultérieur. Export (même périmètre que Streamlit) :</p>
+      <h3>Dimensions &amp; profils (issue-011)</h3>
+      <p id="dimReadOnlyNote" class="muted" hidden>Seul un administrateur du projet peut modifier les dimensions.</p>
+      <p id="dimMsg" class="muted" aria-live="polite"></p>
+      <label>Profil de dimensions
+        <select id="dimPresetSel"></select>
+      </label>
+      <div class="row">
+        <button type="button" id="btnDimApplyPreset" disabled>Charger ce profil</button>
+      </div>
+      <label>Listes effectives (JSON — types, structures, tons, formats, publics, statuts)
+        <textarea id="dimJson" rows="12" spellcheck="false" disabled></textarea>
+      </label>
+      <div class="row">
+        <button type="button" id="btnDimSaveLists" disabled>Enregistrer les listes</button>
+      </div>
+      <h4>Profil personnalisé</h4>
+      <label>Identifiant technique <input type="text" id="dimCustomId" maxlength="200" disabled /></label>
+      <label>Libellé affiché <input type="text" id="dimCustomLabel" maxlength="500" disabled /></label>
+      <div class="row">
+        <button type="button" id="btnDimSaveCustom" disabled>Enregistrer le profil</button>
+      </div>
+      <h3>Export</h3>
+      <p class="muted">Même périmètre que Streamlit :</p>
       <label>Périmètre
         <select id="exportScope">
           <option value="validated_only">Validées seulement</option>
@@ -251,6 +273,49 @@ INDEX_HTML = """<!DOCTYPE html>
       }
     }
 
+    async function loadDimensionsSettings() {
+      const msg = document.getElementById("dimMsg");
+      const note = document.getElementById("dimReadOnlyNote");
+      const sel = document.getElementById("dimPresetSel");
+      const ta = document.getElementById("dimJson");
+      const ps = document.getElementById("projectSel");
+      if (!msg || !sel || !ta || !ps) return;
+      const pid = ps.value;
+      if (!pid) {
+        msg.textContent = "Sélectionnez un projet.";
+        return;
+      }
+      msg.textContent = "";
+      try {
+        const d = await api("/api/projects/" + encodeURIComponent(pid) + "/settings/dimensions");
+        sel.innerHTML = "";
+        for (const p of d.presets) {
+          const o = document.createElement("option");
+          o.value = p.key;
+          o.textContent = p.label + " (" + p.key + ")";
+          sel.appendChild(o);
+        }
+        sel.value = d.activePresetKey;
+        ta.value = JSON.stringify(d.dimensions, null, 2);
+        const can = d.canEditDimensions;
+        ta.disabled = !can;
+        if (note) note.hidden = can;
+        const bApply = document.getElementById("btnDimApplyPreset");
+        const bSave = document.getElementById("btnDimSaveLists");
+        const cid = document.getElementById("dimCustomId");
+        const clab = document.getElementById("dimCustomLabel");
+        const bCust = document.getElementById("btnDimSaveCustom");
+        if (bApply) bApply.disabled = !can;
+        if (bSave) bSave.disabled = !can;
+        if (cid) cid.disabled = !can;
+        if (clab) clab.disabled = !can;
+        if (bCust) bCust.disabled = !can;
+      } catch (e) {
+        if (e && e.error) msg.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
+        else msg.textContent = "Impossible de charger les dimensions.";
+      }
+    }
+
     function activateMainTab(idx) {
       mainNav.querySelectorAll("button").forEach((b, j) => b.classList.toggle("active", j === idx));
       panelsHost.querySelectorAll(".panel").forEach((p) => {
@@ -258,6 +323,7 @@ INDEX_HTML = """<!DOCTYPE html>
         p.classList.toggle("active", i === idx);
       });
       if (mainTabLabels[idx] === "Mon compte") loadAccountPanel().catch(showErr);
+      if (mainTabLabels[idx] === "Réglages & Export") loadDimensionsSettings().catch(showErr);
       if (mainTabLabels[idx] === "Super Admin") {
         loadSuperAdminAccounts().catch(showErr);
         loadSuperAdminSagaTelemetry().catch(function() {});
@@ -511,6 +577,80 @@ INDEX_HTML = """<!DOCTYPE html>
       if (b6) b6.onclick = () => downloadCsv();
       const b7 = document.getElementById("btnJsonl");
       if (b7) b7.onclick = () => downloadJsonl();
+      const bDimApply = document.getElementById("btnDimApplyPreset");
+      if (bDimApply) bDimApply.onclick = async () => {
+        const msg = document.getElementById("dimMsg");
+        if (msg) msg.textContent = "";
+        const ps = document.getElementById("projectSel");
+        const sel = document.getElementById("dimPresetSel");
+        if (!ps || !sel || !ps.value) return;
+        try {
+          await api("/api/projects/" + encodeURIComponent(ps.value) + "/settings/dimensions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "load_preset", preset_key: sel.value }),
+          });
+          if (msg) msg.textContent = "Profil appliqué.";
+          await loadDimensionsSettings();
+        } catch (e) {
+          if (msg && e && e.error) msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
+        }
+      };
+      const bDimSave = document.getElementById("btnDimSaveLists");
+      if (bDimSave) bDimSave.onclick = async () => {
+        const msg = document.getElementById("dimMsg");
+        if (msg) msg.textContent = "";
+        const ps = document.getElementById("projectSel");
+        const ta = document.getElementById("dimJson");
+        if (!ps || !ta || !ps.value) return;
+        let parsed;
+        try { parsed = JSON.parse(ta.value); } catch (_) {
+          if (msg) msg.textContent = "JSON invalide : vérifiez la syntaxe.";
+          return;
+        }
+        try {
+          await api("/api/projects/" + encodeURIComponent(ps.value) + "/settings/dimensions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "replace_dimensions", dimensions: parsed }),
+          });
+          if (msg) msg.textContent = "Listes enregistrées.";
+          await loadDimensionsSettings();
+        } catch (e) {
+          if (msg && e && e.error) msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
+        }
+      };
+      const bDimCustom = document.getElementById("btnDimSaveCustom");
+      if (bDimCustom) bDimCustom.onclick = async () => {
+        const msg = document.getElementById("dimMsg");
+        if (msg) msg.textContent = "";
+        const ps = document.getElementById("projectSel");
+        const ta = document.getElementById("dimJson");
+        const cid = document.getElementById("dimCustomId");
+        const clab = document.getElementById("dimCustomLabel");
+        if (!ps || !ta || !cid || !clab || !ps.value) return;
+        let parsed;
+        try { parsed = JSON.parse(ta.value); } catch (_) {
+          if (msg) msg.textContent = "JSON invalide : vérifiez la syntaxe.";
+          return;
+        }
+        try {
+          await api("/api/projects/" + encodeURIComponent(ps.value) + "/settings/dimensions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "save_custom_preset",
+              custom_preset_name: cid.value,
+              custom_preset_label: clab.value,
+              dimensions: parsed,
+            }),
+          });
+          if (msg) msg.textContent = "Profil personnalisé enregistré.";
+          await loadDimensionsSettings();
+        } catch (e) {
+          if (msg && e && e.error) msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
+        }
+      };
       wireSuperAdminAccountsPanel();
     }
 
@@ -571,6 +711,7 @@ INDEX_HTML = """<!DOCTYPE html>
         setActiveProjectHint("");
       }
       await loadEntries();
+      await loadDimensionsSettings().catch(function() {});
     }
 
     function onProjectChanged() {
@@ -579,6 +720,7 @@ INDEX_HTML = """<!DOCTYPE html>
       setActiveProjectHint(pid);
       clearEntryState();
       loadEntries().catch(showErr);
+      loadDimensionsSettings().catch(showErr);
     }
 
     async function loadEntries() {

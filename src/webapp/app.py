@@ -58,6 +58,11 @@ from src.webapp import curator_ai, entry_mutations
 from src.webapp import deps as webapp_deps
 from src.webapp.errors import EnvelopeHttpError
 from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
+from src.webapp.project_dimensions_settings import (
+    ProjectDimensionsPatchBody,
+    apply_project_dimensions_settings_patch,
+    build_project_dimensions_settings_payload,
+)
 from src.webapp.super_admin_invite import invite_collaborator_by_email
 from src.webapp.super_admin_saga import build_deprovision_telemetry_payload
 from src.webapp.workspace_payload import projects_list_response
@@ -599,6 +604,41 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             media_type="application/x-ndjson; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="export-{project_id}.jsonl"'},
         )
+
+    @app.get("/api/projects/{project_id}/settings/dimensions")
+    async def api_get_project_dimensions_settings(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Presets et dimensions effectives (lecture : issue-011, aligné ``src/presets``)."""
+        eng = webapp_deps.get_engine(request)
+        return build_project_dimensions_settings_payload(eng, project_id, user_id)
+
+    @app.patch("/api/projects/{project_id}/settings/dimensions")
+    async def api_patch_project_dimensions_settings(
+        request: Request,
+        project_id: str,
+        body: ProjectDimensionsPatchBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Mutation presets / dimensions (admin projet uniquement)."""
+        eng = webapp_deps.get_engine(request)
+        out, err = apply_project_dimensions_settings_patch(eng, project_id, user_id, body)
+        if err:
+            raise EnvelopeHttpError(
+                400,
+                {
+                    "error": {
+                        "code": "BAD_REQUEST",
+                        "title": "Réglages dimensions",
+                        "message": err,
+                        "suggested_action": "Corrigez les valeurs envoyées puis réessayez.",
+                        "detail": None,
+                    }
+                },
+            )
+        return out
 
     @app.get("/api/projects/{project_id}/curator/dimensions")
     async def api_curator_dimensions(

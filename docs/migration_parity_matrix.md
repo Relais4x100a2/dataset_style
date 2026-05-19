@@ -87,6 +87,19 @@ Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `
 
 ---
 
+## Réglages presets & dimensions (issue-011 / GitHub #133)
+
+Slice **webapp** : `GET /api/projects/{id}/settings/dimensions` et `PATCH` sur la même ressource (`src/webapp/project_dimensions_settings.py`, `src/webapp/app.py`) — validation et fusion alignées sur `src/presets.py` ; persistance inchangée via `update_project_settings` (`active_preset_key`, `custom_presets_json`, `dimensions_override_json`). Coquille HTML : onglet **Réglages & Export** (`src/webapp/index_template.py`).
+
+| ID flux | Slice (issue-011) |
+| --- | --- |
+| SET-READ | OK — `GET .../settings/dimensions` |
+| SET-WRITE | OK — `PATCH .../settings/dimensions` (dimensions + presets ; champs LLM / LanguageTool hors périmètre coquille, inchangés côté Streamlit) |
+| DIM-WRITE | OK — mêmes actions que `_render_dimensions_section` / `src/presets` |
+| ENT-NEW-READ | OK — smoke : après `PATCH`, `GET .../curator/dimensions` reflète `load_active_dimensions` (`tests/test_webapp_project_dimensions_settings.py`) |
+
+---
+
 ## Grille statut sprint backlog (issues issue-010 à issue-016)
 
 Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (pas le numéro GitHub — voir règle de synchronisation backlog / GitHub dans la doc projet).
@@ -97,12 +110,12 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | PRJ-VIEW | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | PRJ-CREATE | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | PRJ-DELETE | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SET-READ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SET-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| DIM-WRITE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| SET-READ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| SET-WRITE | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| DIM-WRITE | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | EXP-SCOPE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
 | EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
-| ENT-NEW-READ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
+| ENT-NEW-READ | ⏳ | OK | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-NEW-WRITE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-LLM | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
 | EDI-SAVE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
@@ -141,7 +154,7 @@ Jalons stables alignés sur les IDs flux de cette matrice : `SB-CTX`, `ENT-NEW-W
 Chaîne **projet → entrée → export** à rejouer après chaque bascule majeure UI / API :
 
 1. **Projet** : créer un projet (ou sélectionner un projet test), vérifier sidebar + onglet Projets.
-2. **Réglages** : ouvrir **Réglages & Export**, vérifier chargement des réglages (`get_project_settings`).
+2. **Réglages** : ouvrir **Réglages & Export**, vérifier chargement des réglages (Streamlit : `get_project_settings` ; slice webapp : `GET /api/projects/{id}/settings/dimensions`).
 3. **Entrée** : sous **Nouvelle entrée**, saisir input/output requis, enregistrer ; vérifier message de succès et qu’une relance affiche la ligne (cache invalidé — pas de « fantôme » d’ancien dataframe).
 4. **Export** : même onglet, basculer périmètre « Validées seulement » / « Tout le dataset », télécharger **CSV** et **JSONL** ; ouvrir les fichiers et contrôler cohérence des filtres (notamment statuts et colonnes stylométriques exportées).
 5. **Non-régression filtres** : avec des fiches non validées, confirmer que « Validées seulement » exclut bien les lignes hors `STATUT_VALIDE` (`export_utils.dataframe_for_export`).
@@ -154,6 +167,7 @@ Exemples de commandes ciblées (à intégrer dans CI ou lancer localement) :
 
 ```bash
 python3 -m pytest tests/test_curator_dashboard_snapshot.py tests/test_webapp_vertical_slice.py -q
+python3 -m pytest tests/test_webapp_project_dimensions_settings.py tests/test_presets_dimensions_patch_validation.py -q
 python3 -m pytest tests/test_migration_parity_matrix_doc.py -q
 # issue-009 / GitHub #131 : persistance Postgres + export (PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL)
 # Exporter DATASET_STYLE_REGRESSION_DATABASE_URL (postgresql://…) — en CI la variable est définie par .github/workflows/ci.yml

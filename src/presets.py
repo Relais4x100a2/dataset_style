@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 from src.database import ProjectSettings
@@ -184,6 +185,97 @@ def parse_dimensions_override(raw_json: str) -> dict[str, list[str]] | None:
 
 def dumps_dimensions_override(dimensions: dict[str, list[str]]) -> str:
     return json.dumps(normalize_dimensions(dimensions), ensure_ascii=False)
+
+
+STATUTS_LIST_CANNOT_BE_EMPTY_FR = "La liste des statuts ne peut pas être vide."
+DIMENSIONS_JSON_OBJECT_EXPECTED_FR = "Dimensions invalides : objet JSON attendu."
+RESERVED_BUILTIN_PRESET_KEY_FR = "Ce nom est réservé par un profil fourni avec l'application."
+UNKNOWN_PRESET_KEY_FR = "Profil de dimensions inconnu ou indisponible."
+CUSTOM_PRESET_ID_REQUIRED_FR = "Identifiant du profil requis."
+
+
+def validate_replace_dimensions_payload(raw: Any) -> tuple[dict[str, list[str]] | None, str | None]:
+    """Valide un remplacement complet des listes (parité UI Streamlit).
+
+    Args:
+        raw: Objet JSON des six listes (``types``, ``structures``, etc.).
+
+    Returns:
+        Paire ``(dimensions normalisées, message d'erreur FR)``. Si le second
+        élément est non nul, la persistance doit être refusée.
+    """
+    if not isinstance(raw, dict):
+        return None, DIMENSIONS_JSON_OBJECT_EXPECTED_FR
+    if "statuts" in raw and isinstance(raw["statuts"], list) and not _clean_list(raw["statuts"]):
+        return None, STATUTS_LIST_CANNOT_BE_EMPTY_FR
+    return normalize_dimensions(raw), None
+
+
+def normalize_custom_preset_storage_key(raw_name: str) -> str:
+    """Identifiant technique du profil (équivalent UI Streamlit, sans espaces)."""
+    return str(raw_name or "").strip().lower().replace(" ", "_")
+
+
+def apply_load_preset_to_settings(
+    current: ProjectSettings,
+    preset_key: str,
+) -> tuple[ProjectSettings | None, str | None]:
+    """Applique un profil prédéfini ou personnalisé (clé active + override dimensions)."""
+    custom = parse_custom_presets(current.custom_presets_json)
+    presets_map = available_presets(custom)
+    key = (preset_key or "").strip()
+    if key not in presets_map:
+        return None, UNKNOWN_PRESET_KEY_FR
+    target = preset_dimensions(presets_map[key])
+    return (
+        replace(
+            current,
+            active_preset_key=key,
+            dimensions_override_json=dumps_dimensions_override(target),
+        ),
+        None,
+    )
+
+
+def apply_replace_dimensions_to_settings(
+    current: ProjectSettings,
+    raw_dimensions: Any,
+) -> tuple[ProjectSettings | None, str | None]:
+    """Met à jour uniquement ``dimensions_override_json`` (clé de preset inchangée)."""
+    normalized, err = validate_replace_dimensions_payload(raw_dimensions)
+    if err:
+        return None, err
+    return replace(current, dimensions_override_json=dumps_dimensions_override(normalized)), None
+
+
+def apply_save_custom_preset_to_settings(
+    current: ProjectSettings,
+    raw_name: str,
+    raw_label: str | None,
+    raw_dimensions: Any,
+) -> tuple[ProjectSettings | None, str | None]:
+    """Fusionne un profil personnalisé dans ``custom_presets_json`` (parité Streamlit)."""
+    normalized, err = validate_replace_dimensions_payload(raw_dimensions)
+    if err:
+        return None, err
+    preset_id = normalize_custom_preset_storage_key(raw_name)
+    if not preset_id:
+        return None, CUSTOM_PRESET_ID_REQUIRED_FR
+    if preset_id in PRESETS:
+        return None, RESERVED_BUILTIN_PRESET_KEY_FR
+    custom = parse_custom_presets(current.custom_presets_json)
+    updated = deepcopy(custom)
+    saved_label = str(raw_label or "").strip() or preset_id
+    updated[preset_id] = {"label": saved_label, **normalized}
+    return (
+        replace(
+            current,
+            active_preset_key=preset_id,
+            custom_presets_json=dumps_custom_presets(updated),
+            dimensions_override_json=dumps_dimensions_override(normalized),
+        ),
+        None,
+    )
 
 
 def load_active_dimensions(
