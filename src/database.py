@@ -345,6 +345,12 @@ def ensure_schema(engine: Engine) -> None:
         _add_column_if_missing(conn, "users", "is_super_admin", "BOOLEAN NOT NULL DEFAULT FALSE")
         _add_column_if_missing(conn, "users", "disabled_at", "TIMESTAMPTZ NULL")
         _add_column_if_missing(conn, "users", "last_login_at", "TIMESTAMPTZ NULL")
+        _add_column_if_missing(
+            conn,
+            "users",
+            "ui_preferences_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
 
         # ── Migrations incrémentales : user_deprovision_ops ──
         _add_column_if_missing(conn, "user_deprovision_ops", "next_retry_at", "TIMESTAMPTZ NULL")
@@ -537,6 +543,53 @@ def get_user_email_display_name_by_id(engine: Engine, user_id: str) -> tuple[str
     if not row:
         return None
     return (str(row["email"]), str(row["display_name"]))
+
+
+def get_user_ui_preferences_raw(engine: Engine, user_id: str) -> str | None:
+    """Retourne le JSON brut des préférences UI, ou ``None`` si utilisateur absent / désactivé."""
+    if not user_id.strip():
+        return None
+    ensure_schema(engine)
+    with engine.begin() as conn:
+        row = (
+            conn.execute(
+                text(
+                    """
+                    SELECT ui_preferences_json AS prefs
+                    FROM users
+                    WHERE id = :uid AND disabled_at IS NULL
+                    LIMIT 1;
+                    """
+                ),
+                {"uid": user_id.strip()},
+            )
+            .mappings()
+            .first()
+        )
+    if not row:
+        return None
+    val = row.get("prefs")
+    if val is None:
+        return "{}"
+    return str(val)
+
+
+def update_user_ui_preferences_raw(engine: Engine, user_id: str, json_text: str) -> bool:
+    """Persiste le JSON canonique ; retourne ``True`` si une ligne a été mise à jour."""
+    ensure_schema(engine)
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                UPDATE users
+                SET ui_preferences_json = :prefs
+                WHERE id = :uid AND disabled_at IS NULL;
+                """
+            ),
+            {"prefs": json_text, "uid": user_id.strip()},
+        )
+    rc = result.rowcount
+    return (rc is not None) and (rc > 0)
 
 
 def require_super_admin(engine: Engine, actor_user_id: str) -> None:

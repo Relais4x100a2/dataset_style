@@ -78,11 +78,11 @@ Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
 ## Mon compte curateur (issue-016 / GitHub #138)
 
-Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `displayName`, `counts.ownedProjects`, `counts.activeMemberships`) ; `POST /api/auth/signout` renvoie `redirect` allow-listé (`WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST`, défaut `/`) ; coquille HTML : navigation shell + onglet **Mon compte** (issue-010).
+Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `displayName`, `counts`, `uiPreferences` avec `density` / `readingComfort` par défaut `default`) ; `PATCH /api/account/ui-preferences` (fusion partielle, issue-023) ; `POST /api/auth/signout` renvoie `redirect` allow-listé (`WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST`, défaut `/`) ; coquille HTML : navigation shell + onglet **Mon compte** (issue-010).
 
 | ID flux | Slice (issue-016) |
 | --- | --- |
-| ACC-INFO | OK — `GET /api/account` + affichage shell |
+| ACC-INFO | OK — `GET /api/account` + `PATCH /api/account/ui-preferences` + affichage shell |
 | ACC-DEL | Écart documenté — suppression compte (saga) hors scope du slice ; reste Streamlit |
 
 ---

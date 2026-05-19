@@ -40,3 +40,9 @@ Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_
 ## Tests et CI
 
 Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+
+## Préférences d'affichage (issue-023)
+
+- Lecture : champ `uiPreferences` sur `GET /api/account` (`density`, `readingComfort`, valeurs par défaut `default`).
+- Mise à jour : `PATCH /api/account/ui-preferences` avec corps JSON partiel (`density` et/ou `readingComfort`). Réponse : `{ "uiPreferences": { ... } }`.
+- Persistance : colonne `users.ui_preferences_json` (créée par `ensure_schema()` au boot Streamlit / webapp). Détails UX et mapping CSS : `docs/ui_display_preferences.md`.
