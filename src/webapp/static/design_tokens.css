@@ -95,6 +95,44 @@ textarea {
   margin: 0.75rem 0;
 }
 
+.curator-tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.curator-tool-row button {
+  width: auto;
+  max-width: none;
+  flex: 1 1 12rem;
+}
+
+.ds-lt-panel {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--ds-color-border-subtle);
+  background: var(--ds-color-surface-muted);
+}
+
+.ds-lt-corrected {
+  white-space: pre-wrap;
+  max-height: 14rem;
+  overflow: auto;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.ds-lt-sug {
+  border: 1px solid var(--ds-color-border-subtle);
+  padding: 0.35rem 0.5rem;
+  margin: 0.35rem 0;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  background: var(--ds-color-surface-elevated);
+}
+
 code {
   font-family: var(--ds-font-mono);
   font-size: 0.85rem;
