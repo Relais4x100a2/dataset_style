@@ -608,6 +608,8 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             entry_mutations.apply_entry_field_updates(eng, project_id, user_id, entry_id, updates)
         except KeyError as exc:
             raise TenantResourceOpaqueDenial() from exc
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
         return {"status": "ok", "entries": _serialize_entries_df(df)}
 

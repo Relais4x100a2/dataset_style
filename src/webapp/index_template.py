@@ -1284,6 +1284,10 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       const eid = document.getElementById("entryId").value.trim();
       const input = document.getElementById("fldInput").value;
       const output = document.getElementById("fldOutput").value;
+      if (!String(input).trim() || !String(output).trim()) {
+        showErr({ error: { title: "Validation", message: "Brouillon/Texte généré obligatoires.", code: "CLIENT" } });
+        return;
+      }
       const patch = {
         input: input,
         output: output,

@@ -56,6 +56,16 @@ _PATCHABLE: frozenset[str] = frozenset(
     }
 )
 
+# Champs d'entrée → clés ``load_active_dimensions`` (listes fermées), alignés sur ``append_minimal_entry``.
+_PATCH_CLOSED_FIELD_TO_DIMS_KEY: dict[str, str] = {
+    "type": "types",
+    "structure": "structures",
+    "ton": "tons",
+    "format": "formats",
+    "public": "publics",
+    "statut": "statuts",
+}
+
 
 def apply_entry_field_updates(
     engine: Engine,
@@ -64,17 +74,31 @@ def apply_entry_field_updates(
     entry_id: str,
     updates: dict[str, Any],
 ) -> None:
-    """Met à jour les champs autorisés d'une ligne puis persiste via le cache NLP."""
+    """Met à jour les champs autorisés d'une ligne puis persiste via le cache NLP.
+
+    Les dimensions fermées (``type``, ``structure``, etc.) sont validées contre
+    ``load_active_dimensions`` comme à la création (``_resolve_closed_dimension_value``).
+    """
     df = load_project_entries(engine, project_id, user_id)
     mask = df["id"] == entry_id
     if not mask.any():
         raise KeyError("entry_not_found")
+
+    dims: dict[str, list[str]] | None = None
+    if updates.keys() & _PATCH_CLOSED_FIELD_TO_DIMS_KEY.keys():
+        settings = get_project_settings(engine, project_id)
+        dims = load_active_dimensions(settings)[2]
+
     for key, raw in updates.items():
         if key not in _PATCHABLE:
             continue
         if key not in df.columns:
             continue
-        df.loc[mask, key] = str(raw)
+        if dims is not None and key in _PATCH_CLOSED_FIELD_TO_DIMS_KEY:
+            dim_key = _PATCH_CLOSED_FIELD_TO_DIMS_KEY[key]
+            df.loc[mask, key] = _resolve_closed_dimension_value(dims, dim_key, str(raw))
+        else:
+            df.loc[mask, key] = str(raw)
     input_text = str(df.loc[mask, "input"].iloc[0])
     output_text = str(df.loc[mask, "output"].iloc[0])
     persist_edited_entry_with_nlp_cache(

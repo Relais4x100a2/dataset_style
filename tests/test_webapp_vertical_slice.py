@@ -87,6 +87,56 @@ def test_patch_entry_calls_update_project_entries() -> None:
     assert "_stylometry_blob" not in body["entries"][0]
 
 
+def test_patch_entry_rejects_closed_dimension_not_in_active_list() -> None:
+    """PATCH : valeurs hors listes actives → 400 ``BAD_REQUEST`` (miroir POST / QA PR #171)."""
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df = pd.DataFrame(
+        [
+            {
+                "id": "e1",
+                "project_id": "p1",
+                "date": "",
+                "type": "Roman",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "a",
+                "output": "b",
+                "statut": "En cours",
+                "notes": "",
+            }
+        ]
+    )
+    dims = {
+        "types": ["Roman"],
+        "structures": [""],
+        "tons": [""],
+        "formats": [""],
+        "publics": [""],
+        "statuts": ["En cours"],
+    }
+    with (
+        patch("src.webapp.entry_mutations.load_project_entries", return_value=df),
+        patch("src.webapp.entry_mutations.get_project_settings", return_value=MagicMock()),
+        patch("src.webapp.entry_mutations.load_active_dimensions", return_value=("k", {}, dims)),
+        patch("src.webapp.entry_mutations.persist_edited_entry_with_nlp_cache") as save_m,
+    ):
+        with TestClient(app) as client:
+            r = client.patch(
+                "/api/projects/p1/entries/e1",
+                headers={"Authorization": "Bearer t"},
+                json={"type": "ÉtiquetteFantôme"},
+            )
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == "BAD_REQUEST"
+    assert "types" in err["message"]
+    save_m.assert_not_called()
+
+
 def test_export_jsonl_lfm2_includes_system_when_stylometry_columns_present() -> None:
     """issue-015: JSONL export matches Streamlit (``include_stylometry=True``)."""
     engine = MagicMock()
