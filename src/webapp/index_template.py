@@ -1,4 +1,4 @@
-"""Page d'accueil HTML du service ``webapp`` (shell curateur issue-010 + slice issue-007).
+"""Page d'accueil HTML du service ``webapp`` (shell issue-010 + slice issue-007 + aides IA issue-013).
 
 Les couleurs et le bandeau sémantique sont dans ``static/design_tokens.css`` (issue-022).
 Le mapping ``error.code`` → variant est injecté depuis ``ui_semantics`` (pas d'inférence HTTP).
@@ -91,9 +91,36 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="2">
       <h2>Nouvelle entrée</h2>
-      <p class="muted">Création minimale (slice issue-007).</p>
+      <p class="muted">Création minimale (slice issue-007). Génération IA et LanguageTool via
+        <code>POST …/curator/llm-generate</code> et <code>POST …/curator/languagetool-check</code>
+        (clés API et URL LLM côté serveur uniquement — issue-013 / GitHub #135).</p>
       <label>input <textarea id="newInput"></textarea></label>
       <label>output <textarea id="newOutput"></textarea></label>
+      <h3>Paramètres de style (génération IA)</h3>
+      <p class="muted">Listes alignées sur le profil actif (<code>GET …/curator/dimensions</code>).</p>
+      <label>Type <select id="neType"></select></label>
+      <label>Structure <select id="neStructure"></select></label>
+      <label>Tonalité <select id="neTon"></select></label>
+      <label>Format <select id="neFormat"></select></label>
+      <label>Public <select id="nePublic"></select></label>
+      <div class="row curator-tool-row">
+        <button type="button" data-curator-llm="ne" data-mode="draft_to_output">Générer l'output (prose) à partir du brouillon</button>
+        <button type="button" data-curator-llm="ne" data-mode="output_to_draft">Générer le brouillon à partir de l'output</button>
+      </div>
+      <div id="neCuratorStack" class="ds-banner-stack" aria-live="polite"></div>
+      <h3>LanguageTool (output)</h3>
+      <div class="row curator-tool-row">
+        <button type="button" data-curator-lt="ne">Analyser l'orthographe / grammaire (output)</button>
+      </div>
+      <div id="neLtPanel" class="ds-lt-panel" hidden>
+        <p class="muted">Texte corrigé proposé :</p>
+        <pre id="neLtCorrected" class="ds-lt-corrected"></pre>
+        <div id="neLtSuggestions"></div>
+        <div class="row curator-tool-row">
+          <button type="button" id="neLtApply">Remplacer l'output par le texte corrigé</button>
+        </div>
+      </div>
+      <div id="neLtStack" class="ds-banner-stack" aria-live="polite"></div>
       <div class="row"><button type="button" id="btnCreate">Créer une fiche</button></div>
     </div>
     <div class="panel" data-tab-idx="3">
@@ -104,6 +131,31 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       <label>id <input type="text" id="entryId" /></label>
       <label>input <textarea id="fldInput"></textarea></label>
       <label>output <textarea id="fldOutput"></textarea></label>
+      <h3>Paramètres de style (génération IA)</h3>
+      <p class="muted">Même logique que l'onglet Nouvelle entrée (issue-013).</p>
+      <label>Type <select id="edType"></select></label>
+      <label>Structure <select id="edStructure"></select></label>
+      <label>Tonalité <select id="edTon"></select></label>
+      <label>Format <select id="edFormat"></select></label>
+      <label>Public <select id="edPublic"></select></label>
+      <div class="row curator-tool-row">
+        <button type="button" data-curator-llm="ed" data-mode="draft_to_output">Générer l'output (prose) à partir du brouillon</button>
+        <button type="button" data-curator-llm="ed" data-mode="output_to_draft">Générer le brouillon à partir de l'output</button>
+      </div>
+      <div id="edCuratorStack" class="ds-banner-stack" aria-live="polite"></div>
+      <h3>LanguageTool (output)</h3>
+      <div class="row curator-tool-row">
+        <button type="button" data-curator-lt="ed">Analyser l'orthographe / grammaire (output)</button>
+      </div>
+      <div id="edLtPanel" class="ds-lt-panel" hidden>
+        <p class="muted">Texte corrigé proposé :</p>
+        <pre id="edLtCorrected" class="ds-lt-corrected"></pre>
+        <div id="edLtSuggestions"></div>
+        <div class="row curator-tool-row">
+          <button type="button" id="edLtApply">Remplacer l'output par le texte corrigé</button>
+        </div>
+      </div>
+      <div id="edLtStack" class="ds-banner-stack" aria-live="polite"></div>
       <div class="row"><button type="button" id="btnSave">Enregistrer</button></div>
     </div>
     <div class="panel" data-tab-idx="4">
@@ -191,6 +243,8 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     const panelsHost = document.getElementById("panels");
     let mainTabLabels = [];
     let activeMainTabIdx = 0;
+    let _lastLtNe = { corrected: "", matches: [] };
+    let _lastLtEd = { corrected: "", matches: [] };
 
     function token() { return localStorage.getItem(LS) || ""; }
     function activeProjectHint() { return sessionStorage.getItem(SS) || ""; }
@@ -208,6 +262,24 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       ids.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
       const div = document.getElementById("entriesTable");
       if (div) div.innerHTML = "";
+      ["neLtPanel", "edLtPanel"].forEach((id) => {
+        const p = document.getElementById(id);
+        if (p) p.hidden = true;
+      });
+      ["neLtCorrected", "edLtCorrected"].forEach((id) => {
+        const p = document.getElementById(id);
+        if (p) p.textContent = "";
+      });
+      ["neLtSuggestions", "edLtSuggestions"].forEach((id) => {
+        const p = document.getElementById(id);
+        if (p) p.innerHTML = "";
+      });
+      ["neCuratorStack", "edCuratorStack", "neLtStack", "edLtStack"].forEach((id) => {
+        const p = document.getElementById(id);
+        if (p) clearDsBannerStack(p);
+      });
+      _lastLtNe = { corrected: "", matches: [] };
+      _lastLtEd = { corrected: "", matches: [] };
     }
 
     function apiBannerVariantForCode(code) {
@@ -287,6 +359,216 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
 
     function escapeHtml(s) {
       return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;");
+    }
+
+    const CURATOR_DIM_KEYS = [
+      ["types", "neType", "edType"],
+      ["structures", "neStructure", "edStructure"],
+      ["tons", "neTon", "edTon"],
+      ["formats", "neFormat", "edFormat"],
+      ["publics", "nePublic", "edPublic"],
+    ];
+
+    function fillSelectFromList(elId, vals) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.innerHTML = "";
+      const list = (vals && vals.length) ? vals : [""];
+      for (const v of list) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v || "—";
+        el.appendChild(o);
+      }
+    }
+
+    function fillCuratorDimensionSelects(dimensions) {
+      const d = dimensions || {};
+      for (const row of CURATOR_DIM_KEYS) {
+        const key = row[0];
+        fillSelectFromList(row[1], d[key] || []);
+        fillSelectFromList(row[2], d[key] || []);
+      }
+    }
+
+    async function loadCuratorDimensions() {
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) return;
+      const neSt = document.getElementById("neCuratorStack");
+      const edSt = document.getElementById("edCuratorStack");
+      try {
+        const data = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/dimensions");
+        fillCuratorDimensionSelects(data.dimensions);
+        if (neSt) clearDsBannerStack(neSt);
+        if (edSt) clearDsBannerStack(edSt);
+      } catch (err) {
+        const parts = (err && err.error)
+          ? [err.error.title || "", err.error.message || "", err.error.suggested_action || ""].filter(Boolean)
+          : ["Impossible de charger les dimensions pour les aides IA."];
+        const txt = parts.join(String.fromCharCode(10));
+        if (neSt) {
+          clearDsBannerStack(neSt);
+          appendBannerToStack(neSt, "warning", "Dimensions", txt);
+        }
+        if (edSt) {
+          clearDsBannerStack(edSt);
+          appendBannerToStack(edSt, "warning", "Dimensions", txt);
+        }
+      }
+    }
+
+    function curatorLlmButtons(scope, disabled) {
+      document.querySelectorAll('[data-curator-llm="' + scope + '"]').forEach((b) => { b.disabled = !!disabled; });
+    }
+
+    async function curatorLlmGenerate(scope, mode) {
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) return;
+      const pfx = scope === "ne" ? "ne" : "ed";
+      const stack = document.getElementById(pfx + "CuratorStack");
+      const inEl = document.getElementById(scope === "ne" ? "newInput" : "fldInput");
+      const outEl = document.getElementById(scope === "ne" ? "newOutput" : "fldOutput");
+      const type = (document.getElementById(pfx + "Type") || {}).value || "";
+      const structure = (document.getElementById(pfx + "Structure") || {}).value || "";
+      const ton = (document.getElementById(pfx + "Ton") || {}).value || "";
+      const format = (document.getElementById(pfx + "Format") || {}).value || "";
+      const pub = (document.getElementById(pfx + "Public") || {}).value || "";
+      curatorLlmButtons(scope, true);
+      if (stack) {
+        clearDsBannerStack(stack);
+        appendBannerToStack(stack, "info", "Génération IA", "Génération en cours…");
+      }
+      try {
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/llm-generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: mode,
+            input: inEl ? inEl.value : "",
+            output: outEl ? outEl.value : "",
+            type: type,
+            structure: structure,
+            ton: ton,
+            format: format,
+            public: pub,
+          }),
+        });
+        if (stack) clearDsBannerStack(stack);
+        if (out.status === "ok" && out.text != null) {
+          if (mode === "draft_to_output" && outEl) outEl.value = out.text;
+          if (mode === "output_to_draft" && inEl) inEl.value = out.text;
+          if (stack) {
+            appendBannerToStack(stack, "success", "Génération IA", "Texte généré : vous pouvez l'ajuster avant enregistrement.");
+          }
+        } else if (out.status === "validation_error") {
+          if (stack) appendBannerToStack(stack, "warning", "Saisie", out.message || "Vérifiez les champs requis.");
+        } else if (out.status === "failed") {
+          if (stack) appendBannerToStack(stack, "danger", "Génération IA", out.message || "La génération a échoué.");
+        } else if (stack) {
+          appendBannerToStack(stack, "danger", "Génération IA", JSON.stringify(out));
+        }
+      } catch (err) {
+        if (stack) {
+          clearDsBannerStack(stack);
+          if (err && err.error) renderApiErrorIntoStack(stack, err.error);
+          else appendBannerToStack(stack, "danger", "Génération IA", "Erreur réseau ou serveur.");
+        }
+      } finally {
+        curatorLlmButtons(scope, false);
+      }
+    }
+
+    function renderLtSuggestions(containerId, matches) {
+      const div = document.getElementById(containerId);
+      if (!div) return;
+      if (!matches || !matches.length) {
+        div.innerHTML = "<p class='muted'>Aucune suggestion détectée.</p>";
+        return;
+      }
+      let h = "";
+      for (let i = 0; i < matches.length; i++) {
+        const m = matches[i];
+        const rep = (m.replacements && m.replacements[0] && m.replacements[0].value) ? m.replacements[0].value : "";
+        const msg = m.message != null ? String(m.message) : "";
+        h += "<div class='ds-lt-sug'><strong>#" + (i + 1) + "</strong> — " + escapeHtml(msg);
+        if (rep) h += "<br/><span class='muted'>Remplacement proposé :</span> <code>" + escapeHtml(rep) + "</code>";
+        h += "</div>";
+      }
+      div.innerHTML = h;
+    }
+
+    async function curatorLtCheck(scope) {
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) return;
+      const pfx = scope === "ne" ? "ne" : "ed";
+      const stack = document.getElementById(pfx + "LtStack");
+      const outEl = document.getElementById(scope === "ne" ? "newOutput" : "fldOutput");
+      const panel = document.getElementById(pfx + "LtPanel");
+      const pre = document.getElementById(pfx + "LtCorrected");
+      const text = outEl ? outEl.value : "";
+      document.querySelectorAll('[data-curator-lt="' + scope + '"]').forEach((b) => { b.disabled = true; });
+      if (stack) {
+        clearDsBannerStack(stack);
+        appendBannerToStack(stack, "info", "LanguageTool", "Analyse LanguageTool en cours…");
+      }
+      if (panel) panel.hidden = true;
+      try {
+        const data = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/languagetool-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text }),
+        });
+        if (pre) pre.textContent = data.corrected || "";
+        renderLtSuggestions(pfx + "LtSuggestions", data.matches || []);
+        if (panel) panel.hidden = false;
+        if (scope === "ne") _lastLtNe = { corrected: data.corrected || "", matches: data.matches || [] };
+        else _lastLtEd = { corrected: data.corrected || "", matches: data.matches || [] };
+        if (stack) {
+          clearDsBannerStack(stack);
+          appendBannerToStack(stack, "success", "LanguageTool", "Analyse terminée : voir les suggestions ci-dessous.");
+        }
+      } catch (err) {
+        if (stack) {
+          clearDsBannerStack(stack);
+          if (err && err.error) renderApiErrorIntoStack(stack, err.error);
+          else appendBannerToStack(stack, "danger", "LanguageTool", "Erreur réseau ou serveur.");
+        }
+      } finally {
+        document.querySelectorAll('[data-curator-lt="' + scope + '"]').forEach((b) => { b.disabled = false; });
+      }
+    }
+
+    function wireCuratorAides() {
+      document.querySelectorAll("[data-curator-llm]").forEach((btn) => {
+        btn.onclick = async function() {
+          const sc = btn.getAttribute("data-curator-llm");
+          const md = btn.getAttribute("data-mode");
+          await curatorLlmGenerate(sc, md);
+        };
+      });
+      document.querySelectorAll("[data-curator-lt]").forEach((btn) => {
+        btn.onclick = async function() {
+          const sc = btn.getAttribute("data-curator-lt");
+          await curatorLtCheck(sc);
+        };
+      });
+      const neA = document.getElementById("neLtApply");
+      if (neA) {
+        neA.onclick = function() {
+          const o = document.getElementById("newOutput");
+          if (o) o.value = _lastLtNe.corrected || "";
+        };
+      }
+      const edA = document.getElementById("edLtApply");
+      if (edA) {
+        edA.onclick = function() {
+          const o = document.getElementById("fldOutput");
+          if (o) o.value = _lastLtEd.corrected || "";
+        };
+      }
     }
 
     function applyUiPrefsToDom(p) {
@@ -424,6 +706,9 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       });
       if (mainTabLabels[idx] === "Mon compte") loadAccountPanel().catch(showErr);
       if (mainTabLabels[idx] === "Réglages & Export") loadDimensionsSettings().catch(showErr);
+      if (mainTabLabels[idx] === "Nouvelle entrée" || mainTabLabels[idx] === "Gestion & édition") {
+        loadCuratorDimensions().catch(function() {});
+      }
       if (mainTabLabels[idx] === "Tableau de bord") loadDashboardBanners().catch(showErr);
       if (mainTabLabels[idx] === "Super Admin") {
         loadSuperAdminAccounts().catch(showErr);
@@ -747,6 +1032,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
         }
       };
       wireSuperAdminAccountsPanel();
+      wireCuratorAides();
     }
 
     document.getElementById("btnSignin").onclick = async () => {
@@ -809,6 +1095,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       }
       await loadEntries();
       await loadDimensionsSettings().catch(function() {});
+      await loadCuratorDimensions().catch(function() {});
     }
 
     function onProjectChanged() {
@@ -818,6 +1105,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       clearEntryState();
       loadEntries().catch(showErr);
       loadDimensionsSettings().catch(showErr);
+      loadCuratorDimensions().catch(function() {});
       if (mainTabLabels[activeMainTabIdx] === "Tableau de bord") loadDashboardBanners().catch(showErr);
     }
 

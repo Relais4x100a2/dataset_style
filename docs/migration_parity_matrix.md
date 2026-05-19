@@ -102,6 +102,17 @@ Slice **webapp** : `GET /api/projects/{id}/settings/dimensions` et `PATCH` sur l
 
 ---
 
+## Génération IA & LanguageTool (issue-013 / GitHub #135)
+
+Slice **webapp** : `GET /api/projects/{id}/curator/dimensions`, `POST …/curator/llm-generate`, `POST …/curator/languagetool-check` (`src/webapp/curator_ai.py`, `src/webapp/app.py`) — même chaîne métier que Streamlit (`llm_generate`, `nlp_engine.languagetool_fr_corrected_with_matches`, réglages `ProjectSettings` côté serveur). Coquille HTML : onglets **Nouvelle entrée** et **Gestion & édition** (`src/webapp/index_template.py`, script embarqué) : listes de dimensions, boutons de génération, analyse LT, affichage des suggestions et application du texte corrigé ; retours utilisateur via `ds-banner-stack` + `renderApiErrorIntoStack` (issue-005). Tests API : `tests/test_webapp_curator_ai.py` ; contrat gabarit : `tests/test_webapp_index_template_issue013.py`.
+
+| ID flux | Slice (issue-013) |
+| --- | --- |
+| ENT-LLM | OK — `POST …/curator/llm-generate` + UI coquille |
+| EDI-LT | OK — `POST …/curator/languagetool-check` + UI coquille |
+
+---
+
 ## Grille statut sprint backlog (issues issue-010 à issue-016)
 
 Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (pas le numéro GitHub — voir règle de synchronisation backlog / GitHub dans la doc projet).
@@ -117,7 +128,7 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 | DIM-WRITE | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | EXP-SCOPE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
 | EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
-| ENT-NEW-READ | ⏳ | OK | OK | ⏳ | ⏳ | ⏳ | ⏳ |
+| ENT-NEW-READ | ⏳ | OK | OK | OK | ⏳ | ⏳ | ⏳ |
 | ENT-NEW-WRITE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
 | ENT-LLM | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
 | EDI-SAVE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
@@ -160,6 +171,7 @@ Chaîne **projet → entrée → export** à rejouer après chaque bascule majeu
 3. **Entrée** : sous **Nouvelle entrée**, saisir input/output requis, enregistrer ; vérifier message de succès et qu’une relance affiche la ligne (cache invalidé — pas de « fantôme » d’ancien dataframe).
 4. **Export** : même onglet, basculer périmètre « Validées seulement » / « Tout le dataset », télécharger **CSV** et **JSONL** ; ouvrir les fichiers et contrôler cohérence des filtres (notamment statuts et colonnes stylométriques exportées).
 5. **Non-régression filtres** : avec des fiches non validées, confirmer que « Validées seulement » exclut bien les lignes hors `STATUT_VALIDE` (`export_utils.dataframe_for_export`).
+6. **Aides IA & LanguageTool** (slice webapp issue-013) : sous **Nouvelle entrée** ou **Gestion & édition**, vérifier le chargement des listes (`GET …/curator/dimensions`), une génération brouillon↔output (`POST …/curator/llm-generate`) et une analyse LT sur un texte accentué FR (`POST …/curator/languagetool-check`) ; en erreur réseau, vérifier un bandeau actionnable (`suggested_action`).
 
 ---
 
@@ -171,6 +183,7 @@ Exemples de commandes ciblées (à intégrer dans CI ou lancer localement) :
 python3 -m pytest tests/test_curator_dashboard_snapshot.py tests/test_webapp_vertical_slice.py -q
 python3 -m pytest tests/test_webapp_issue010_shell.py -q
 python3 -m pytest tests/test_webapp_project_dimensions_settings.py tests/test_presets_dimensions_patch_validation.py -q
+python3 -m pytest tests/test_webapp_curator_ai.py tests/test_webapp_index_template_issue013.py -q
 python3 -m pytest tests/test_migration_parity_matrix_doc.py -q
 # issue-009 / GitHub #131 : persistance Postgres + export (PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL)
 # Exporter DATASET_STYLE_REGRESSION_DATABASE_URL (postgresql://…) — en CI la variable est définie par .github/workflows/ci.yml

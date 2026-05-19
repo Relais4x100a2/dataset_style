@@ -45,7 +45,7 @@ Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la pag
 
 ## Tests et CI
 
-Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
 
 ## Shell curateur — projets et navigation (issue-010 / GitHub #132)
 
@@ -60,6 +60,14 @@ Tests : `tests/test_webapp_issue010_shell.py`.
 
 - `GET /api/projects/{project_id}/settings/dimensions` — lecture après contrôle d’accès (`load_project_entries`) : `activePresetKey`, `dimensions` (effectives), liste `presets` (`key` + `label`), `projectRole`, `canEditDimensions` (admin projet uniquement).
 - `PATCH /api/projects/{project_id}/settings/dimensions` — mutations réservées à l’admin (`require_admin` + `update_project_settings`), corps JSON `action` : `load_preset` (`preset_key`), `replace_dimensions` (`dimensions` objet), `save_custom_preset` (`custom_preset_name`, `custom_preset_label`, `dimensions`). Validation et persistance alignées sur `src/presets.py` (mêmes champs `project_settings` que Streamlit).
+
+## Génération IA & LanguageTool (issue-013 / GitHub #135)
+
+- `GET /api/projects/{project_id}/curator/dimensions` — dimensions actives pour les sélecteurs d'aide (profil `load_active_dimensions`).
+- `POST /api/projects/{project_id}/curator/llm-generate` — génération brouillon↔output (`src/llm_generate`, timeouts et URL LLM issus des réglages projet ; pas de clé exposée au navigateur).
+- `POST /api/projects/{project_id}/curator/languagetool-check` — texte corrigé + suggestions (`src/nlp_engine` ; URL LT projet ou défaut).
+
+La coquille `GET /` appelle ces routes depuis les onglets **Nouvelle entrée** et **Gestion & édition** (bandeaux `ds-banner-stack`). Tests : `tests/test_webapp_curator_ai.py`, `tests/test_webapp_index_template_issue013.py`.
 
 ## Préférences d'affichage (issue-023)
 
