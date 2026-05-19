@@ -74,3 +74,13 @@ Les user stories **007 à 016** (implémentation du nouveau frontal, côté dép
 - Déploiement CapRover : `docs/caprover_deployment.md`
 - Variables d’environnement : `docs/caprover_env_example.md`
 - Communication migration (e-mail type, exports, bannière optionnelle) : `docs/migration_communication_plan.md`
+
+## 8. Artefacts mesure UX (issue-020 / #142)
+
+Pour la revue de bascule (issue-001), archiver avec le paquet décisionnel :
+
+- le répertoire ou une copie des fichiers sous **`DATASET_STYLE_UX_TELEMETRY_DIR`** (`ux_scenario_*.jsonl`, `ux_error_*.jsonl`) ;
+- la sortie TSV de **`scripts/aggregate_ux_baseline_jsonl.py`** (voir `docs/ux_baseline_issue_020.md`) ;
+- les réponses au questionnaire interne (`docs/ux_baseline_questionnaire.md`) si la campagne l’a prévu.
+
+Les métriques ne sont **pas** stockées dans les tables métier PostgreSQL en v1.

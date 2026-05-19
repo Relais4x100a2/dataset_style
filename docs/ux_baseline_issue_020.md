@@ -21,9 +21,24 @@ Parcours **projet → entrée → contrôle → export** :
 
 ## Cible documentée (nouveau frontal)
 
-- **Parité de jalons** : la webapp devra émettre les **mêmes** `milestone_code` aux frontières équivalentes (session HTTP / client + `run_id` anonyme).
+- **Parité de jalons** : la webapp **émet** les mêmes `milestone_code` côté serveur (`src/webapp/ux_telemetry.py` + `src/webapp/app.py`) lorsque le client envoie un `run_id` anonyme ; voir section *Webapp* ci-dessous.
 - **Temps** : mesurer côté client la durée entre réponse `POST`/`PATCH` entrées (persistance réussie) et fin de préparation du fichier export (équivalent `EXP-DL`), ou horodatages serveur si instrumentés de façon comparable.
-- **Contrôle** : lorsque l’UI webapp expose un récap qualité équivalent au récap Streamlit ; à défaut, documenter un **écart** dans la matrice de parité (comme pour l’export recap slice).
+- **Contrôle** : côté webapp, l’équivalent minimal v1 de `EXP-SCOPE` est émis **au moment où le périmètre d’export est résolu** sur le serveur (juste avant la sérialisation CSV/JSONL), **sans** récap qualité détaillé Streamlit — aligné sur l’**écart documenté** matrice (récap pré-export slice).
+
+## Webapp (FastAPI)
+
+- **En-tête obligatoire pour toute écriture fichier** : `X-Dataset-Style-Ux-Run-Id: ux_<32 hex minuscules>` (même format que le `run_id` Streamlit).
+- **`SB-CTX`** : sur `GET /api/projects`, ajouter **`X-Dataset-Style-Ux-Shell-Init: 1`** **une seule fois** après connexion (premier chargement shell), avec le `run_id` ci-dessus — évite le bruit sur les polls de liste projets.
+- **Jalons automatiques** (si `run_id` valide) : `POST/PATCH …/entries` → `ENT-NEW-WRITE` / `EDI-SAVE` ; `GET …/export.csv` ou `export.jsonl` → enchaînement `EXP-SCOPE` puis `EXP-DL` pour **cette** requête (deux lignes JSONL ; comparer à Streamlit où les deux téléchargements peuvent partager un même rendu d’onglet).
+- **Erreur export 413** (`EXPORT_PAYLOAD_TOO_LARGE`) : événement `ux_error` avec `milestone_context: EXP-DL` si `run_id` présent.
+
+Implémentation webapp : `src/webapp/ux_telemetry.py`, routes dans `src/webapp/app.py`.
+
+## Agrégation (revue / issue-001)
+
+- Fichiers produits : `ux_scenario_YYYYMMDD.jsonl`, `ux_error_YYYYMMDD.jsonl` sous le répertoire `DATASET_STYLE_UX_TELEMETRY_DIR`.
+- Script TSV (deltas `monotonic_ns` entre jalons successifs par `run_id` + `surface`) : `scripts/aggregate_ux_baseline_jsonl.py --input <répertoire>`.
+- Alternative : importer les JSONL dans un tableur ; dédupliquer les doublons éventuels de `SB-CTX` côté webapp en ne conservant que la **première** occurrence par `(run_id, milestone_code)` si besoin.
 
 ## Collecte technique (interne, sans PII inutile)
 
@@ -33,7 +48,7 @@ Parcours **projet → entrée → contrôle → export** :
 - Pas de contenu de fiches, pas d’e-mails ; champs `extra` limités à des compteurs / périmètres / tailles d’export.
 - Logs applicatifs : chaque événement est aussi émis en `INFO` JSON côté logger (audit central possible sans fichier).
 
-Implémentation : `src/ux_scenario_telemetry.py` ; instrumentation Streamlit : `src/ui_components.py`.
+Implémentation cœur : `src/ux_scenario_telemetry.py` ; instrumentation Streamlit : `src/ui_components.py`.
 
 ## Cartographie erreurs Streamlit ↔ codes API
 
@@ -45,4 +60,12 @@ Implémentation : `src/ux_scenario_telemetry.py` ; instrumentation Streamlit : `
 
 ## Archive issue-001
 
-Consigner le répertoire ou les fichiers JSONL (et éventuellement exports des logs structurés) dans le paquet de revue de bascule. Toute future table d’événements UX devra rester **isolée du schéma tenant** (schéma ou préfixe dédié, rétention) — hors scope v1.
+Inclure dans le paquet de revue de bascule (issue-001 / stratégie #124) :
+
+1. **Copie** du répertoire configuré (`DATASET_STYLE_UX_TELEMETRY_DIR`) après la campagne de mesure, ou **export** des logs applicatifs contenant les lignes `ux_scenario_event` / `ux_error_event` filtrées sur la période.
+2. **Sortie agrégée** : résultat du script `scripts/aggregate_ux_baseline_jsonl.py` (ou tableur équivalent) pour les deltas de jalons.
+3. **Questionnaires** papier / formulaire interne : voir `docs/ux_baseline_questionnaire.md` (hors dépôt machine si politique RH l’exige).
+
+Toute future table d’événements UX devra rester **isolée du schéma tenant** (schéma ou préfixe dédié, rétention) — hors scope v1.
+
+Référence positionnement produit : `docs/streamlit_to_new_frontend_cutover.md` (section *Artefacts mesure UX*).
