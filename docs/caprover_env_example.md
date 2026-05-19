@@ -15,7 +15,8 @@ Exemple:
   "LLM_API_KEY": "",
   "LLM_TIMEOUT_SECONDS": "300",
   "LANGUAGETOOL_BASE_URL": "http://srv-captain--languagetool:8010",
-  "DISABLE_SELF_SERVICE_PROJECT_CREATION": ""
+  "DISABLE_SELF_SERVICE_PROJECT_CREATION": "",
+  "DATASET_STYLE_UX_TELEMETRY_DIR": "/tmp/dataset_style_ux_telemetry"
 }
 ```
 

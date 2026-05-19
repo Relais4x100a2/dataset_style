@@ -42,6 +42,14 @@ def test_migration_parity_matrix_has_manual_and_automated_checklists() -> None:
     assert "## Jeux de non-régression automatisés" in text
 
 
+def test_migration_parity_matrix_documents_ux_baseline_issue020() -> None:
+    """issue-020 : baseline UX liée aux IDs flux de la matrice."""
+    text = _DOC_PATH.read_text()
+    assert "## Baseline UX (issue-020)" in text
+    assert "docs/ux_baseline_issue_020.md" in text
+    assert "DATASET_STYLE_UX_TELEMETRY_DIR" in text
+
+
 def test_migration_parity_matrix_documents_issue007_vertical_slice() -> None:
     """issue-004 : marquage slice vertical + service webapp versionné."""
     text = _DOC_PATH.read_text()
