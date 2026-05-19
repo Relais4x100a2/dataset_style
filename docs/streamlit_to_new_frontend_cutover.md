@@ -10,7 +10,7 @@ Document de référence pour débloquer auth, domaines CapRover et le plan suppo
 | Sujet | Décision |
 |-------|----------|
 | **Mode en production** | **Cutover unique** : après la bascule, **une seule** interface applicative est servie sur l’URL de production ; pas de double interface officielle pérenne côté utilisateurs. |
-| **Intégration avant prod** | Développement et recettes sur une **rampe de type** `deploy-newfrontend` (nom exact à figer côté produit) + **environnement CapRover préprod / staging** distinct de la production Relais4 (`deploy-caprover-relais4`). Voir `docs/release_train_caprover.md`. |
+| **Intégration avant prod** | Développement et recettes sur la branche **`deploy-newfrontend`** + **environnement CapRover préprod / staging** distinct de la production Relais4 (`deploy-caprover-relais4`). Voir `docs/release_train_caprover.md` (publication de la branche distante, CI, merge vers prod). |
 | **Coexistence deux interfaces en prod** | **Non retenue.** Durée maximale d’une double interface **en production** : **0 jour** (bascule unique ; pas de période documentée où deux URL « officielles » coexisteraient pour le même usage métier). |
 | **Surface canonique pour le support** | L’**URL publique unique** effectivement servie en production, **alignée sur `APP_PUBLIC_BASE_URL`** (liens d’invitation et de reset e‑mail, cohérence avec la configuration SuperTokens et les origines autorisées). Avant cutover : l’URL Streamlit actuelle en prod ; après cutover : l’URL du nouveau frontal telle qu’arrêtée en release. |
 
