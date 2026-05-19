@@ -34,6 +34,7 @@ INDEX_HTML = """<!DOCTYPE html>
     h1 { font-size: 1.35rem; }
     h2 { font-size: 1.1rem; margin-top: 0; }
     .banner { font-size: 0.85rem; color: #444; margin-bottom: 1rem; }
+    .migration-info { background:#e8f4fc; border:1px solid #6ab0de; padding:0.65rem 0.85rem; border-radius:6px; white-space: pre-wrap; }
     .account-dl dt { font-weight: 600; margin-top: 0.5rem; }
     .account-dl dd { margin: 0.15rem 0 0 0; }
     table.sa-accounts { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
@@ -46,6 +47,7 @@ INDEX_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <div class="wrap">
+    <!--DS_MIGRATION_BANNER_PLACEHOLDER-->
     <h1>Dataset Style — coquille curateur</h1>
     <p class="banner">Shell de navigation aligné sur Streamlit (ordre des onglets via <code>/api/me</code>).
       Streamlit reste sur le port <code>8501</code> ; ce service <code>webapp</code> porte le slice API + UI minimale.</p>
