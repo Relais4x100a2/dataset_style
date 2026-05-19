@@ -126,6 +126,16 @@ Pendant la double exposition (**Streamlit** port **8501**, **webapp** slice vert
 
 ---
 
+## Baseline UX (issue-020)
+
+Protocole versionné pour **temps de parcours**, **erreurs** et **questionnaire interne** :
+`docs/ux_baseline_issue_020.md` (questionnaire : `docs/ux_baseline_questionnaire.md`).
+Jalons stables alignés sur les IDs flux de cette matrice : `SB-CTX`, `ENT-NEW-WRITE`,
+`EDI-SAVE`, `EXP-SCOPE`, `EXP-DL`. Collecte optionnelle côté serveur Streamlit via
+`DATASET_STYLE_UX_TELEMETRY_DIR` (fichiers JSONL append-only, hors schéma tenant).
+
+---
+
 ## Checklist recette minimale (manuelle)
 
 Chaîne **projet → entrée → export** à rejouer après chaque bascule majeure UI / API :

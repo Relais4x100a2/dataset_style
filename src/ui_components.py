@@ -158,6 +158,20 @@ from src.super_admin_ui_texts import (
     super_admin_tab_labels,
     super_admin_warning_detach_memberships,
 )
+from src.ux_scenario_telemetry import (
+    MILESTONE_EDI_SAVE,
+    MILESTONE_ENT_NEW_WRITE,
+    MILESTONE_EXP_DL,
+    MILESTONE_EXP_SCOPE,
+    MILESTONE_SB_CTX,
+    emit_once_per_session_key,
+    ensure_streamlit_run_id,
+    fingerprint_project,
+    record_streamlit_validation_error,
+    record_ux_error_event,
+    record_ux_scenario_event,
+    streamlit_dedupe_bucket,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -576,6 +590,16 @@ def _current_project_id() -> str:
 
 def _show_action_error(prefix: str, exc: Exception) -> None:
     from src.api_errors import TenantResourceOpaqueDenial, resolve_exception_for_api
+
+    rid = ensure_streamlit_run_id(st.session_state)
+    fp = fingerprint_project(_current_project_id())
+    record_ux_error_event(
+        run_id=rid,
+        surface="streamlit",
+        milestone_context="STREAMLIT_ACTION",
+        project_fp=fp,
+        exception=exc,
+    )
 
     if isinstance(exc, TenantResourceOpaqueDenial):
         resolved = resolve_exception_for_api(exc, include_technical_detail=False)
@@ -1070,6 +1094,16 @@ def render_sidebar(
     st.session_state["project_id"] = chosen.project_id
     st.session_state["project_role"] = chosen.role
     st.caption(f"Rôle: {chosen.role}")
+    rid = ensure_streamlit_run_id(st.session_state)
+    fp = fingerprint_project(chosen.project_id)
+    dedupe = streamlit_dedupe_bucket(st.session_state)
+    if emit_once_per_session_key(dedupe, f"SB-CTX:{rid}:{fp}"):
+        record_ux_scenario_event(
+            run_id=rid,
+            milestone_code=MILESTONE_SB_CTX,
+            surface="streamlit",
+            project_fp=fp,
+        )
     return chosen.project_id, chosen.role
 
 
@@ -1509,6 +1543,22 @@ def render_tab_settings_export(
             "réviser le corpus avant export."
         )
 
+    rid = ensure_streamlit_run_id(st.session_state)
+    fp = fingerprint_project(project_id)
+    dedupe = streamlit_dedupe_bucket(st.session_state)
+    if emit_once_per_session_key(dedupe, f"EXP-SCOPE:{rid}:{fp}:{export_scope}"):
+        record_ux_scenario_event(
+            run_id=rid,
+            milestone_code=MILESTONE_EXP_SCOPE,
+            surface="streamlit",
+            project_fp=fp,
+            extra={
+                "export_scope": export_scope,
+                "export_row_count": recap.export_row_count,
+                "validated_row_count": recap.validated_row_count,
+            },
+        )
+
     export_format = st.selectbox(
         "Format JSONL",
         ["lfm2", "baguettotron", "mistral"],
@@ -1521,6 +1571,19 @@ def render_tab_settings_export(
         include_stylometry=True,
         scope=export_scope,
     )
+    if emit_once_per_session_key(dedupe, f"EXP-DL:{rid}:{fp}:{export_scope}"):
+        record_ux_scenario_event(
+            run_id=rid,
+            milestone_code=MILESTONE_EXP_DL,
+            surface="streamlit",
+            project_fp=fp,
+            extra={
+                "export_scope": export_scope,
+                "csv_bytes": len(csv),
+                "jsonl_bytes": len(jsonl_data),
+                "jsonl_format": export_format,
+            },
+        )
     st.download_button(
         "Télécharger CSV",
         csv,
@@ -1714,6 +1777,14 @@ def render_tab_ajout(
         body_err = new_entry_missing_required_body_message(input_save, output_save)
         if body_err:
             st.error(body_err)
+            rid = ensure_streamlit_run_id(st.session_state)
+            fp = fingerprint_project(project_id)
+            record_streamlit_validation_error(
+                run_id=rid,
+                milestone_context=MILESTONE_ENT_NEW_WRITE,
+                project_fp=fp,
+                category="MISSING_REQUIRED_BODY",
+            )
             return
         type_save = str(st.session_state.get(keys["type"], type_))
         structure_save = str(st.session_state.get(keys["structure"], structure))
@@ -1767,6 +1838,15 @@ def render_tab_ajout(
             _clear_post_save_stylometric_feedback(project_id)
             _show_action_error("Enregistrement impossible", exc)
             return
+        rid = ensure_streamlit_run_id(st.session_state)
+        fp = fingerprint_project(project_id)
+        record_ux_scenario_event(
+            run_id=rid,
+            milestone_code=MILESTONE_ENT_NEW_WRITE,
+            surface="streamlit",
+            project_fp=fp,
+            extra={"saved": True},
+        )
         st.session_state[new_entry_pending_clear_session_key(project_id, user.user_id)] = True
         st.success("Entrée enregistrée.")
         st.rerun()
@@ -2176,6 +2256,15 @@ def render_tab_edition(
             _clear_post_save_stylometric_feedback(project_id)
             _show_action_error("Sauvegarde impossible", exc)
             return
+        rid = ensure_streamlit_run_id(st.session_state)
+        fp = fingerprint_project(project_id)
+        record_ux_scenario_event(
+            run_id=rid,
+            milestone_code=MILESTONE_EDI_SAVE,
+            surface="streamlit",
+            project_fp=fp,
+            extra={"saved": True},
+        )
         st.success("Entrée mise à jour.")
         st.rerun()
 
