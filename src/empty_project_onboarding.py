@@ -112,7 +112,8 @@ def empty_dataset_curator_guidance_html_fr() -> str:
     """Fragment HTML sûr pour la page slice ``webapp`` (issue-015).
 
     Returns:
-        Paragraphe unique encodé pour injection dans :func:`src.webapp.app.create_slice_app`.
+        Paragraphe unique encodé pour injection côté client (``GET /api/me``,
+        clé ``workspaceOnboarding``).
     """
     tab_new = html.escape(EXPECTED_WORKFLOW_TAB_ORDER[2])
     tab_settings = html.escape(EXPECTED_WORKFLOW_TAB_ORDER[1])
@@ -133,6 +134,19 @@ def no_projects_slice_guidance_html_fr() -> str:
         "<p>Crée un premier projet depuis le studio Streamlit (onglet <strong>Projets</strong>), "
         "puis sélectionne-le ici après reconnexion si besoin.</p>"
     )
+
+
+def workspace_onboarding_for_webapp_me() -> dict[str, str]:
+    """Fragments HTML pour la coquille curateur (``GET /api/me``, issue-015).
+
+    Returns:
+        Clés camelCase alignées sur le JSON API : guidance projet sans fiches et
+        absence totale de projet côté liste ``GET /api/projects``.
+    """
+    return {
+        "emptyDatasetGuidanceHtml": empty_dataset_curator_guidance_html_fr(),
+        "noProjectsGuidanceHtml": no_projects_slice_guidance_html_fr(),
+    }
 
 
 def onboarding_steps_when_creation_allowed() -> tuple[OnboardingStep, ...]:

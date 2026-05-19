@@ -365,6 +365,43 @@ def test_signout_returns_allowlisted_redirect_only() -> None:
     assert r2.json()["redirect"] == "/safe"
 
 
+def test_export_csv_response_excludes_underscore_columns_issue015() -> None:
+    """Parité documentée : CSV HTTP sans colonnes ``_*`` (Streamlit exporte le slice brut)."""
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df = pd.DataFrame(
+        [
+            {
+                "id": "e1",
+                "project_id": "p1",
+                "statut": "Fait et validé",
+                "input": "i",
+                "output": "o",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "date": "",
+                "notes": "",
+                "_secret_cache": "x",
+            }
+        ]
+    )
+    with patch("src.webapp.app.load_project_entries", return_value=df):
+        with TestClient(app) as client:
+            r = client.get(
+                "/api/projects/p1/export.csv",
+                params={"scope": "validated_only"},
+                headers={"Authorization": "Bearer t"},
+            )
+    assert r.status_code == 200
+    header = r.text.strip().splitlines()[0]
+    assert "_secret_cache" not in header
+    assert "id" in header
+
+
 def test_export_csv_uses_dataframe_for_export() -> None:
     engine = MagicMock()
     app = create_slice_app(engine=engine)

@@ -44,6 +44,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       <h2>Projets</h2>
       <p class="muted">Projet courant persisté dans la session du navigateur (sessionStorage).</p>
       <label>Projet actif <select id="projectSel"></select></label>
+      <div id="noProjectsOnboarding" aria-live="polite"></div>
       <h3>Créer un projet</h3>
       <label>Nom <input type="text" id="newProjectName" maxlength="500" /></label>
       <label>Description (optionnel) <input type="text" id="newProjectDesc" maxlength="10000" /></label>
@@ -270,6 +271,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     var _entriesCache = [];
     const SS = "webapp_active_project_id";
     const UIPREFS_SS = "ds_ui_prefs_v1";
+    let workspaceOnboarding = { emptyDatasetGuidanceHtml: "", noProjectsGuidanceHtml: "" };
     const authMsg = document.getElementById("authMsg");
     const workspace = document.getElementById("workspace");
     const mainNav = document.getElementById("mainNav");
@@ -289,6 +291,14 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       workspace.hidden = !t;
     }
     setToken(token());
+
+    function captureWorkspaceOnboarding(me) {
+      const w = me && me.workspaceOnboarding;
+      workspaceOnboarding = {
+        emptyDatasetGuidanceHtml: (w && w.emptyDatasetGuidanceHtml) || "",
+        noProjectsGuidanceHtml: (w && w.noProjectsGuidanceHtml) || "",
+      };
+    }
 
     function clearEntryState() {
       const ids = ["entryId", "fldInput", "fldOutput", "newInput", "newOutput", "neNotes", "edNotes", "edDate"];
@@ -1114,6 +1124,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
         setToken(out.accessToken || "");
         showOk("Connecté.");
         const me = await api("/api/me");
+        captureWorkspaceOnboarding(me);
         document.getElementById("userLine").textContent =
           me.user.displayName + " · " + me.user.email + (me.user.isSuperAdmin ? " · super admin" : "");
         renderMainTabs(me.mainTabLabels);
@@ -1158,6 +1169,18 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
         setActiveProjectHint(resolved);
       } else {
         setActiveProjectHint("");
+      }
+      const banner = document.getElementById("noProjectsOnboarding");
+      if (banner) {
+        if (!data.projects.length && workspaceOnboarding.noProjectsGuidanceHtml) {
+          banner.innerHTML = workspaceOnboarding.noProjectsGuidanceHtml;
+        } else {
+          banner.innerHTML = "";
+        }
+      }
+      if (!data.projects.length) {
+        const et = document.getElementById("entriesTable");
+        if (et) et.innerHTML = "";
       }
       await loadEntries();
       await loadDimensionsSettings().catch(function() {});
@@ -1211,7 +1234,11 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       _entriesCache = entries || [];
       const div = document.getElementById("entriesTable");
       if (!div) return;
-      if (!_entriesCache.length) { div.textContent = "(aucune fiche)"; return; }
+      if (!_entriesCache.length) {
+        div.innerHTML = workspaceOnboarding.emptyDatasetGuidanceHtml
+          || "<p class='muted'>(aucune fiche)</p>";
+        return;
+      }
       const t = document.createElement("table");
       t.border = "1";
       const cols = ["id", "type", "statut", "input", "output"];
@@ -1457,6 +1484,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       if (!token()) return;
       try {
         const me = await api("/api/me");
+        captureWorkspaceOnboarding(me);
         setToken(token());
         document.getElementById("userLine").textContent =
           me.user.displayName + " · " + me.user.email + (me.user.isSuperAdmin ? " · super admin" : "");

@@ -28,6 +28,9 @@ def test_api_me_returns_user_and_main_tab_labels() -> None:
     assert body["user"]["appUserId"] == "u1"
     assert body["user"]["isSuperAdmin"] is True
     assert body["mainTabLabels"] == main_tab_labels(include_super_admin=True)
+    wo = body["workspaceOnboarding"]
+    assert "emptyDatasetGuidanceHtml" in wo and "noProjectsGuidanceHtml" in wo
+    assert "onboarding-empty" in wo["emptyDatasetGuidanceHtml"]
 
 
 def test_api_me_non_super_admin_omits_super_admin_tab() -> None:

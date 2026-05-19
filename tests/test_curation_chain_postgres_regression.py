@@ -27,7 +27,12 @@ from src.database import (
     load_project_entries,
     upsert_user_from_su,
 )
-from src.export_utils import ExportScope, convert_to_jsonl, dataframe_for_export
+from src.export_utils import (
+    ExportScope,
+    convert_to_jsonl,
+    csv_text_from_export_dataframe,
+    dataframe_for_export,
+)
 from src.webapp import deps as webapp_deps
 from src.webapp import entry_mutations
 from src.webapp.app import create_slice_app
@@ -71,13 +76,12 @@ def fresh_owner_project(pg_engine: Engine) -> tuple[Engine, str, str]:
 def _webapp_csv_body(df: pd.DataFrame, scope: ExportScope) -> str:
     """Reproduit ``GET .../export.csv`` (colonnes publiques sans préfixe ``_``)."""
     export_df = dataframe_for_export(df, scope)
-    cols = [c for c in export_df.columns if not str(c).startswith("_")]
-    return export_df[cols].to_csv(index=False)
+    return csv_text_from_export_dataframe(export_df)
 
 
 def _webapp_jsonl_body(df: pd.DataFrame, scope: ExportScope) -> str:
-    """Reproduit ``GET .../export.jsonl`` (LFM2, sans stylométrie)."""
-    return convert_to_jsonl(df, "lfm2", include_stylometry=False, scope=scope)
+    """Reproduit ``GET .../export.jsonl`` (LFM2, ``include_stylometry=True`` comme Streamlit)."""
+    return convert_to_jsonl(df, "lfm2", include_stylometry=True, scope=scope)
 
 
 def test_prj_create_ent_new_write_edi_save_reload_coherence(

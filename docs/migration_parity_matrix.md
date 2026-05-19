@@ -148,7 +148,7 @@ Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (
 
 ## Comparaison coexistence Streamlit vs webapp
 
-Pendant la double exposition (**Streamlit** port **8501**, **webapp** slice vertical port **8080** par défaut), rejouer la même séquence sur les deux interfaces avec le même compte et le même projet : **PRJ-CREATE** (ou sélection), **ENT-NEW-WRITE** / **EDI-SAVE**, puis **EXP-SCOPE** + **EXP-DL** (CSV et JSONL). Les téléchargements côté webapp appliquent **`export_utils`** (périmètres `validated_only` / `full_dataset`) et la règle **CSV sans colonnes préfixées `_`** (alignée sur la sérialisation API des entrées). Toute divergence volontaire ou constatée avec Streamlit doit être notée en **Écart documenté** dans la matrice ou la recette associée.
+Pendant la double exposition (**Streamlit** port **8501**, **webapp** slice vertical port **8080** par défaut), rejouer la même séquence sur les deux interfaces avec le même compte et le même projet : **PRJ-CREATE** (ou sélection), **ENT-NEW-WRITE** / **EDI-SAVE**, puis **EXP-SCOPE** + **EXP-DL** (CSV et JSONL). Les téléchargements côté webapp appliquent **`export_utils`** (périmètres `validated_only` / `full_dataset`) et la règle **CSV sans colonnes préfixées `_`** via `public_export_column_names` / `csv_text_from_export_dataframe` (alignée sur la sérialisation API des entrées). **Écart documenté** : le CSV Streamlit appelle `to_csv` sur le slice complet et inclut donc encore les colonnes cache `_*`. Toute divergence volontaire ou constatée avec Streamlit doit être notée en **Écart documenté** dans la matrice ou la recette associée.
 
 ---
 

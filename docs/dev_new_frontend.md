@@ -43,6 +43,10 @@ Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_
 
 Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la page `GET /` du service `webapp` (ainsi que dans Streamlit lorsque les deux coexistent en recette). Voir `docs/migration_communication_plan.md`. Laisser vide pour masquer.
 
+## Export volumineux (issue-015)
+
+Variable optionnelle **`WEBAPP_EXPORT_MAX_ROWS`** : nombre maximum de lignes dans le périmètre d’export (`dataframe_for_export` après filtre de statut). Si le projet dépasse cette limite, `GET /api/projects/{id}/export.csv` et `…/export.jsonl` répondent **413** avec le code stable `EXPORT_PAYLOAD_TOO_LARGE` (enveloppe `src/api_errors.py`). Non défini = pas de plafond côté serveur (comportement par défaut en développement).
+
 ## Tests et CI
 
 Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, `tests/test_webapp_entry_mutations_issue012.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
