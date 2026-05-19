@@ -160,6 +160,9 @@ Protocole versionné pour **temps de parcours**, **erreurs** et **questionnaire 
 Jalons stables alignés sur les IDs flux de cette matrice : `SB-CTX`, `ENT-NEW-WRITE`,
 `EDI-SAVE`, `EXP-SCOPE`, `EXP-DL`. Collecte optionnelle côté serveur Streamlit via
 `DATASET_STYLE_UX_TELEMETRY_DIR` (fichiers JSONL append-only, hors schéma tenant).
+**Webapp** : mêmes codes sur les routes FastAPI lorsque le client envoie
+`X-Dataset-Style-Ux-Run-Id` (et `X-Dataset-Style-Ux-Shell-Init: 1` une fois pour `SB-CTX`) ;
+voir `docs/ux_baseline_issue_020.md` et `scripts/aggregate_ux_baseline_jsonl.py`.
 
 ---
 

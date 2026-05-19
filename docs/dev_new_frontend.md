@@ -32,6 +32,15 @@ Interface locale : `http://localhost:8080` — healthcheck ops : `http://localho
 
 Les **assets statiques** du slice (tokens CSS, etc.) sont servis sous `http://localhost:8080/static/…` (ex. `design_tokens.css`). Voir `docs/design_tokens_webapp.md`.
 
+## Mesure UX baseline (issue-020)
+
+Pour des séries comparables à Streamlit, le navigateur peut envoyer un identifiant anonyme
+stable sur les requêtes du parcours critique : en-tête **`X-Dataset-Style-Ux-Run-Id`**
+(valeur `ux_` + 32 caractères hex minuscules). Pour le jalon **`SB-CTX`** uniquement,
+ajouter une fois **`X-Dataset-Style-Ux-Shell-Init: 1`** sur `GET /api/projects` après
+connexion. Définir **`DATASET_STYLE_UX_TELEMETRY_DIR`** sur le serveur webapp pour
+écrire les JSONL (voir `docs/ux_baseline_issue_020.md`).
+
 ## Cohérence auth (ADR 0006)
 
 - Aligner **`APP_PUBLIC_BASE_URL`** sur l’URL réellement servie aux testeurs (ex. `http://localhost:8080` pour un test local du slice web seul), afin que les liens invitation / reset et les cookies SuperTokens restent cohérents.

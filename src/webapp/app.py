@@ -76,7 +76,8 @@ from src.ui_preferences import (
     merge_patch_into_canonical,
     serialize_canonical_preferences,
 )
-from src.webapp import curator_ai, entry_mutations
+from src.ux_scenario_telemetry import MILESTONE_EDI_SAVE, MILESTONE_ENT_NEW_WRITE
+from src.webapp import curator_ai, entry_mutations, ux_telemetry
 from src.webapp import deps as webapp_deps
 from src.webapp.errors import EnvelopeHttpError
 from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
@@ -502,7 +503,13 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         projects = list_projects_for_user(eng, user_id)
-        return projects_list_response(projects, active_hint)
+        payload = projects_list_response(projects, active_hint)
+        ux_telemetry.maybe_record_webapp_sb_ctx(
+            request,
+            project_ids_in_order=[p.project_id for p in projects],
+            active_hint=active_hint,
+        )
+        return payload
 
     @app.post("/api/projects")
     async def api_create_project(
@@ -620,6 +627,11 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         except ValueError as exc:
             raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
+        ux_telemetry.record_webapp_persist_entry_milestone(
+            request,
+            project_id=project_id,
+            milestone_code=MILESTONE_EDI_SAVE,
+        )
         return {"status": "ok", "entries": _serialize_entries_df(df)}
 
     @app.post("/api/projects/{project_id}/entries")
@@ -652,6 +664,11 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         except ValueError as exc:
             raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
+        ux_telemetry.record_webapp_persist_entry_milestone(
+            request,
+            project_id=project_id,
+            milestone_code=MILESTONE_ENT_NEW_WRITE,
+        )
         return {"id": new_id, "status": "ok", "entries": _serialize_entries_df(df)}
 
     @app.get("/api/projects/{project_id}/export.csv")
@@ -667,11 +684,26 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         try:
             _enforce_export_row_cap(export_df)
         except ExportPayloadTooLargeError as exc:
+            ux_telemetry.record_webapp_export_payload_too_large(
+                request, project_id=project_id, exc=exc
+            )
             return JSONResponse(
                 status_code=413,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
             )
         text = csv_text_from_export_dataframe(export_df)
+        scope_str = str(scope)
+        row_n = int(len(export_df.index))
+        ux_telemetry.record_webapp_export_milestones(
+            request,
+            project_id=project_id,
+            scope=scope_str,
+            export_row_count=row_n,
+            delivery="csv",
+            csv_byte_len=len(text.encode("utf-8")),
+            jsonl_byte_len=None,
+            jsonl_format=None,
+        )
         return PlainTextResponse(
             content=text,
             media_type="text/csv; charset=utf-8",
@@ -692,6 +724,9 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         try:
             _enforce_export_row_cap(export_df)
         except ExportPayloadTooLargeError as exc:
+            ux_telemetry.record_webapp_export_payload_too_large(
+                request, project_id=project_id, exc=exc
+            )
             return JSONResponse(
                 status_code=413,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
@@ -701,6 +736,18 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             format=export_format,
             include_stylometry=True,
             scope=scope,
+        )
+        scope_str = str(scope)
+        row_n = int(len(export_df.index))
+        ux_telemetry.record_webapp_export_milestones(
+            request,
+            project_id=project_id,
+            scope=scope_str,
+            export_row_count=row_n,
+            delivery="jsonl",
+            csv_byte_len=0,
+            jsonl_byte_len=len(payload.encode("utf-8")),
+            jsonl_format=str(export_format),
         )
         return PlainTextResponse(
             content=payload,

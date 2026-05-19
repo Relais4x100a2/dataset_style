@@ -225,7 +225,7 @@ Toutes les actions sensibles (suppression projet, réglages) sont validées côt
 
 - `docs/multi_tenant_architecture.md` — vue d'ensemble multi-tenant.
 - `docs/architecture/project_access_model.md` — **issue-003** : propriétaire vs `project_memberships`, super-admin, implications API/UI.
-- `docs/ux_baseline_issue_020.md` — **issue-020** : baseline UX scénario critique (jalons, télémétrie fichier optionnelle, questionnaire interne).
+- `docs/ux_baseline_issue_020.md` — **issue-020** : baseline UX scénario critique (jalons, télémétrie fichier optionnelle, questionnaire interne) ; agrégation : `scripts/aggregate_ux_baseline_jsonl.py`.
 
 ## Merge-ready & incidents
 
