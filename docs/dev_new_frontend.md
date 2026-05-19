@@ -45,7 +45,12 @@ Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la pag
 
 ## Tests et CI
 
-Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+
+## API — presets et dimensions projet (issue-011)
+
+- `GET /api/projects/{project_id}/settings/dimensions` — lecture après contrôle d’accès (`load_project_entries`) : `activePresetKey`, `dimensions` (effectives), liste `presets` (`key` + `label`), `projectRole`, `canEditDimensions` (admin projet uniquement).
+- `PATCH /api/projects/{project_id}/settings/dimensions` — mutations réservées à l’admin (`require_admin` + `update_project_settings`), corps JSON `action` : `load_preset` (`preset_key`), `replace_dimensions` (`dimensions` objet), `save_custom_preset` (`custom_preset_name`, `custom_preset_label`, `dimensions`). Validation et persistance alignées sur `src/presets.py` (mêmes champs `project_settings` que Streamlit).
 
 ## Préférences d'affichage (issue-023)
 
