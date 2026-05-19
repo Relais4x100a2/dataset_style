@@ -47,6 +47,15 @@ Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la pag
 
 Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
 
+## Shell curateur — projets et navigation (issue-010 / GitHub #132)
+
+- **`GET /api/me`** : `user` (identité + `isSuperAdmin`) et `mainTabLabels` — même ordre que Streamlit (`src/tab_layout.main_tab_labels`).
+- **`GET /api/projects`** : liste des projets du tenant + `activeProjectId` résolu (paramètre optionnel `active_hint` = dernier projet choisi côté navigateur).
+- **`POST /api/projects`** / **`DELETE /api/projects/{id}`** : création et suppression (admin propriétaire uniquement ; refus = enveloppe opaque `404` / `NOT_FOUND_GENERIC`, comme les autres routes protégées).
+- **Persistance client** : la coquille HTML (`GET /`) mémorise l’identifiant projet actif dans `sessionStorage` sous la clé `webapp_active_project_id` (équivalent fonctionnel de `st.session_state["project_id"]` côté Streamlit). Voir aussi `docs/session_state_keys.md` (section webapp).
+
+Tests : `tests/test_webapp_issue010_shell.py`.
+
 ## API — presets et dimensions projet (issue-011)
 
 - `GET /api/projects/{project_id}/settings/dimensions` — lecture après contrôle d’accès (`load_project_entries`) : `activePresetKey`, `dimensions` (effectives), liste `presets` (`key` + `label`), `projectRole`, `canEditDimensions` (admin projet uniquement).

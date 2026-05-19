@@ -5,8 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+from src.api_errors import TenantResourceOpaqueDenial
 from src.database import ProjectRecord, UserRecord
-from src.tab_layout import main_tab_labels
+from src.tab_layout import EXPECTED_WORKFLOW_TAB_ORDER, main_tab_labels
 from src.webapp import deps as webapp_deps
 from src.webapp.app import create_slice_app
 
@@ -112,3 +113,50 @@ def test_delete_project_calls_delete_project_as_admin() -> None:
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
     del_m.assert_called_once_with(engine, "p9", "u1")
+
+
+def test_projects_empty_list_returns_empty_active_id() -> None:
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    with patch("src.webapp.app.list_projects_for_user", return_value=[]):
+        with TestClient(app) as client:
+            r = client.get("/api/projects", headers={"Authorization": "Bearer x"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["projects"] == []
+    assert body["activeProjectId"] == ""
+
+
+def test_api_me_workflow_prefix_matches_expected_workflow_order() -> None:
+    """Les onglets workflow suivent ``EXPECTED_WORKFLOW_TAB_ORDER`` (issue-010)."""
+    app = create_slice_app(engine=MagicMock())
+    for include_sa, expected_len in ((False, 6), (True, 7)):
+        user = UserRecord(
+            user_id="u",
+            email="e@x",
+            display_name="E",
+            is_super_admin=include_sa,
+        )
+        app.dependency_overrides[webapp_deps.require_app_user] = lambda u=user: u
+        with TestClient(app) as client:
+            r = client.get("/api/me", headers={"Authorization": "Bearer t"})
+            labels = r.json()["mainTabLabels"]
+        assert labels[: len(EXPECTED_WORKFLOW_TAB_ORDER)] == EXPECTED_WORKFLOW_TAB_ORDER
+        assert labels[len(EXPECTED_WORKFLOW_TAB_ORDER)] == "Mon compte"
+        assert len(labels) == expected_len
+
+
+def test_delete_project_forbidden_returns_opaque_404() -> None:
+    """Refus RBAC (``require_admin`` / ``TenantResourceOpaqueDenial``) → 404 JSON contrat API."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    with patch(
+        "src.webapp.app.delete_project_as_admin",
+        side_effect=TenantResourceOpaqueDenial(),
+    ):
+        with TestClient(app) as client:
+            r = client.delete("/api/projects/p-other", headers={"Authorization": "Bearer t"})
+    assert r.status_code == 404
+    payload = r.json()
+    assert "error" in payload
+    assert payload["error"].get("code") == "NOT_FOUND_GENERIC"

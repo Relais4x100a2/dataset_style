@@ -57,3 +57,10 @@ def test_migration_parity_matrix_documents_issue007_vertical_slice() -> None:
     assert "webapp" in text.lower()
     assert "EXP-DL" in text
     assert "/api/projects/{id}/dashboard" in text or "/dashboard" in text
+
+
+def test_migration_parity_matrix_documents_issue010_regression_and_github() -> None:
+    """issue-010 : trace GitHub #132 et jeu de tests shell dans la matrice versionnée."""
+    text = _DOC_PATH.read_text()
+    assert "GitHub #132" in text
+    assert "test_webapp_issue010_shell.py" in text
