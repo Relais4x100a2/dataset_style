@@ -103,6 +103,8 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       <label>Tonalité <select id="neTon"></select></label>
       <label>Format <select id="neFormat"></select></label>
       <label>Public <select id="nePublic"></select></label>
+      <label>Statut <select id="neStatut"></select></label>
+      <label>Notes <input type="text" id="neNotes" maxlength="10000" /></label>
       <div class="row curator-tool-row">
         <button type="button" data-curator-llm="ne" data-mode="draft_to_output">Générer l'output (prose) à partir du brouillon</button>
         <button type="button" data-curator-llm="ne" data-mode="output_to_draft">Générer le brouillon à partir de l'output</button>
@@ -125,10 +127,40 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="3">
       <h2>Gestion &amp; édition</h2>
-      <p><button type="button" id="btnReloadEntries">Recharger les entrées</button></p>
+      <h3>Filtres de la liste</h3>
+      <p class="muted">Paramètres <code>edition_*</code> identiques à ceux de l&apos;API <code>GET /api/projects/…/entries</code> (logique Streamlit : <code>edition_filters_service</code> + filtre dataframe).</p>
+      <label>Statut
+        <select id="efStatut"><option value="">Tous</option></select>
+      </label>
+      <label>Score de cohérence
+        <select id="efScoreMode">
+          <option value="all">Tous les scores (aucun filtre)</option>
+          <option value="below">Strictement sous un seuil</option>
+          <option value="bucket">Tranche de 10 points (décile)</option>
+          <option value="na_only">Score non calculé uniquement (N/A)</option>
+        </select>
+      </label>
+      <div id="efThrWrap" class="row" hidden>
+        <label>Seuil exclusif (0–100)
+          <input type="number" id="efThr" min="0" max="100" value="50" />
+        </label>
+      </div>
+      <div id="efBucketWrap" class="row" hidden>
+        <label>Tranche (décile 0–9)
+          <select id="efBucket"></select>
+        </label>
+      </div>
+      <div id="efNaWrap" class="row" hidden>
+        <label><input type="checkbox" id="efIncludeNa" /> Inclure les fiches sans score exploitable (N/A)</label>
+      </div>
+      <p><button type="button" id="btnReloadEntries">Appliquer les filtres / recharger</button></p>
       <div id="entriesTable"></div>
-      <h3>Édition (id de fiche)</h3>
+      <h3>Édition (fiche sélectionnée)</h3>
+      <p class="muted">Cliquez une ligne du tableau pour préremplir le formulaire. La suppression de fiche isolée n&apos;est pas exposée dans Streamlit — pas de bouton ici (issue-012).</p>
       <label>id <input type="text" id="entryId" /></label>
+      <label>Statut <select id="edStatut"></select></label>
+      <label>Notes <input type="text" id="edNotes" maxlength="10000" /></label>
+      <label>Date <input type="text" id="edDate" /></label>
       <label>input <textarea id="fldInput"></textarea></label>
       <label>output <textarea id="fldOutput"></textarea></label>
       <h3>Paramètres de style (génération IA)</h3>
@@ -235,6 +267,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
   <script>
     const API_ERROR_BANNER_VARIANT = __API_ERROR_BANNER_VARIANT_JSON__;
     const LS = "slice_vertical_access_token";
+    var _entriesCache = [];
     const SS = "webapp_active_project_id";
     const UIPREFS_SS = "ds_ui_prefs_v1";
     const authMsg = document.getElementById("authMsg");
@@ -258,7 +291,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     setToken(token());
 
     function clearEntryState() {
-      const ids = ["entryId", "fldInput", "fldOutput", "newInput", "newOutput"];
+      const ids = ["entryId", "fldInput", "fldOutput", "newInput", "newOutput", "neNotes", "edNotes", "edDate"];
       ids.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
       const div = document.getElementById("entriesTable");
       if (div) div.innerHTML = "";
@@ -367,7 +400,25 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       ["tons", "neTon", "edTon"],
       ["formats", "neFormat", "edFormat"],
       ["publics", "nePublic", "edPublic"],
+      ["statuts", "neStatut", "edStatut"],
     ];
+
+    function fillStatutFilterSelect(dimensions) {
+      const el = document.getElementById("efStatut");
+      if (!el) return;
+      const st = (dimensions && dimensions.statuts) ? dimensions.statuts : [];
+      el.innerHTML = "";
+      const all = document.createElement("option");
+      all.value = "";
+      all.textContent = "Tous";
+      el.appendChild(all);
+      for (const v of st) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        el.appendChild(o);
+      }
+    }
 
     function fillSelectFromList(elId, vals) {
       const el = document.getElementById(elId);
@@ -400,6 +451,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       try {
         const data = await api("/api/projects/" + encodeURIComponent(pid) + "/curator/dimensions");
         fillCuratorDimensionSelects(data.dimensions);
+        fillStatutFilterSelect(data.dimensions);
         if (neSt) clearDsBannerStack(neSt);
         if (edSt) clearDsBannerStack(edSt);
       } catch (err) {
@@ -943,6 +995,20 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     function wireProjectAndEntries() {
       const ps = document.getElementById("projectSel");
       if (ps) ps.onchange = onProjectChanged;
+      const efB = document.getElementById("efBucket");
+      if (efB && !efB.options.length) {
+        for (let i = 0; i < 10; i++) {
+          const o = document.createElement("option");
+          o.value = String(i);
+          o.textContent = "Décile " + i;
+          efB.appendChild(o);
+        }
+      }
+      const efm = document.getElementById("efScoreMode");
+      if (efm) {
+        efm.onchange = syncEditionFilterWidgetsVisibility;
+        syncEditionFilterWidgetsVisibility();
+      }
       const b1 = document.getElementById("btnReloadEntries");
       if (b1) b1.onclick = () => loadEntries().catch(showErr);
       const b2 = document.getElementById("btnSave");
@@ -1109,27 +1175,108 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       if (mainTabLabels[activeMainTabIdx] === "Tableau de bord") loadDashboardBanners().catch(showErr);
     }
 
-    async function loadEntries() {
-      const sel = document.getElementById("projectSel");
-      const pid = sel ? sel.value : "";
-      if (!pid) return;
-      const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries");
+    function syncEditionFilterWidgetsVisibility() {
+      const mode = (document.getElementById("efScoreMode") || {}).value || "all";
+      const thrW = document.getElementById("efThrWrap");
+      const buW = document.getElementById("efBucketWrap");
+      const naW = document.getElementById("efNaWrap");
+      if (thrW) thrW.hidden = mode !== "below";
+      if (buW) buW.hidden = mode !== "bucket";
+      if (naW) naW.hidden = (mode === "all" || mode === "na_only");
+    }
+
+    function entriesEditionQueryString() {
+      const st = (document.getElementById("efStatut") || {}).value;
+      const mode = (document.getElementById("efScoreMode") || {}).value || "all";
+      const p = new URLSearchParams();
+      if (st) p.set("edition_statut", st);
+      if (mode !== "all") {
+        p.set("edition_score_mode", mode);
+        if (mode === "below") {
+          const raw = (document.getElementById("efThr") || {}).value;
+          const n = parseInt(raw, 10);
+          if (!isNaN(n)) p.set("edition_score_threshold_lt", String(n));
+        }
+        if (mode === "bucket") {
+          p.set("edition_score_bucket_decile", (document.getElementById("efBucket") || {}).value || "0");
+        }
+        const inc = document.getElementById("efIncludeNa");
+        if (inc && inc.checked) p.set("edition_score_include_na", "true");
+      }
+      const s = p.toString();
+      return s ? ("?" + s) : "";
+    }
+
+    function renderEntriesTable(entries) {
+      _entriesCache = entries || [];
       const div = document.getElementById("entriesTable");
       if (!div) return;
-      if (!data.entries.length) { div.textContent = "(aucune fiche)"; return; }
+      if (!_entriesCache.length) { div.textContent = "(aucune fiche)"; return; }
       const t = document.createElement("table");
       t.border = "1";
-      const keys = Object.keys(data.entries[0]).filter(k => !k.startsWith("_"));
+      const cols = ["id", "type", "statut", "input", "output"];
       const trh = document.createElement("tr");
-      for (const k of keys) { const th = document.createElement("th"); th.textContent = k; trh.appendChild(th); }
+      for (const k of cols) {
+        const th = document.createElement("th");
+        th.textContent = k;
+        trh.appendChild(th);
+      }
       t.appendChild(trh);
-      for (const row of data.entries) {
+      for (let i = 0; i < _entriesCache.length; i++) {
+        const row = _entriesCache[i];
         const tr = document.createElement("tr");
-        for (const k of keys) { const td = document.createElement("td"); td.textContent = row[k]; tr.appendChild(td); }
+        tr.style.cursor = "pointer";
+        tr.title = "Ouvrir cette fiche dans le formulaire";
+        const idx = i;
+        tr.onclick = function() { applyRowToEditionForm(_entriesCache[idx]); };
+        for (const k of cols) {
+          const td = document.createElement("td");
+          let v = row[k] != null ? String(row[k]) : "";
+          if ((k === "input" || k === "output") && v.length > 80) v = v.slice(0, 80) + "…";
+          td.textContent = v;
+          tr.appendChild(td);
+        }
         t.appendChild(tr);
       }
       div.innerHTML = "";
       div.appendChild(t);
+    }
+
+    function setSelectValueIfPresent(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const v = value != null ? String(value) : "";
+      if (Array.from(el.options).some(function(o) { return o.value === v; })) el.value = v;
+      else if (el.options.length) el.selectedIndex = 0;
+    }
+
+    function applyRowToEditionForm(row) {
+      if (!row) return;
+      const eid = document.getElementById("entryId");
+      if (eid) eid.value = row.id || "";
+      const fi = document.getElementById("fldInput");
+      if (fi) fi.value = row.input != null ? String(row.input) : "";
+      const fo = document.getElementById("fldOutput");
+      if (fo) fo.value = row.output != null ? String(row.output) : "";
+      setSelectValueIfPresent("edType", row.type);
+      setSelectValueIfPresent("edStructure", row.structure);
+      setSelectValueIfPresent("edTon", row.ton);
+      setSelectValueIfPresent("edFormat", row.format);
+      setSelectValueIfPresent("edPublic", row.public);
+      setSelectValueIfPresent("edStatut", row.statut);
+      const en = document.getElementById("edNotes");
+      if (en) en.value = row.notes != null ? String(row.notes) : "";
+      const ed = document.getElementById("edDate");
+      if (ed) ed.value = row.date != null ? String(row.date) : "";
+    }
+
+    async function loadEntries() {
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) return;
+      const q = entriesEditionQueryString();
+      const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries" + q);
+      renderEntriesTable(data.entries);
     }
 
     async function saveEntry() {
@@ -1137,14 +1284,30 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       const eid = document.getElementById("entryId").value.trim();
       const input = document.getElementById("fldInput").value;
       const output = document.getElementById("fldOutput").value;
+      if (!String(input).trim() || !String(output).trim()) {
+        showErr({ error: { title: "Validation", message: "Brouillon/Texte généré obligatoires.", code: "CLIENT" } });
+        return;
+      }
+      const patch = {
+        input: input,
+        output: output,
+        type: (document.getElementById("edType") || {}).value,
+        structure: (document.getElementById("edStructure") || {}).value,
+        ton: (document.getElementById("edTon") || {}).value,
+        format: (document.getElementById("edFormat") || {}).value,
+        public: (document.getElementById("edPublic") || {}).value,
+        statut: (document.getElementById("edStatut") || {}).value,
+        notes: (document.getElementById("edNotes") || {}).value,
+        date: (document.getElementById("edDate") || {}).value,
+      };
       try {
-        await api("/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid), {
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input, output }),
+          body: JSON.stringify(patch),
         });
-        showOk("Fiche enregistrée.");
-        await loadEntries();
+        showOk("Fiche enregistrée — tableau synchronisé depuis la réponse serveur (entries).");
+        renderEntriesTable(out.entries);
       } catch (e) { showErr(e); }
     }
 
@@ -1152,15 +1315,30 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       const pid = document.getElementById("projectSel").value;
       const input = document.getElementById("newInput").value;
       const output = document.getElementById("newOutput").value;
+      if (!String(input).trim() || !String(output).trim()) {
+        showErr({ error: { title: "Validation", message: "Brouillon/Texte généré obligatoires.", code: "CLIENT" } });
+        return;
+      }
+      const body = {
+        input: input,
+        output: output,
+        type: (document.getElementById("neType") || {}).value,
+        structure: (document.getElementById("neStructure") || {}).value,
+        ton: (document.getElementById("neTon") || {}).value,
+        format: (document.getElementById("neFormat") || {}).value,
+        public: (document.getElementById("nePublic") || {}).value,
+        statut: (document.getElementById("neStatut") || {}).value,
+        notes: (document.getElementById("neNotes") || {}).value,
+      };
       try {
         const out = await api("/api/projects/" + encodeURIComponent(pid) + "/entries", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input, output }),
+          body: JSON.stringify(body),
         });
         document.getElementById("entryId").value = out.id;
-        showOk("Fiche créée : " + out.id);
-        await loadEntries();
+        showOk("Fiche créée : " + out.id + " — liste rafraîchie depuis la réponse (entries), sans GET supplémentaire.");
+        renderEntriesTable(out.entries);
       } catch (e) { showErr(e); }
     }
 

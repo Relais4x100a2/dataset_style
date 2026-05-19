@@ -59,6 +59,7 @@ from src.services.curator_dashboard_snapshot import (
     build_curator_dashboard_envelope,
 )
 from src.services.edition_filters_service import build_edition_score_filter_spec
+from src.services.new_entry_validation import new_entry_missing_required_body_message
 from src.services.project_dataframe_view import prepare_for_edition_tab
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.tab_layout import main_tab_labels
@@ -139,12 +140,19 @@ class AccountUiPreferencesPatchBody(BaseModel):
 
 
 class NewEntryBody(BaseModel):
-    """Création minimale d'une fiche."""
+    """Création d'une fiche (corps + dimensions fermées optionnelles, aligné Streamlit)."""
 
     model_config = ConfigDict(extra="forbid")
 
     input: str = ""
     output: str = ""
+    type: str | None = None
+    structure: str | None = None
+    ton: str | None = None
+    format: str | None = None
+    public: str | None = None
+    statut: str | None = None
+    notes: str | None = None
 
 
 class EntryPatchBody(BaseModel):
@@ -600,6 +608,8 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             entry_mutations.apply_entry_field_updates(eng, project_id, user_id, entry_id, updates)
         except KeyError as exc:
             raise TenantResourceOpaqueDenial() from exc
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
         return {"status": "ok", "entries": _serialize_entries_df(df)}
 
@@ -611,13 +621,27 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
     ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
-        new_id = entry_mutations.append_minimal_entry(
-            eng,
-            project_id,
-            user_id,
-            input_text=body.input,
-            output_text=body.output,
-        )
+        missing = new_entry_missing_required_body_message(body.input, body.output)
+        if missing:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(missing))
+        extras = body.model_dump(exclude_none=True)
+        try:
+            new_id = entry_mutations.append_minimal_entry(
+                eng,
+                project_id,
+                user_id,
+                input_text=body.input,
+                output_text=body.output,
+                type_=extras.get("type"),
+                structure=extras.get("structure"),
+                ton=extras.get("ton"),
+                format_=extras.get("format"),
+                public=extras.get("public"),
+                statut=extras.get("statut"),
+                notes=extras.get("notes"),
+            )
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
         return {"id": new_id, "status": "ok", "entries": _serialize_entries_df(df)}
 

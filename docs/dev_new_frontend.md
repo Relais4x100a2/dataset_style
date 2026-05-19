@@ -45,7 +45,7 @@ Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la pag
 
 ## Tests et CI
 
-Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, `tests/test_webapp_entry_mutations_issue012.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
 
 ## Shell curateur — projets et navigation (issue-010 / GitHub #132)
 
@@ -60,6 +60,15 @@ Tests : `tests/test_webapp_issue010_shell.py`.
 
 - `GET /api/projects/{project_id}/settings/dimensions` — lecture après contrôle d’accès (`load_project_entries`) : `activePresetKey`, `dimensions` (effectives), liste `presets` (`key` + `label`), `projectRole`, `canEditDimensions` (admin projet uniquement).
 - `PATCH /api/projects/{project_id}/settings/dimensions` — mutations réservées à l’admin (`require_admin` + `update_project_settings`), corps JSON `action` : `load_preset` (`preset_key`), `replace_dimensions` (`dimensions` objet), `save_custom_preset` (`custom_preset_name`, `custom_preset_label`, `dimensions`). Validation et persistance alignées sur `src/presets.py` (mêmes champs `project_settings` que Streamlit).
+
+## Entrées — création, édition, filtres (issue-012 / GitHub #134)
+
+- `GET /api/projects/{project_id}/entries` — liste ; paramètres query optionnels `edition_*` (mêmes noms que le filtre Streamlit : `edition_statut`, `edition_score_mode`, `edition_score_threshold_lt`, `edition_score_bucket_decile`, `edition_score_include_na`) ; logique serveur = `prepare_for_edition_tab` + `build_edition_score_filter_spec` + `filter_edition_entries_dataframe` (`src/webapp/app.py`).
+- `POST /api/projects/{project_id}/entries` — corps JSON : `input` / `output` obligatoires (non vides, règle partagée `src/services/new_entry_validation.py` avec Streamlit) ; champs de dimensions fermées optionnels (`type`, `structure`, `ton`, `format`, `public`, `statut`, `notes`) validés contre le preset actif dans `entry_mutations.append_minimal_entry` → `entry_nlp_persist_service.persist_new_entry_with_nlp_cache` → `update_project_entries`.
+- `PATCH /api/projects/{project_id}/entries/{entry_id}` — champs partiels (`EntryPatchBody`) ; persistance `entry_mutations.apply_entry_field_updates` → `persist_edited_entry_with_nlp_cache` → `update_project_entries`. Les dimensions fermées (`type`, `structure`, `ton`, `format`, `public`, `statut`) sont contrôlées contre `load_active_dimensions` comme pour `POST` (réponse `400` + `BAD_REQUEST` si valeur hors liste).
+- **Coquille HTML** (`src/webapp/index_template.py`) : filtres liste + clic ligne pour ouvrir la fiche ; après `POST`/`PATCH`, rafraîchissement du tableau depuis la propriété `entries` de la réponse (documenté dans `docs/migration_parity_matrix.md`). **Suppression d’une fiche** : non couverte par l’UI Streamlit actuelle — pas d’endpoint dédié dans ce livrable.
+
+Tests : `tests/test_webapp_vertical_slice.py`, `tests/test_webapp_entry_mutations_issue012.py`.
 
 ## Génération IA & LanguageTool (issue-013 / GitHub #135)
 

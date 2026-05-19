@@ -135,6 +135,7 @@ from src.services.entry_nlp_persist_service import (
 )
 from src.services.export_quality_recap_service import build_export_quality_recap
 from src.services.export_scope_service import summarize_export_perimeter
+from src.services.new_entry_validation import new_entry_missing_required_body_message
 from src.services.project_dataframe_view import prepare_for_dashboard_tab, prepare_for_edition_tab
 from src.super_admin_ui_texts import (
     SUPER_ADMIN_ACCOUNT_MANAGEMENT_HUB_TITLE,
@@ -523,21 +524,6 @@ def ensure_new_entry_widget_keys_initialized(
         session[keys["notes"]] = ""
     _discard_legacy_new_entry_keys_for_project(session, legacy)
     return keys
-
-
-def new_entry_missing_required_body_message(input_text: str, output_text: str) -> str | None:
-    """Validate that both body fields are non-empty before persisting.
-
-    Args:
-        input_text: Draft (brouillon) content.
-        output_text: Generated text content.
-
-    Returns:
-        A short French error message if validation fails, otherwise ``None``.
-    """
-    if not str(input_text).strip() or not str(output_text).strip():
-        return "Brouillon/Texte généré obligatoires."
-    return None
 
 
 def new_entry_pending_clear_session_key(project_id: str, user_id: str) -> str:

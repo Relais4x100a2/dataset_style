@@ -87,6 +87,56 @@ def test_patch_entry_calls_update_project_entries() -> None:
     assert "_stylometry_blob" not in body["entries"][0]
 
 
+def test_patch_entry_rejects_closed_dimension_not_in_active_list() -> None:
+    """PATCH : valeurs hors listes actives → 400 ``BAD_REQUEST`` (miroir POST / QA PR #171)."""
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df = pd.DataFrame(
+        [
+            {
+                "id": "e1",
+                "project_id": "p1",
+                "date": "",
+                "type": "Roman",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "a",
+                "output": "b",
+                "statut": "En cours",
+                "notes": "",
+            }
+        ]
+    )
+    dims = {
+        "types": ["Roman"],
+        "structures": [""],
+        "tons": [""],
+        "formats": [""],
+        "publics": [""],
+        "statuts": ["En cours"],
+    }
+    with (
+        patch("src.webapp.entry_mutations.load_project_entries", return_value=df),
+        patch("src.webapp.entry_mutations.get_project_settings", return_value=MagicMock()),
+        patch("src.webapp.entry_mutations.load_active_dimensions", return_value=("k", {}, dims)),
+        patch("src.webapp.entry_mutations.persist_edited_entry_with_nlp_cache") as save_m,
+    ):
+        with TestClient(app) as client:
+            r = client.patch(
+                "/api/projects/p1/entries/e1",
+                headers={"Authorization": "Bearer t"},
+                json={"type": "ÉtiquetteFantôme"},
+            )
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == "BAD_REQUEST"
+    assert "types" in err["message"]
+    save_m.assert_not_called()
+
+
 def test_export_jsonl_lfm2_includes_system_when_stylometry_columns_present() -> None:
     """issue-015: JSONL export matches Streamlit (``include_stylometry=True``)."""
     engine = MagicMock()
@@ -347,6 +397,83 @@ def test_export_csv_uses_dataframe_for_export() -> None:
     assert r.status_code == 200
     lines = [ln for ln in r.text.strip().splitlines() if ln.strip()]
     assert len(lines) == 1
+
+
+def test_post_entry_rejects_empty_required_bodies() -> None:
+    """issue-012 / #134 : même règle métier que Streamlit (brouillon + output non vides)."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/projects/p1/entries",
+            headers={"Authorization": "Bearer t"},
+            json={"input": "", "output": "x"},
+        )
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert err["code"] == "BAD_REQUEST"
+    assert "obligatoires" in err["message"]
+
+
+def test_post_entry_valueerror_returns_bad_request() -> None:
+    """Valeur de dimension hors liste : message explicite 400 (pas 500)."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    with patch(
+        "src.webapp.app.entry_mutations.append_minimal_entry",
+        side_effect=ValueError("Dimension « types » : valeur non autorisée pour ce projet."),
+    ):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/projects/p1/entries",
+                headers={"Authorization": "Bearer t"},
+                json={"input": "a", "output": "b", "type": "ZZZ"},
+            )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "BAD_REQUEST"
+
+
+def test_post_entry_passes_dimension_fields_to_append_minimal_entry() -> None:
+    """Corps JSON type/statut/… transmis à ``append_minimal_entry`` (parité champs fermés)."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df_one = pd.DataFrame(
+        [
+            {
+                "id": "e_new",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "i",
+                "output": "o",
+                "statut": "En cours",
+                "notes": "",
+            }
+        ]
+    )
+    with patch("src.webapp.app.entry_mutations.append_minimal_entry", return_value="e_new") as ap_m:
+        with patch("src.webapp.app.load_project_entries", return_value=df_one):
+            with TestClient(app) as client:
+                r = client.post(
+                    "/api/projects/p1/entries",
+                    headers={"Authorization": "Bearer t"},
+                    json={
+                        "input": "i",
+                        "output": "o",
+                        "type": "T1",
+                        "statut": "Fait",
+                        "notes": "n1",
+                    },
+                )
+    assert r.status_code == 200
+    ap_m.assert_called_once()
+    assert ap_m.call_args.kwargs["type_"] == "T1"
+    assert ap_m.call_args.kwargs["statut"] == "Fait"
+    assert ap_m.call_args.kwargs["notes"] == "n1"
 
 
 def test_post_entry_returns_entries_after_create() -> None:
