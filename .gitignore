@@ -210,3 +210,6 @@ __marimo__/
 # AI team orchestrator — only shared context is versioned (sprints/runs stay local)
 .ai-team-orchestrator/*
 !.ai-team-orchestrator/context.md
+
+# Pointeur legacy à la racine ; source de vérité : .ai-team-orchestrator/sprints/<id>/backlog.json
+backlog.json
