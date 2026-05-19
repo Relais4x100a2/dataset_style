@@ -73,3 +73,4 @@ Les user stories **007 à 016** (implémentation du nouveau frontal, côté dép
 - Train de release et branche prod : `docs/release_train_caprover.md`
 - Déploiement CapRover : `docs/caprover_deployment.md`
 - Variables d’environnement : `docs/caprover_env_example.md`
+- Communication migration (e-mail type, exports, bannière optionnelle) : `docs/migration_communication_plan.md`
