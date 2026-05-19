@@ -1,5 +1,7 @@
 """Tests for empty-project onboarding copy and feature flags (issue-008, issue-025)."""
 
+import html
+
 import pytest
 from src import empty_project_onboarding as ep
 from src.tab_layout import EXPECTED_WORKFLOW_TAB_ORDER
@@ -17,6 +19,17 @@ def test_onboarding_steps_reference_workflow_tab_labels() -> None:
     labels = "\n".join(s.body_markdown for s in steps)
     assert EXPECTED_WORKFLOW_TAB_ORDER[1] in labels
     assert EXPECTED_WORKFLOW_TAB_ORDER[2] in labels
+
+
+def test_workspace_onboarding_for_webapp_me_has_expected_keys() -> None:
+    """issue-015 : charge utile ``/api/me`` alignée sur ``empty_project_onboarding``."""
+    payload = ep.workspace_onboarding_for_webapp_me()
+    assert set(payload.keys()) == {"emptyDatasetGuidanceHtml", "noProjectsGuidanceHtml"}
+    assert "onboarding-empty" in payload["emptyDatasetGuidanceHtml"]
+    assert html.escape(EXPECTED_WORKFLOW_TAB_ORDER[1]) in payload["emptyDatasetGuidanceHtml"]
+    assert html.escape(EXPECTED_WORKFLOW_TAB_ORDER[2]) in payload["emptyDatasetGuidanceHtml"]
+    no_proj = payload["noProjectsGuidanceHtml"]
+    assert "Projets" in no_proj or "administrateur" in no_proj
 
 
 def test_empty_dataset_curator_guidance_names_settings_and_new_entry_tabs() -> None:

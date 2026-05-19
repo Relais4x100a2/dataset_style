@@ -11,8 +11,10 @@ import pytest
 from src.database import STATUT_VALIDE
 from src.export_utils import (
     convert_to_jsonl,
+    csv_text_from_export_dataframe,
     dataframe_for_export,
     export_perimeter_ui_recap_fr,
+    public_export_column_names,
 )
 
 
@@ -34,6 +36,24 @@ def _minimal_valid_row() -> dict[str, str]:
         "_nb_sentences": "2",
         "_weak_verb_ratio": "0.2",
     }
+
+
+def test_public_export_column_names_skips_internal_cache_columns() -> None:
+    """issue-015 : CSV webapp / JSON entrées = colonnes sans préfixe ``_``."""
+    df = pd.DataFrame([_minimal_valid_row()])
+    names = public_export_column_names(df)
+    assert "_ttr" not in names
+    assert "input" in names
+
+
+def test_csv_text_from_export_dataframe_matches_public_columns_only() -> None:
+    """issue-015 : le corps CSV HTTP repose sur ``csv_text_from_export_dataframe``."""
+    df = pd.DataFrame([_minimal_valid_row()])
+    export_df = dataframe_for_export(df, "validated_only")
+    text = csv_text_from_export_dataframe(export_df)
+    header = text.strip().splitlines()[0]
+    assert "_ttr" not in header
+    assert "input" in header
 
 
 def test_convert_to_jsonl_lfm2_happy_path() -> None:

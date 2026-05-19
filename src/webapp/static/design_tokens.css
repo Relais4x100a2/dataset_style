@@ -448,3 +448,14 @@ html[data-ds-reading="high_contrast"] .err {
 html[data-ds-reading="high_contrast"] .warn {
   color: var(--ds-banner-warning-text) !important;
 }
+
+/* issue-015 : fragment HTML onboarding projet sans fiches (serveur) */
+.onboarding-empty {
+  color: #333;
+  background: #eef6ff;
+  border: 1px solid #bcd;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+}

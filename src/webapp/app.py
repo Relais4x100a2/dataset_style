@@ -48,7 +48,15 @@ from src.database import (
     update_user_ui_preferences_raw,
     validate_super_admin_accounts_list_params,
 )
-from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
+from src.empty_project_onboarding import workspace_onboarding_for_webapp_me
+from src.export_utils import (
+    ExportFormat,
+    ExportScope,
+    convert_to_jsonl,
+    csv_text_from_export_dataframe,
+    dataframe_for_export,
+    public_export_column_names,
+)
 from src.migration_communication import (
     INDEX_HTML_BANNER_PLACEHOLDER,
     migration_info_banner_html_fragment,
@@ -86,7 +94,7 @@ logger = logging.getLogger(__name__)
 
 def _serialize_entries_df(df: pd.DataFrame) -> list[Any]:
     """Sérialise les colonnes « publiques » ; exclut le cache NLP et champs internes (préfixe ``_``)."""
-    cols = [c for c in df.columns if not str(c).startswith("_")]
+    cols = public_export_column_names(df)
     if not cols:
         return []
     return jsonable_encoder(df[cols].to_dict(orient="records"))
@@ -471,7 +479,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     async def api_me(
         user: Annotated[UserRecord, Depends(webapp_deps.require_app_user)],
     ) -> dict[str, Any]:
-        """Contexte utilisateur + ordre des onglets (``main_tab_labels`` / issue-010)."""
+        """Contexte utilisateur + onglets (issue-010) + fragments onboarding (issue-015)."""
         labels = main_tab_labels(include_super_admin=bool(user.is_super_admin))
         return {
             "user": {
@@ -481,6 +489,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 "isSuperAdmin": bool(user.is_super_admin),
             },
             "mainTabLabels": labels,
+            "workspaceOnboarding": workspace_onboarding_for_webapp_me(),
         }
 
     @app.get("/api/projects")
@@ -662,8 +671,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 status_code=413,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
             )
-        cols = [c for c in export_df.columns if not str(c).startswith("_")]
-        text = export_df[cols].to_csv(index=False)
+        text = csv_text_from_export_dataframe(export_df)
         return PlainTextResponse(
             content=text,
             media_type="text/csv; charset=utf-8",
