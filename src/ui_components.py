@@ -1196,7 +1196,7 @@ def _render_super_admin_technical_panel(user: CurrentUser, engine: Engine) -> No
     st.markdown(f"### {SUPER_ADMIN_TECH_EXPANDER_TITLE}")
     st.caption(SUPER_ADMIN_TECH_EXPANDER_CAPTION)
     st.markdown(f"#### {SUPER_ADMIN_SAGA_SECTION_TITLE}")
-    monitor_rows = list_recent_deprovision_ops(engine, user.user_id, limit=100)
+    monitor_rows = list_recent_deprovision_ops(engine, user.user_id)
     if monitor_rows:
         monitor_df = pd.DataFrame(
             [
@@ -1229,7 +1229,7 @@ def _render_super_admin_technical_panel(user: CurrentUser, engine: Engine) -> No
         st.info("Aucune opération de suppression récente à afficher.")
 
     st.markdown(f"#### {SUPER_ADMIN_DLQ_SECTION_TITLE}")
-    dlq_rows = list_quarantined_deprovision_ops(engine, user.user_id, limit=50)
+    dlq_rows = list_quarantined_deprovision_ops(engine, user.user_id)
     if not dlq_rows:
         st.info("Aucune opération en quarantaine.")
     else:
