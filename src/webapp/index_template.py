@@ -1,93 +1,27 @@
-"""Page d'accueil HTML du service ``webapp`` (shell curateur issue-010 + slice issue-007)."""
+"""Page d'accueil HTML du service ``webapp`` (shell curateur issue-010 + slice issue-007).
 
-# Contenu servi tel quel par ``GET /`` ; pas de logique Python ici (uniquement chaîne).
-INDEX_HTML = """<!DOCTYPE html>
+Les couleurs et le bandeau sémantique sont dans ``static/design_tokens.css`` (issue-022).
+Le mapping ``error.code`` → variant est injecté depuis ``ui_semantics`` (pas d'inférence HTTP).
+"""
+
+from src.webapp.ui_semantics import api_error_banner_variant_json_for_index_script
+
+# Gabarit ``GET /`` : espaces réservés remplis au chargement du module.
+_RAW_INDEX_HTML = """<!DOCTYPE html>
 <html lang="fr">
 <script>(function(){try{var r=sessionStorage.getItem('ds_ui_prefs_v1');if(!r)return;var o=JSON.parse(r);if(!o||typeof o!=='object')return;var e=document.documentElement;if(o.density&&o.density!=='default')e.setAttribute('data-ds-density',o.density);else e.removeAttribute('data-ds-density');if(o.readingComfort&&o.readingComfort!=='default')e.setAttribute('data-ds-reading',o.readingComfort);else e.removeAttribute('data-ds-reading');}catch(x){}})();</script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dataset Style — curateur</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f6f7f9; color: #1a1a1a; }
-    .wrap { max-width: 56rem; margin: 0 auto; padding: 1rem 1rem 2rem; }
-    label { display: block; margin-top: 0.75rem; }
-    input, textarea, select, button { width: 100%; max-width: 36rem; box-sizing: border-box; }
-    textarea { min-height: 5rem; }
-    .row { margin: 0.75rem 0; }
-    .err { color: #a40000; white-space: pre-wrap; }
-    .ok { color: #0b5; }
-    .warn { color: #964; white-space: pre-wrap; }
-    code { font-size: 0.85rem; }
-    nav#mainNav {
-      display: flex; flex-wrap: wrap; gap: 0.25rem; border-bottom: 1px solid #ccd; margin: 0.5rem 0 1rem;
-      background: #fff; padding: 0.35rem 0.25rem 0; border-radius: 6px 6px 0 0;
-    }
-    nav#mainNav button {
-      width: auto; max-width: none; padding: 0.45rem 0.65rem; border: 1px solid transparent;
-      background: transparent; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 0.9rem;
-    }
-    nav#mainNav button:hover { background: #eef1f6; }
-    nav#mainNav button.active { background: #f6f7f9; border-color: #ccd #ccd #f6f7f9; font-weight: 600; }
-    .panel { display: none; background: #fff; padding: 1rem; border: 1px solid #ccd; border-top: none; border-radius: 0 0 6px 6px; }
-    .panel.active { display: block; }
-    .muted { color: #555; font-size: 0.9rem; }
-    h1 { font-size: 1.35rem; }
-    h2 { font-size: 1.1rem; margin-top: 0; }
-    .banner { font-size: 0.85rem; color: #444; margin-bottom: 1rem; }
-    .account-dl dt { font-weight: 600; margin-top: 0.5rem; }
-    .account-dl dd { margin: 0.15rem 0 0 0; }
-    table.sa-accounts { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
-    table.sa-accounts th, table.sa-accounts td { border: 1px solid #ccd; padding: 0.35rem 0.5rem; text-align: left; }
-    table.sa-saga { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.35rem; }
-    table.sa-saga th, table.sa-saga td { border: 1px solid #ccd; padding: 0.3rem 0.45rem; text-align: left; word-break: break-all; }
-    .danger-zone { border: 2px solid #c0392b; background: #fdecea; padding: 0.85rem 1rem; border-radius: 6px; margin-top: 1rem; }
-    .danger-zone h4 { margin-top: 0; color: #7b241c; font-size: 1rem; }
-    /* Préférences d'affichage (issue-023) : scope sous .wrap ; alertes / zones sensibles exclus */
-    html[data-ds-density="compact"] .wrap { --ds-shell-pad: 0.55rem; --ds-panel-pad: 0.65rem; --ds-font-scale: 0.96; }
-    html[data-ds-density="comfortable"] .wrap { --ds-shell-pad: 1.35rem; --ds-panel-pad: 1.15rem; --ds-font-scale: 1.05; }
-    html[data-ds-density="compact"] .wrap .panel,
-    html[data-ds-density="comfortable"] .wrap .panel {
-      padding: var(--ds-panel-pad, 1rem);
-    }
-    html[data-ds-density="compact"] .wrap,
-    html[data-ds-density="comfortable"] .wrap {
-      padding-left: var(--ds-shell-pad, 1rem);
-      padding-right: var(--ds-shell-pad, 1rem);
-      font-size: calc(1rem * var(--ds-font-scale, 1));
-    }
-    html[data-ds-density="compact"] .wrap h1 { font-size: 1.2rem; }
-    html[data-ds-density="comfortable"] .wrap h1 { font-size: 1.45rem; }
-    html[data-ds-density="compact"] .wrap nav#mainNav button { padding: 0.35rem 0.5rem; font-size: 0.85rem; }
-    html[data-ds-density="comfortable"] .wrap nav#mainNav button { padding: 0.5rem 0.75rem; }
-    html[data-ds-reading="high_contrast"] .wrap {
-      background: #fff;
-      color: #0a0a0a;
-    }
-    html[data-ds-reading="high_contrast"] .wrap .muted { color: #222; }
-    html[data-ds-reading="high_contrast"] .wrap nav#mainNav { background: #fff; border-color: #333; }
-    html[data-ds-reading="high_contrast"] .wrap .panel { border-color: #333; }
-    html[data-ds-reading="reduced_motion"] .wrap nav#mainNav button { transition: none; }
-    .err, .warn, #authMsg, .danger-zone, .danger-zone * {
-      font-size: 1rem !important;
-    }
-    html[data-ds-density="compact"] .err,
-    html[data-ds-density="compact"] .warn,
-    html[data-ds-density="compact"] #authMsg,
-    html[data-ds-density="compact"] .danger-zone,
-    html[data-ds-density="comfortable"] .err,
-    html[data-ds-density="comfortable"] .warn,
-    html[data-ds-density="comfortable"] #authMsg,
-    html[data-ds-density="comfortable"] .danger-zone,
-    html[data-ds-reading="high_contrast"] .err { color: #a40000 !important; }
-    html[data-ds-reading="high_contrast"] .warn { color: #964 !important; }
-  </style>
+  <link rel="stylesheet" href="/static/design_tokens.css" />
 </head>
 <body>
   <div class="wrap">
+    <!--DS_MIGRATION_BANNER_PLACEHOLDER-->
     <h1>Dataset Style — coquille curateur</h1>
-    <p class="banner">Shell de navigation aligné sur Streamlit (ordre des onglets via <code>/api/me</code>).
-      Streamlit reste sur le port <code>8501</code> ; ce service <code>webapp</code> porte le slice API + UI minimale.</p>
+    <div class="shell-lede">Shell de navigation aligné sur Streamlit (ordre des onglets via <code>/api/me</code>).
+      Streamlit reste sur le port <code>8501</code> ; ce service <code>webapp</code> porte le slice API + UI minimale.</div>
 
     <section id="auth">
       <h2>Connexion</h2>
@@ -95,7 +29,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <label>Mot de passe <input type="password" id="password" autocomplete="current-password" /></label>
       <div class="row"><button type="button" id="btnSignin">Se connecter</button></div>
       <div class="row"><button type="button" id="btnSignout">Se déconnecter</button></div>
-      <p id="authMsg" class="err" aria-live="polite"></p>
+      <div id="authMsg" class="ds-banner-stack" aria-live="polite"></div>
     </section>
 
     <section id="workspace" hidden>
@@ -152,7 +86,9 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="4">
       <h2>Tableau de bord</h2>
-      <p class="muted">Placeholder — parité métriques / stylométrie : sprints suivants.</p>
+      <p class="muted">Alertes qualité dataset (issue-014) : chargement via <code>GET /api/projects/…/dashboard</code>.</p>
+      <div id="dashBannerStack" class="ds-banner-stack" aria-live="polite"></div>
+      <p id="dashMetricsHint" class="muted"></p>
     </div>
     <div class="panel" data-tab-idx="5">
       <h2>Mon compte</h2>
@@ -176,14 +112,14 @@ INDEX_HTML = """<!DOCTYPE html>
       </label>
       <div class="row"><button type="button" id="btnSaveUiPrefs">Enregistrer l&apos;affichage</button></div>
       <p id="uiPrefsMsg" class="muted" aria-live="polite"></p>
-      <p id="accountLoadErr" class="err" aria-live="polite"></p>
+      <div id="accountLoadErr" class="ds-banner-stack" aria-live="polite"></div>
     </div>
     <div class="panel" data-tab-idx="6">
       <h2>Super Admin</h2>
       <p class="muted">Invitation d’un collaborateur (invitation-only). Aucune inscription publique.</p>
       <label>E-mail du collaborateur <input type="email" id="saInviteEmail" autocomplete="off" /></label>
       <div class="row"><button type="button" id="btnSaInvite">Envoyer l’invitation</button></div>
-      <p id="saInviteMsg" class="muted" aria-live="polite"></p>
+      <div id="saInviteMsg" class="ds-banner-stack" aria-live="polite"></div>
       <h3>Comptes actifs</h3>
       <p class="muted">Liste paginée via <code>GET /api/super-admin/accounts</code> : <code>page</code> ≥ 1 ;
         <code>page_size</code> entre 10 et 100 (défaut 25).</p>
@@ -197,14 +133,14 @@ INDEX_HTML = """<!DOCTYPE html>
       </label>
       <label>Page <input type="number" id="saAccountsPage" min="1" value="1" /></label>
       <div class="row"><button type="button" id="btnSaAccountsReload">Actualiser la liste</button></div>
-      <p id="saAccountsErr" class="err" aria-live="polite"></p>
+      <div id="saAccountsErr" class="ds-banner-stack" aria-live="polite"></div>
       <p id="saAccountsSummary" class="muted"></p>
       <div id="saAccountsTableWrap"></div>
       <h3>Panneau technique (saga)</h3>
       <p class="muted">Métriques alignées sur le studio : cartes = répartition sur les N dernières mises à jour ;
         totaux = ensemble de la table. File = opérations éligibles au worker (<code>retry_deprovision_ops</code>).</p>
       <p><button type="button" id="btnSaSagaReload">Actualiser la télémétrie</button></p>
-      <p id="saSagaErr" class="err" aria-live="polite"></p>
+      <div id="saSagaErr" class="ds-banner-stack" aria-live="polite"></div>
       <div id="saSagaSummary" class="muted"></div>
       <div id="saSagaTables"></div>
       <div class="danger-zone" id="saSagaDanger">
@@ -217,12 +153,13 @@ INDEX_HTML = """<!DOCTYPE html>
         <div class="row">
           <button type="button" id="btnSaSagaReplay" disabled>Relancer l'opération</button>
         </div>
-        <p id="saSagaReplayMsg" class="muted" aria-live="polite"></p>
+        <div id="saSagaReplayMsg" class="ds-banner-stack" aria-live="polite"></div>
       </div>
     </div>
   </template>
 
   <script>
+    const API_ERROR_BANNER_VARIANT = __API_ERROR_BANNER_VARIANT_JSON__;
     const LS = "slice_vertical_access_token";
     const SS = "webapp_active_project_id";
     const UIPREFS_SS = "ds_ui_prefs_v1";
@@ -231,6 +168,7 @@ INDEX_HTML = """<!DOCTYPE html>
     const mainNav = document.getElementById("mainNav");
     const panelsHost = document.getElementById("panels");
     let mainTabLabels = [];
+    let activeMainTabIdx = 0;
 
     function token() { return localStorage.getItem(LS) || ""; }
     function activeProjectHint() { return sessionStorage.getItem(SS) || ""; }
@@ -250,19 +188,61 @@ INDEX_HTML = """<!DOCTYPE html>
       if (div) div.innerHTML = "";
     }
 
+    function apiBannerVariantForCode(code) {
+      const v = API_ERROR_BANNER_VARIANT[code];
+      return v || "danger";
+    }
+
+    function datasetAlertVariantFromSeverity(sev) {
+      return sev === "info" ? "info" : "warning";
+    }
+
+    function clearDsBannerStack(host) {
+      if (!host) return;
+      host.innerHTML = "";
+      host.className = "ds-banner-stack";
+    }
+
+    function fillDsBanner(el, variant, titleText, messageText) {
+      el.className = "ds-banner ds-banner--" + variant;
+      el.setAttribute("role", "status");
+      el.innerHTML = "";
+      const t = document.createElement("strong");
+      t.className = "ds-banner__title";
+      t.textContent = titleText || "";
+      const m = document.createElement("p");
+      m.className = "ds-banner__message";
+      m.textContent = messageText || "";
+      el.appendChild(t);
+      el.appendChild(m);
+    }
+
+    function appendBannerToStack(stack, variant, titleText, messageText) {
+      const inner = document.createElement("div");
+      stack.appendChild(inner);
+      fillDsBanner(inner, variant, titleText, messageText);
+    }
+
+    function renderApiErrorIntoStack(stack, err) {
+      clearDsBannerStack(stack);
+      if (!err) return;
+      const variant = apiBannerVariantForCode(err.code || "");
+      const title = err.title || "Erreur";
+      const parts = [err.message || "", err.suggested_action || "", err.code ? "code : " + err.code : ""].filter(Boolean);
+      appendBannerToStack(stack, variant, title, parts.join(String.fromCharCode(10)));
+    }
+
     function showErr(obj) {
+      clearDsBannerStack(authMsg);
       if (obj && obj.error) {
-        const e = obj.error;
-        authMsg.textContent = (e.title || "") + "\\n" + (e.message || "") + (e.code ? "\\ncode: " + e.code : "");
-        authMsg.className = "err";
+        renderApiErrorIntoStack(authMsg, obj.error);
       } else {
-        authMsg.textContent = JSON.stringify(obj);
-        authMsg.className = "err";
+        appendBannerToStack(authMsg, "danger", "Erreur", typeof obj === "string" ? obj : JSON.stringify(obj));
       }
     }
     function showOk(msg) {
-      authMsg.textContent = msg || "OK";
-      authMsg.className = "ok";
+      clearDsBannerStack(authMsg);
+      appendBannerToStack(authMsg, "success", "Succès", msg || "OK");
     }
 
     async function api(path, opts = {}) {
@@ -346,7 +326,7 @@ INDEX_HTML = """<!DOCTYPE html>
       const errEl = document.getElementById("accountLoadErr");
       const detail = document.getElementById("accountDetail");
       if (!errEl || !detail) return;
-      errEl.textContent = "";
+      clearDsBannerStack(errEl);
       try {
         const a = await api("/api/account");
         if (a.uiPreferences) persistUiPrefsCache(a.uiPreferences);
@@ -365,18 +345,20 @@ INDEX_HTML = """<!DOCTYPE html>
           + "</dl>";
       } catch (e) {
         detail.innerHTML = "";
-        if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
-        else errEl.textContent = "Impossible de charger le profil.";
+        if (e && e.error) renderApiErrorIntoStack(errEl, e.error);
+        else appendBannerToStack(errEl, "danger", "Profil", "Impossible de charger le profil.");
       }
     }
 
     function activateMainTab(idx) {
+      activeMainTabIdx = idx;
       mainNav.querySelectorAll("button").forEach((b, j) => b.classList.toggle("active", j === idx));
       panelsHost.querySelectorAll(".panel").forEach((p) => {
         const i = parseInt(p.getAttribute("data-tab-idx"), 10);
         p.classList.toggle("active", i === idx);
       });
       if (mainTabLabels[idx] === "Mon compte") loadAccountPanel().catch(showErr);
+      if (mainTabLabels[idx] === "Tableau de bord") loadDashboardBanners().catch(showErr);
       if (mainTabLabels[idx] === "Super Admin") {
         loadSuperAdminAccounts().catch(showErr);
         loadSuperAdminSagaTelemetry().catch(function() {});
@@ -413,7 +395,7 @@ INDEX_HTML = """<!DOCTYPE html>
       const sumEl = document.getElementById("saAccountsSummary");
       const wrap = document.getElementById("saAccountsTableWrap");
       if (!errEl || !sumEl || !wrap) return;
-      errEl.textContent = "";
+      clearDsBannerStack(errEl);
       const pgEl = document.getElementById("saAccountsPage");
       const psEl = document.getElementById("saAccountsPageSize");
       const page = Math.max(1, parseInt(pgEl && pgEl.value, 10) || 1);
@@ -441,8 +423,8 @@ INDEX_HTML = """<!DOCTYPE html>
         wrap.innerHTML = html;
       } catch (e) {
         wrap.innerHTML = "";
-        if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
-        else errEl.textContent = "Impossible de charger l’annuaire.";
+        if (e && e.error) renderApiErrorIntoStack(errEl, e.error);
+        else appendBannerToStack(errEl, "danger", "Annuaire", "Impossible de charger l’annuaire.");
       }
     }
 
@@ -452,12 +434,10 @@ INDEX_HTML = """<!DOCTYPE html>
       const inp = document.getElementById("saInviteEmail");
       if (!btn || !msg || !inp) return;
       btn.onclick = async () => {
-        msg.textContent = "";
-        msg.className = "muted";
+        clearDsBannerStack(msg);
         const email = inp.value.trim();
         if (!email) {
-          msg.textContent = "Saisis une adresse e-mail.";
-          msg.className = "err";
+          appendBannerToStack(msg, "warning", "Invitation", "Saisis une adresse e-mail.");
           return;
         }
         btn.disabled = true;
@@ -467,17 +447,17 @@ INDEX_HTML = """<!DOCTYPE html>
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ email }),
           });
-          msg.textContent = out.message;
-          msg.className = out.mailMode === "smtp" ? "ok" : "warn";
+          const okSmtp = out.mailMode === "smtp";
+          appendBannerToStack(
+            msg,
+            okSmtp ? "success" : "warning",
+            okSmtp ? "Invitation" : "Invitation (mail simulé)",
+            out.message || "OK"
+          );
           loadSuperAdminAccounts().catch(function() {});
         } catch (e) {
-          if (e && e.error) {
-            msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
-            msg.className = "err";
-          } else {
-            msg.textContent = "Erreur inattendue.";
-            msg.className = "err";
-          }
+          if (e && e.error) renderApiErrorIntoStack(msg, e.error);
+          else appendBannerToStack(msg, "danger", "Invitation", "Erreur inattendue.");
         } finally {
           btn.disabled = false;
         }
@@ -573,7 +553,7 @@ INDEX_HTML = """<!DOCTYPE html>
       if (sel) sel.onchange = syncReplayBtn;
       if (btn) btn.onclick = async function() {
         const msg = document.getElementById("saSagaReplayMsg");
-        if (msg) { msg.textContent = ""; msg.className = "muted"; }
+        if (msg) clearDsBannerStack(msg);
         if (!sel || !sel.value) return;
         btn.disabled = true;
         try {
@@ -582,16 +562,12 @@ INDEX_HTML = """<!DOCTYPE html>
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ confirm: true, operationId: sel.value }),
           });
-          if (msg) {
-            msg.textContent = out.message || "OK";
-            msg.className = "ok";
-          }
+          if (msg) appendBannerToStack(msg, "success", "Relance", out.message || "OK");
           if (out.telemetry) applySuperAdminSagaTelemetry(out.telemetry);
         } catch (e) {
           if (msg) {
-            msg.className = "err";
-            if (e && e.error) msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
-            else msg.textContent = "Relance impossible.";
+            if (e && e.error) renderApiErrorIntoStack(msg, e.error);
+            else appendBannerToStack(msg, "danger", "Relance", "Relance impossible.");
           }
         } finally {
           syncReplayBtn();
@@ -601,14 +577,14 @@ INDEX_HTML = """<!DOCTYPE html>
 
     async function loadSuperAdminSagaTelemetry() {
       const errEl = document.getElementById("saSagaErr");
-      if (errEl) errEl.textContent = "";
+      if (errEl) clearDsBannerStack(errEl);
       try {
         const data = await api("/api/super-admin/saga/telemetry");
         applySuperAdminSagaTelemetry(data);
       } catch (e) {
         if (errEl) {
-          if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
-          else errEl.textContent = "Impossible de charger la télémétrie saga.";
+          if (e && e.error) renderApiErrorIntoStack(errEl, e.error);
+          else appendBannerToStack(errEl, "danger", "Saga", "Impossible de charger la télémétrie saga.");
         }
       }
     }
@@ -634,7 +610,7 @@ INDEX_HTML = """<!DOCTYPE html>
     }
 
     document.getElementById("btnSignin").onclick = async () => {
-      authMsg.textContent = "";
+      clearDsBannerStack(authMsg);
       const email = document.getElementById("email").value.trim();
       const password = document.getElementById("password").value;
       try {
@@ -700,6 +676,7 @@ INDEX_HTML = """<!DOCTYPE html>
       setActiveProjectHint(pid);
       clearEntryState();
       loadEntries().catch(showErr);
+      if (mainTabLabels[activeMainTabIdx] === "Tableau de bord") loadDashboardBanners().catch(showErr);
     }
 
     async function loadEntries() {
@@ -831,6 +808,43 @@ INDEX_HTML = """<!DOCTYPE html>
       a.click();
     }
 
+    async function loadDashboardBanners() {
+      const stack = document.getElementById("dashBannerStack");
+      const hint = document.getElementById("dashMetricsHint");
+      if (!stack || !hint) return;
+      clearDsBannerStack(stack);
+      hint.textContent = "";
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) {
+        appendBannerToStack(stack, "info", "Tableau de bord", "Sélectionnez un projet pour afficher les alertes qualité.");
+        return;
+      }
+      try {
+        const body = await api(
+          "/api/projects/" + encodeURIComponent(pid) + "/dashboard?dashboard_scope=validated"
+        );
+        const alerts = (body.dataset_quality && body.dataset_quality.alerts) || [];
+        for (const a of alerts) {
+          const v = datasetAlertVariantFromSeverity(a.severity);
+          appendBannerToStack(stack, v, a.title_fr || "Qualité du dataset", a.message_fr || "");
+        }
+        if (!alerts.length) {
+          appendBannerToStack(
+            stack,
+            "success",
+            "Tableau de bord",
+            "Aucune alerte qualité pour ce périmètre (fiches validées)."
+          );
+        }
+        hint.textContent = "Périmètre chargé : fiches validées (dashboard_scope=validated), aligné issue-014.";
+      } catch (e) {
+        clearDsBannerStack(stack);
+        if (e && e.error) renderApiErrorIntoStack(stack, e.error);
+        else appendBannerToStack(stack, "danger", "Tableau de bord", "Impossible de charger les agrégats.");
+      }
+    }
+
     (async function restoreSession() {
       if (!token()) return;
       try {
@@ -849,3 +863,8 @@ INDEX_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+INDEX_HTML = _RAW_INDEX_HTML.replace(
+    "__API_ERROR_BANNER_VARIANT_JSON__",
+    api_error_banner_variant_json_for_index_script(),
+)

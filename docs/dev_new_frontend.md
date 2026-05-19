@@ -30,12 +30,18 @@ docker compose --env-file .env up postgres supertokens webapp
 
 Interface locale : `http://localhost:8080` — healthcheck ops : `http://localhost:8080/health`.
 
+Les **assets statiques** du slice (tokens CSS, etc.) sont servis sous `http://localhost:8080/static/…` (ex. `design_tokens.css`). Voir `docs/design_tokens_webapp.md`.
+
 ## Cohérence auth (ADR 0006)
 
 - Aligner **`APP_PUBLIC_BASE_URL`** sur l’URL réellement servie aux testeurs (ex. `http://localhost:8080` pour un test local du slice web seul), afin que les liens invitation / reset et les cookies SuperTokens restent cohérents.
 - **`WEBAPP_CORS_ORIGINS`** : liste fermée d’origines autorisées (séparées par des virgules) si le navigateur appelle le BFF depuis une origine distincte ; en monorigine (même schéma, hôte et port), la valeur par défaut `http://localhost:8080` suffit.
 
 Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique).
+
+## Bannière d’information (optionnel)
+
+Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la page `GET /` du service `webapp` (ainsi que dans Streamlit lorsque les deux coexistent en recette). Voir `docs/migration_communication_plan.md`. Laisser vide pour masquer.
 
 ## Tests et CI
 
