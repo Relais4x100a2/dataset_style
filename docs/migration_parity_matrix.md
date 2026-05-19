@@ -79,6 +79,48 @@ Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
 ---
 
+## Réglages presets & dimensions (issue-011 / GitHub #133)
+
+Slice **webapp** : `GET /api/projects/{id}/settings/dimensions` et `PATCH` sur la même ressource (`src/webapp/project_dimensions_settings.py`, `src/webapp/app.py`) — validation et fusion alignées sur `src/presets.py` ; persistance via `update_project_settings` (`active_preset_key`, `custom_presets_json`, `dimensions_override_json`). Coquille HTML : onglet **Réglages & Export** (`src/webapp/index_template.py`). **Écart documenté** : le formulaire Streamlit complet (`get_project_settings` / champs LLM, timeouts, etc.) n’est pas entièrement porté par cette ressource — dimensions + presets seulement ; champs LLM / LanguageTool restent éditables côté Streamlit (voir tableau § issue-011).
+
+| ID flux | Slice (issue-011) |
+| --- | --- |
+| SET-READ | OK — `GET .../settings/dimensions` |
+| SET-WRITE | OK — `PATCH .../settings/dimensions` (dimensions + presets ; hors champs LLM / LT coquille) |
+| DIM-WRITE | OK — mêmes actions que `_render_dimensions_section` / `src/presets` |
+| ENT-NEW-READ | OK — après `PATCH`, `GET .../curator/dimensions` reflète `load_active_dimensions` (`tests/test_webapp_project_dimensions_settings.py`) |
+
+---
+
+## Nouvelle entrée & gestion / édition (issue-012 / GitHub #134)
+
+**API** : `GET /api/projects/{id}/entries` (filtres `edition_*`), `POST …/entries`, `PATCH …/entries/{entry_id}` ; corps `entries` après mutation ; colonnes internes préfixées `_` exclues du JSON (`tests/test_webapp_vertical_slice.py`, `src/webapp/entry_mutations.py`). **UI** : tableau et fiche d’édition dans la coquille (`src/webapp/index_template.py`) ; dimensions fermées sur `POST` / `PATCH` validées côté serveur (`_resolve_closed_dimension_value`). **Écart documenté** : **suppression de fiche** non exposée (aligné sur l’UI Streamlit actuelle, voir matrice principale ligne EDI-SAVE).
+
+---
+
+## Génération IA & LanguageTool (issue-013 / GitHub #135)
+
+Slice **webapp** : `GET /api/projects/{id}/curator/dimensions`, `POST …/curator/llm-generate`, `POST …/curator/languagetool-check` (`src/webapp/curator_ai.py`, `src/webapp/app.py`) — chaîne métier alignée Streamlit (`llm_generate`, `nlp_engine.languagetool_fr_corrected_with_matches`, réglages `ProjectSettings` côté serveur). Coquille HTML : onglets **Nouvelle entrée** et **Gestion & édition** ; retours via `ds-banner-stack` + `renderApiErrorIntoStack` (issue-005). Tests : `tests/test_webapp_curator_ai.py`, `tests/test_webapp_index_template_issue013.py`.
+
+| ID flux | Slice (issue-013) |
+| --- | --- |
+| ENT-LLM | OK — `POST …/curator/llm-generate` + UI coquille |
+| EDI-LT | OK — `POST …/curator/languagetool-check` + UI coquille |
+
+---
+
+## Stylométrie, cohérence, tableau de bord (issue-014 / GitHub #136)
+
+**API** : `GET /api/projects/{id}/dashboard` (`dashboard_scope`) — `build_curator_dashboard_envelope` ; tests `tests/test_webapp_vertical_slice.py`, `tests/test_curator_dashboard_snapshot.py`. **UI** : onglet **Tableau de bord** — chargement `fetch` vers `/dashboard` et bandeaux (script embarqué dans `src/webapp/index_template.py`). **Écart documenté (rendu analytique)** : pas de reproduction des graphiques / onglets denses du studio Streamlit ; alertes et résumés `dataset_quality` côté coquille.
+
+---
+
+## Export CSV/JSONL & onboarding projet vide (issue-015 / GitHub #137)
+
+**API** : `GET …/export.csv` et `…/export.jsonl` (`scope`, `dataframe_for_export`, CSV sans colonnes `_`) — `tests/test_webapp_vertical_slice.py`, `src/webapp/app.py`. **UI** : `#exportScope` dans `index_template.py`. Onboarding projet vide : `empty_project_onboarding` (slice issue-007 / 015). **Écart documenté** : récap qualité pré-export Streamlit (`export_quality_recap_service.build_export_quality_recap`) — non porté HTTP. **Écart documenté (CSV)** : colonnes `_*` — voir § *Comparaison coexistence Streamlit vs webapp*.
+
+---
+
 ## Mon compte curateur (issue-016 / GitHub #138)
 
 Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `displayName`, `counts`, `uiPreferences` avec `density` / `readingComfort` par défaut `default`) ; `PATCH /api/account/ui-preferences` (fusion partielle, issue-023) ; `POST /api/auth/signout` renvoie `redirect` allow-listé (`WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST`, défaut `/`) ; coquille HTML : navigation shell + onglet **Mon compte** (issue-010).
@@ -90,60 +132,41 @@ Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `
 
 ---
 
-## Réglages presets & dimensions (issue-011 / GitHub #133)
-
-Slice **webapp** : `GET /api/projects/{id}/settings/dimensions` et `PATCH` sur la même ressource (`src/webapp/project_dimensions_settings.py`, `src/webapp/app.py`) — validation et fusion alignées sur `src/presets.py` ; persistance inchangée via `update_project_settings` (`active_preset_key`, `custom_presets_json`, `dimensions_override_json`). Coquille HTML : onglet **Réglages & Export** (`src/webapp/index_template.py`).
-
-| ID flux | Slice (issue-011) |
-| --- | --- |
-| SET-READ | OK — `GET .../settings/dimensions` |
-| SET-WRITE | OK — `PATCH .../settings/dimensions` (dimensions + presets ; champs LLM / LanguageTool hors périmètre coquille, inchangés côté Streamlit) |
-| DIM-WRITE | OK — mêmes actions que `_render_dimensions_section` / `src/presets` |
-| ENT-NEW-READ | OK — smoke : après `PATCH`, `GET .../curator/dimensions` reflète `load_active_dimensions` (`tests/test_webapp_project_dimensions_settings.py`) |
-
----
-
-## Génération IA & LanguageTool (issue-013 / GitHub #135)
-
-Slice **webapp** : `GET /api/projects/{id}/curator/dimensions`, `POST …/curator/llm-generate`, `POST …/curator/languagetool-check` (`src/webapp/curator_ai.py`, `src/webapp/app.py`) — même chaîne métier que Streamlit (`llm_generate`, `nlp_engine.languagetool_fr_corrected_with_matches`, réglages `ProjectSettings` côté serveur). Coquille HTML : onglets **Nouvelle entrée** et **Gestion & édition** (`src/webapp/index_template.py`, script embarqué) : listes de dimensions, boutons de génération, analyse LT, affichage des suggestions et application du texte corrigé ; retours utilisateur via `ds-banner-stack` + `renderApiErrorIntoStack` (issue-005). Tests API : `tests/test_webapp_curator_ai.py` ; contrat gabarit : `tests/test_webapp_index_template_issue013.py`.
-
-| ID flux | Slice (issue-013) |
-| --- | --- |
-| ENT-LLM | OK — `POST …/curator/llm-generate` + UI coquille |
-| EDI-LT | OK — `POST …/curator/languagetool-check` + UI coquille |
-
----
-
 ## Grille statut sprint backlog (issues issue-010 à issue-016)
 
-Remplacez chaque `⏳` lors de la clôture de l’issue backlog correspondante (pas le numéro GitHub — voir règle de synchronisation backlog / GitHub dans la doc projet).
+Chaque cellule = **`OK`**, **`N/A`** ou **`Écart documenté`** + **référence** (section `§` ci-dessus, route HTTP, ou fichier de test abrégé).
+
+**Abréviations tests** : `T010` → `tests/test_webapp_issue010_shell.py` ; `TDIM` → `tests/test_webapp_project_dimensions_settings.py` ; `TPRESET` → `tests/test_presets_dimensions_patch_validation.py` ; `TWV` → `tests/test_webapp_vertical_slice.py` ; `T013` → `tests/test_webapp_curator_ai.py` ; `T013T` → `tests/test_webapp_index_template_issue013.py` ; `T014` → `tests/test_curator_dashboard_snapshot.py` ; `REG` → `tests/test_curation_chain_postgres_regression.py` (opt-in CI, issue-009).
+
+**`N/A` (colonne issue-0XX)** : le flux n’est pas un livrable de cette issue ; la décision de périmètre est celle du backlog sprint (pas une assertion de complétude globale du produit).
 
 | ID flux | issue-010 | issue-011 | issue-012 | issue-013 | issue-014 | issue-015 | issue-016 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SB-CTX | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| PRJ-VIEW | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| PRJ-CREATE | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| PRJ-DELETE | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SET-READ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SET-WRITE | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| DIM-WRITE | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| EXP-SCOPE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
-| EXP-DL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ |
-| ENT-NEW-READ | ⏳ | OK | OK | OK | ⏳ | ⏳ | ⏳ |
-| ENT-NEW-WRITE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
-| ENT-LLM | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
-| EDI-SAVE | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ | ⏳ |
-| EDI-LT | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ | ⏳ |
-| DASH-METRICS | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ |
-| DASH-STYLO | ⏳ | ⏳ | ⏳ | ⏳ | OK | ⏳ | ⏳ |
-| ACC-INFO | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | OK |
-| ACC-DEL | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | Écart documenté |
-| SA-LIST | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SA-DETACH | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SA-DELETE | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
-| SA-REPLAY | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| SB-CTX | OK — T010, `GET /api/me`, `GET /api/projects` + `active_hint` | N/A | N/A | N/A | N/A | N/A | N/A |
+| PRJ-VIEW | OK — T010, TWV | N/A | N/A | N/A | N/A | N/A | N/A |
+| PRJ-CREATE | OK — T010 | N/A | N/A | N/A | N/A | N/A | N/A |
+| PRJ-DELETE | OK — T010 | N/A | N/A | N/A | N/A | N/A | N/A |
+| SET-READ | N/A | OK — TDIM, `GET …/settings/dimensions`, §11 | N/A | N/A | N/A | N/A | N/A |
+| SET-WRITE | N/A | OK — TDIM, TPRESET, `PATCH …/settings/dimensions`, §11 | N/A | N/A | N/A | N/A | N/A |
+| DIM-WRITE | N/A | OK — §11, TDIM, TPRESET | N/A | N/A | N/A | N/A | N/A |
+| EXP-SCOPE | N/A | N/A | N/A | N/A | N/A | OK — TWV, `#exportScope`, §15 | N/A |
+| EXP-DL | N/A | N/A | N/A | N/A | N/A | **Écart documenté** — génération fichiers OK (`TWV`, `REG`, `dataframe_for_export`) ; **non** récap qualité pré-export Streamlit ; **non** parité CSV colonnes `_*` vs Streamlit — §15 + § coexistence | N/A |
+| ENT-NEW-READ | N/A | OK — §11 (tableau slice) | OK — TWV, gabarit `index_template`, §12 | OK — T013, `GET …/curator/dimensions`, §13 | N/A | N/A | N/A |
+| ENT-NEW-WRITE | N/A | N/A | OK — TWV, REG, §12 | N/A | N/A | N/A | N/A |
+| ENT-LLM | N/A | N/A | N/A | OK — T013, T013T, §13 | N/A | N/A | N/A |
+| EDI-SAVE | N/A | N/A | OK — TWV, REG, §12 | N/A | N/A | N/A | N/A |
+| EDI-LT | N/A | N/A | N/A | OK — T013, T013T, §13 | N/A | N/A | N/A |
+| DASH-METRICS | N/A | N/A | N/A | N/A | OK — TWV, T014, `GET …/dashboard`, §14 | N/A | N/A |
+| DASH-STYLO | N/A | N/A | N/A | N/A | OK — idem DASH-METRICS (`dashboard_scope`), §14 | N/A | N/A |
+| ACC-INFO | N/A | N/A | N/A | N/A | N/A | N/A | OK — TWV, `GET /api/account`, §16 |
+| ACC-DEL | N/A | N/A | N/A | N/A | N/A | N/A | Écart documenté — §16 (saga hors webapp) |
+| SA-LIST | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| SA-INVITE | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| SA-DETACH | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| SA-DELETE | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| SA-REPLAY | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
 
-**issue-015 (export slice + onboarding)** : le récap qualité pré-export Streamlit (`export_quality_recap_service.build_export_quality_recap`) n’est pas porté par le slice HTTP — **écart documenté** ; la parité « données exportées » repose sur `dataframe_for_export` + `convert_to_jsonl` uniquement.
+**Notes lecture produit (colonnes 010–016)** : les lignes **SA-*** sont hors périmètre **parité curateur** (backlog 017–019) ; la cellule **`N/A`** signifie que l’issue colonne ne couvre pas le flux super-admin. **`Écart documenté`** sur **EXP-DL × issue-015** regroupe (1) le récap qualité pré-export Streamlit non porté en HTTP et (2) l’écart CSV colonnes `_*` documenté en § *Comparaison coexistence* — ces points ne doivent pas être relus comme **`OK`** plein studio.
 
 ---
 

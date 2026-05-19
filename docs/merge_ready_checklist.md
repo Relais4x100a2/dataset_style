@@ -4,6 +4,8 @@
 
 Pour tout merge vers **`deploy-caprover-relais4`** (prod Relais4), suivre la procédure détaillée dans **`docs/release_train_caprover.md`** : `pytest -q`, `ruff check` / `ruff format --check`, `bootstrap_check`, contrats auth si la PR touche les chemins listés dans `auth-contract.yml`.
 
+Pour toute PR qui modifie un flux listé dans **`docs/migration_parity_matrix.md`** (routes webapp, tests de parité, ou comportement Streamlit équivalent), mettre à jour la **grille issue-010 → issue-016** et les sections `§` associées dans ce même fichier, puis exécuter `pytest -q tests/test_migration_parity_matrix_doc.py`.
+
 ## 1) Sécurité auth validée
 
 - [ ] `AUTH_ENFORCE_INVITATION_ONLY=true` en cible.
