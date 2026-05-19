@@ -308,3 +308,105 @@ table.sa-saga td {
 .ds-migration-banner {
   margin-bottom: 0.75rem;
 }
+
+/* Retours inline courts (issue-023, onglet Mon compte) */
+.ok {
+  color: var(--ds-banner-success-text);
+}
+
+.err {
+  color: var(--ds-banner-danger-text);
+  white-space: pre-wrap;
+}
+
+/* Préférences d'affichage (issue-023) : scope sous .wrap ; alertes / zones sensibles exclus */
+html[data-ds-density="compact"] .wrap {
+  --ds-shell-pad: 0.55rem;
+  --ds-panel-pad: 0.65rem;
+  --ds-font-scale: 0.96;
+}
+
+html[data-ds-density="comfortable"] .wrap {
+  --ds-shell-pad: 1.35rem;
+  --ds-panel-pad: 1.15rem;
+  --ds-font-scale: 1.05;
+}
+
+html[data-ds-density="compact"] .wrap .panel,
+html[data-ds-density="comfortable"] .wrap .panel {
+  padding: var(--ds-panel-pad, 1rem);
+}
+
+html[data-ds-density="compact"] .wrap,
+html[data-ds-density="comfortable"] .wrap {
+  padding-left: var(--ds-shell-pad, 1rem);
+  padding-right: var(--ds-shell-pad, 1rem);
+  font-size: calc(1rem * var(--ds-font-scale, 1));
+}
+
+html[data-ds-density="compact"] .wrap h1 {
+  font-size: 1.2rem;
+}
+
+html[data-ds-density="comfortable"] .wrap h1 {
+  font-size: 1.45rem;
+}
+
+html[data-ds-density="compact"] .wrap nav#mainNav button {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+html[data-ds-density="comfortable"] .wrap nav#mainNav button {
+  padding: 0.5rem 0.75rem;
+}
+
+html[data-ds-reading="high_contrast"] .wrap {
+  background: var(--ds-color-surface-elevated);
+  color: #0a0a0a;
+}
+
+html[data-ds-reading="high_contrast"] .wrap .muted {
+  color: #222;
+}
+
+html[data-ds-reading="high_contrast"] .wrap nav#mainNav {
+  background: var(--ds-color-surface-elevated);
+  border-color: var(--ds-color-border-strong);
+}
+
+html[data-ds-reading="high_contrast"] .wrap .panel {
+  border-color: var(--ds-color-border-strong);
+}
+
+html[data-ds-reading="reduced_motion"] .wrap nav#mainNav button {
+  transition: none;
+}
+
+.err,
+.warn,
+.ds-banner-stack,
+.ds-banner-stack .ds-banner,
+#authMsg,
+.danger-zone,
+.danger-zone * {
+  font-size: 1rem !important;
+}
+
+html[data-ds-density="compact"] .err,
+html[data-ds-density="compact"] .warn,
+html[data-ds-density="compact"] .ds-banner-stack,
+html[data-ds-density="compact"] #authMsg,
+html[data-ds-density="compact"] .danger-zone,
+html[data-ds-density="comfortable"] .err,
+html[data-ds-density="comfortable"] .warn,
+html[data-ds-density="comfortable"] .ds-banner-stack,
+html[data-ds-density="comfortable"] #authMsg,
+html[data-ds-density="comfortable"] .danger-zone,
+html[data-ds-reading="high_contrast"] .err {
+  color: var(--ds-banner-danger-text) !important;
+}
+
+html[data-ds-reading="high_contrast"] .warn {
+  color: var(--ds-banner-warning-text) !important;
+}
