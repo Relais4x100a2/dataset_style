@@ -38,6 +38,10 @@ INDEX_HTML = """<!DOCTYPE html>
     .account-dl dd { margin: 0.15rem 0 0 0; }
     table.sa-accounts { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
     table.sa-accounts th, table.sa-accounts td { border: 1px solid #ccd; padding: 0.35rem 0.5rem; text-align: left; }
+    table.sa-saga { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.35rem; }
+    table.sa-saga th, table.sa-saga td { border: 1px solid #ccd; padding: 0.3rem 0.45rem; text-align: left; word-break: break-all; }
+    .danger-zone { border: 2px solid #c0392b; background: #fdecea; padding: 0.85rem 1rem; border-radius: 6px; margin-top: 1rem; }
+    .danger-zone h4 { margin-top: 0; color: #7b241c; font-size: 1rem; }
   </style>
 </head>
 <body>
@@ -139,6 +143,25 @@ INDEX_HTML = """<!DOCTYPE html>
       <p id="saAccountsErr" class="err" aria-live="polite"></p>
       <p id="saAccountsSummary" class="muted"></p>
       <div id="saAccountsTableWrap"></div>
+      <h3>Panneau technique (saga)</h3>
+      <p class="muted">Métriques alignées sur le studio : cartes = répartition sur les N dernières mises à jour ;
+        totaux = ensemble de la table. File = opérations éligibles au worker (<code>retry_deprovision_ops</code>).</p>
+      <p><button type="button" id="btnSaSagaReload">Actualiser la télémétrie</button></p>
+      <p id="saSagaErr" class="err" aria-live="polite"></p>
+      <div id="saSagaSummary" class="muted"></div>
+      <div id="saSagaTables"></div>
+      <div class="danger-zone" id="saSagaDanger">
+        <h4>Zone sensible — relance manuelle (DLQ)</h4>
+        <p class="muted">Même effet qu'une relance confirmée côté studio. Ne pas utiliser sans diagnostic.</p>
+        <label>Opération en quarantaine
+          <select id="saSagaDlqSelect"></select>
+        </label>
+        <label><input type="checkbox" id="saSagaReplayConfirm" /> Je confirme la remise en file de l'opération sélectionnée</label>
+        <div class="row">
+          <button type="button" id="btnSaSagaReplay" disabled>Relancer l'opération</button>
+        </div>
+        <p id="saSagaReplayMsg" class="muted" aria-live="polite"></p>
+      </div>
     </div>
   </template>
 
@@ -235,7 +258,10 @@ INDEX_HTML = """<!DOCTYPE html>
         p.classList.toggle("active", i === idx);
       });
       if (mainTabLabels[idx] === "Mon compte") loadAccountPanel().catch(showErr);
-      if (mainTabLabels[idx] === "Super Admin") loadSuperAdminAccounts().catch(showErr);
+      if (mainTabLabels[idx] === "Super Admin") {
+        loadSuperAdminAccounts().catch(showErr);
+        loadSuperAdminSagaTelemetry().catch(function() {});
+      }
     }
 
     function renderMainTabs(labels) {
@@ -348,6 +374,124 @@ INDEX_HTML = """<!DOCTYPE html>
         const pg = document.getElementById("saAccountsPage");
         if (pg) pg.value = "1";
       };
+      wireSuperAdminSagaPanel();
+    }
+
+    function saSagaDlqTableRows(ops) {
+      if (!ops || !ops.length) return "<p class='muted'>(aucune ligne en quarantaine dans l'aperçu)</p>";
+      let h = "<table class='sa-saga'><thead><tr><th>Opération</th><th>Cible</th><th>Tentatives</th><th>Erreur</th></tr></thead><tbody>";
+      for (const o of ops) {
+        h += "<tr><td>" + escapeHtml(o.operationId) + "</td><td>" + escapeHtml(o.targetUserId) + "</td><td>"
+          + o.retryCount + "</td><td>" + escapeHtml((o.lastError || "").slice(0, 120)) + "</td></tr>";
+      }
+      h += "</tbody></table>";
+      return h;
+    }
+
+    function saSagaOpsTable(title, ops) {
+      if (!ops || !ops.length) return "<h4>" + title + "</h4><p class='muted'>(vide)</p>";
+      let h = "<h4>" + title + "</h4><table class='sa-saga'><thead><tr><th>Opération</th><th>État</th><th>Cible</th></tr></thead><tbody>";
+      for (const o of ops) {
+        h += "<tr><td>" + escapeHtml(o.operationId) + "</td><td>" + escapeHtml(o.state) + "</td><td>"
+          + escapeHtml(o.targetUserId) + "</td></tr>";
+      }
+      h += "</tbody></table>";
+      return h;
+    }
+
+    function applySuperAdminSagaTelemetry(data) {
+      const sumEl = document.getElementById("saSagaSummary");
+      const tblEl = document.getElementById("saSagaTables");
+      const sel = document.getElementById("saSagaDlqSelect");
+      const chk = document.getElementById("saSagaReplayConfirm");
+      const btn = document.getElementById("btnSaSagaReplay");
+      if (!sumEl || !tblEl || !sel || !chk || !btn) return;
+      const w = data.stateCountsInRecentWindow || {};
+      const g = data.totalsByState || {};
+      sumEl.innerHTML =
+        "<p><strong>Fenêtre (" + data.recentOpsLimit + " dernières mises à jour)</strong> — en attente : "
+        + (w.pending || 0) + ", fournisseur : " + (w.provider_done || 0) + ", échec : " + (w.failed || 0)
+        + ", quarantaine : " + (w.quarantined || 0) + "</p>"
+        + "<p><strong>Totaux (toute la table)</strong> — pending : " + (g.pending || 0) + ", fournisseur : "
+        + (g.provider_done || 0) + ", base : " + (g.db_done || 0) + ", terminé : " + (g.completed || 0)
+        + ", échec : " + (g.failed || 0) + ", quarantaine : " + (g.quarantined || 0)
+        + " — file (aperçu " + (data.retryQueuePreviewLimit || 0) + ") : "
+        + ((data.retryQueueOps && data.retryQueueOps.length) || 0) + " op.</p>";
+      tblEl.innerHTML =
+        saSagaOpsTable("Opérations récentes (aperçu)", data.recentOps || [])
+        + saSagaOpsTable("File de retry (aperçu)", data.retryQueueOps || [])
+        + "<h4>Quarantaine (aperçu)</h4>" + saSagaDlqTableRows(data.dlqOps || []);
+      sel.innerHTML = "";
+      const dlq = data.dlqOps || [];
+      for (const o of dlq) {
+        const opt = document.createElement("option");
+        opt.value = o.operationId;
+        opt.textContent = o.operationId + " → " + o.targetUserId;
+        sel.appendChild(opt);
+      }
+      chk.checked = false;
+      btn.disabled = true;
+      if (!dlq.length) {
+        sel.disabled = true;
+        chk.disabled = true;
+      } else {
+        sel.disabled = false;
+        chk.disabled = false;
+      }
+    }
+
+    function wireSuperAdminSagaPanel() {
+      const btnReload = document.getElementById("btnSaSagaReload");
+      if (btnReload) btnReload.onclick = function() { loadSuperAdminSagaTelemetry().catch(function() {}); };
+      const chk = document.getElementById("saSagaReplayConfirm");
+      const sel = document.getElementById("saSagaDlqSelect");
+      const btn = document.getElementById("btnSaSagaReplay");
+      function syncReplayBtn() {
+        if (!btn || !chk || !sel) return;
+        btn.disabled = !(chk.checked && sel.value && !sel.disabled);
+      }
+      if (chk) chk.onchange = syncReplayBtn;
+      if (sel) sel.onchange = syncReplayBtn;
+      if (btn) btn.onclick = async function() {
+        const msg = document.getElementById("saSagaReplayMsg");
+        if (msg) { msg.textContent = ""; msg.className = "muted"; }
+        if (!sel || !sel.value) return;
+        btn.disabled = true;
+        try {
+          const out = await api("/api/super-admin/saga/replay-quarantined", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, operationId: sel.value }),
+          });
+          if (msg) {
+            msg.textContent = out.message || "OK";
+            msg.className = "ok";
+          }
+          if (out.telemetry) applySuperAdminSagaTelemetry(out.telemetry);
+        } catch (e) {
+          if (msg) {
+            msg.className = "err";
+            if (e && e.error) msg.textContent = (e.error.title || "") + "\\n" + (e.error.message || "");
+            else msg.textContent = "Relance impossible.";
+          }
+        } finally {
+          syncReplayBtn();
+        }
+      };
+    }
+
+    async function loadSuperAdminSagaTelemetry() {
+      const errEl = document.getElementById("saSagaErr");
+      if (errEl) errEl.textContent = "";
+      try {
+        const data = await api("/api/super-admin/saga/telemetry");
+        applySuperAdminSagaTelemetry(data);
+      } catch (e) {
+        if (errEl) {
+          if (e && e.error) errEl.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
+          else errEl.textContent = "Impossible de charger la télémétrie saga.";
+        }
+      }
     }
 
     function wireProjectAndEntries() {
