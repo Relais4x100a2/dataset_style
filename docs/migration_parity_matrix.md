@@ -53,6 +53,7 @@ Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaqu
 | Mon compte | ACC-INFO | compte + compteurs | — | — | `count_owned_projects`, `count_active_memberships` | `render_tab_account` |
 | Mon compte | ACC-DEL | — | `revoke_account_with_saga` | `logout`, `st.rerun` | saga + `database` (opérations compte) | `src/auth.revoke_account_with_saga` |
 | Super Admin | SA-LIST | listes admin | — | — | `list_accounts_for_super_admin`, compteurs | `render_tab_super_admin` |
+| Super Admin | SA-INVITE | — | `create_invitation_link` + `send_account_link_email` | rechargement annuaire (webapp) | `create_invitation_link` (`require_super_admin`) | `POST /api/super-admin/invite` ; **GitHub #139** — e-mail déjà connu : même message succès (lien reset) |
 | Super Admin | SA-DETACH | — | `detach_memberships_as_super_admin` | `st.rerun` | `detach_memberships_as_super_admin` | UI confirmation |
 | Super Admin | SA-DELETE | — | `revoke_account_with_saga` | `invalidate_project_entries_cache`, flash, `st.rerun` | saga + invalidation | `auth`, `database` |
 | Super Admin | SA-REPLAY | DLQ | `replay_quarantined_operation` | `st.rerun` | `replay_quarantined_operation` | panneau technique |

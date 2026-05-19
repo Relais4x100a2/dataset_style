@@ -12,6 +12,12 @@ from src.empty_project_onboarding import invitation_account_link_email_intro_fr
 from src.mailer import send_account_link_email
 
 _INVITE_SUBJECT = "Invitation Dataset Style Studio"
+# Comportement voulu (SuperTokens) : ``create_invitation_link`` accepte ``EMAIL_ALREADY_EXISTS_ERROR``
+# puis renvoie un lien de reset ; l’UI ne distingue pas nouvelle invitation / compte existant.
+_INVITE_EXISTING_ACCOUNT_UX_NOTE = (
+    " Remarque support : si l'adresse avait déjà un compte, le fournisseur renvoie un lien de "
+    "réinitialisation ; l'interface affiche le même message que pour une nouvelle invitation."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +46,10 @@ def invite_collaborator_by_email(
     Raises:
         PermissionError: Si l'acteur n'est pas super-admin.
         RuntimeError: Échec provider ou configuration (ex. ``APP_PUBLIC_BASE_URL``).
+
+    Note:
+        Compte e-mail déjà connu côté fournisseur : même chaîne utilisateur qu'une nouvelle
+        invitation (pas de libellé distinct), cf. ``_INVITE_EXISTING_ACCOUNT_UX_NOTE``.
     """
     invite_link = create_invitation_link(engine, actor_user_id, email)
     delivery = send_account_link_email(
@@ -50,7 +60,7 @@ def invite_collaborator_by_email(
     )
     if delivery.mode == "smtp":
         return SuperAdminInviteOutcome(
-            message_fr="Invitation envoyée par e-mail.",
+            message_fr="Invitation envoyée par e-mail." + _INVITE_EXISTING_ACCOUNT_UX_NOTE,
             mail_mode="smtp",
         )
     return SuperAdminInviteOutcome(
@@ -58,6 +68,7 @@ def invite_collaborator_by_email(
             "Mode développement : aucun e-mail réel n'est envoyé par ce serveur. "
             "Transmets au destinataire le lien d'activation en t'appuyant sur l'aperçu "
             f"masqué suivant (le jeton complet n'est pas affiché) : {delivery.preview}"
+            + _INVITE_EXISTING_ACCOUNT_UX_NOTE
         ),
         mail_mode="dev",
     )

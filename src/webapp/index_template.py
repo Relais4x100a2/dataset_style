@@ -854,6 +854,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
           return;
         }
         btn.disabled = true;
+        inp.disabled = true;
         try {
           const out = await api("/api/super-admin/invite", {
             method: "POST",
@@ -870,9 +871,14 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
           loadSuperAdminAccounts().catch(function() {});
         } catch (e) {
           if (e && e.error) renderApiErrorIntoStack(msg, e.error);
-          else appendBannerToStack(msg, "danger", "Invitation", "Erreur inattendue.");
+          else if (e && Array.isArray(e.detail) && e.detail.length && e.detail[0].msg) {
+            const raw = String(e.detail[0].msg);
+            const cleaned = raw.replace(/^Value error, /i, "").trim() || raw;
+            appendBannerToStack(msg, "danger", "Invitation", cleaned);
+          } else appendBannerToStack(msg, "danger", "Invitation", "Erreur inattendue.");
         } finally {
           btn.disabled = false;
+          inp.disabled = false;
         }
       };
     }
