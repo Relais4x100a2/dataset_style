@@ -32,10 +32,13 @@ def migration_info_banner_html_fragment() -> str:
     Fragment HTML sûr à injecter dans la page d'accueil ``webapp``.
 
     Returns:
-        Chaîne vide si la bannière est désactivée ; sinon un ``<p>`` avec
-        classe ``migration-info`` et contenu entièrement échappé.
+        Chaîne vide si la bannière est désactivée ; sinon un bandeau
+        ``ds-banner--info`` (issue-022) au contenu entièrement échappé.
     """
     text = migration_info_banner_text()
     if not text:
         return ""
-    return f'<p class="banner migration-info" role="status">{escape(text)}</p>'
+    return (
+        f'<div class="ds-banner ds-banner--info ds-migration-banner" role="status">'
+        f'<p class="ds-banner__message">{escape(text)}</p></div>'
+    )

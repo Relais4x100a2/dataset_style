@@ -1,0 +1,310 @@
+/**
+ * Design tokens + bandeaux sémantiques (issue-022 / #144).
+ * Polices : pile système uniquement (pas de Google Fonts — compatibilité CSP).
+ *
+ * Contraste visé WCAG 2.1 AA (texte normal) sur fond + texte principal :
+ * - success  : #155724 sur #d4edda
+ * - warning  : #664d03 sur #fff0c2
+ * - danger   : #7a1b15 sur #fde2e0
+ * - info     : #0b3d6d sur #dbeafe
+ */
+
+:root {
+  --ds-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ds-font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+
+  --ds-color-surface-page: #f0f2f5;
+  --ds-color-surface-elevated: #ffffff;
+  --ds-color-surface-muted: #eef1f6;
+  --ds-color-border-subtle: #c5cad6;
+  --ds-color-border-strong: #9aa3b2;
+
+  --ds-color-text-primary: #141823;
+  --ds-color-text-muted: #4b5565;
+
+  --ds-color-nav-active-bg: var(--ds-color-surface-page);
+  --ds-color-nav-hover-bg: var(--ds-color-surface-muted);
+
+  --ds-color-link: #0b4a6f;
+  --ds-color-link-hover: #08324a;
+  --ds-color-focus-ring: #1458a8;
+
+  --ds-banner-success-bg: #d4edda;
+  --ds-banner-success-text: #155724;
+  --ds-banner-success-border: #28a745;
+  --ds-banner-success-link: #0f3d1a;
+
+  --ds-banner-warning-bg: #fff0c2;
+  --ds-banner-warning-text: #664d03;
+  --ds-banner-warning-border: #d9a400;
+  --ds-banner-warning-link: #4a3802;
+
+  --ds-banner-danger-bg: #fde2e0;
+  --ds-banner-danger-text: #7a1b15;
+  --ds-banner-danger-border: #c53030;
+  --ds-banner-danger-link: #52120e;
+
+  --ds-banner-info-bg: #dbeafe;
+  --ds-banner-info-text: #0b3d6d;
+  --ds-banner-info-border: #3b82f6;
+  --ds-banner-info-link: #082f52;
+
+  --ds-danger-zone-bg: #fdecea;
+  --ds-danger-zone-border: #c0392b;
+  --ds-danger-zone-heading: #6b1d15;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--ds-font-sans);
+  margin: 0;
+  padding: 0;
+  background: var(--ds-color-surface-page);
+  color: var(--ds-color-text-primary);
+}
+
+.wrap {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 2rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.75rem;
+}
+
+input,
+textarea,
+select,
+button {
+  width: 100%;
+  max-width: 36rem;
+}
+
+textarea {
+  min-height: 5rem;
+}
+
+.row {
+  margin: 0.75rem 0;
+}
+
+code {
+  font-family: var(--ds-font-mono);
+  font-size: 0.85rem;
+}
+
+nav#mainNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--ds-color-border-subtle);
+  margin: 0.5rem 0 1rem;
+  background: var(--ds-color-surface-elevated);
+  padding: 0.35rem 0.25rem 0;
+  border-radius: 6px 6px 0 0;
+}
+
+nav#mainNav button {
+  width: auto;
+  max-width: none;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+nav#mainNav button:hover {
+  background: var(--ds-color-nav-hover-bg);
+}
+
+nav#mainNav button:focus-visible {
+  outline: 2px solid var(--ds-color-focus-ring);
+  outline-offset: 2px;
+}
+
+nav#mainNav button.active {
+  background: var(--ds-color-nav-active-bg);
+  border-color: var(--ds-color-border-subtle) var(--ds-color-border-subtle) var(--ds-color-nav-active-bg);
+  font-weight: 600;
+}
+
+.panel {
+  display: none;
+  background: var(--ds-color-surface-elevated);
+  padding: 1rem;
+  border: 1px solid var(--ds-color-border-subtle);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+}
+
+.panel.active {
+  display: block;
+}
+
+.muted {
+  color: var(--ds-color-text-muted);
+  font-size: 0.9rem;
+}
+
+h1 {
+  font-size: 1.35rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin-top: 0;
+}
+
+.shell-lede {
+  font-size: 0.9rem;
+  color: var(--ds-color-text-muted);
+  margin-bottom: 1rem;
+}
+
+.account-dl dt {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.account-dl dd {
+  margin: 0.15rem 0 0 0;
+}
+
+table.sa-accounts,
+table.sa-saga {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+table.sa-saga {
+  font-size: 0.85rem;
+  margin-top: 0.35rem;
+}
+
+table.sa-accounts th,
+table.sa-accounts td,
+table.sa-saga th,
+table.sa-saga td {
+  border: 1px solid var(--ds-color-border-subtle);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+table.sa-saga th,
+table.sa-saga td {
+  padding: 0.3rem 0.45rem;
+  word-break: break-all;
+}
+
+.danger-zone {
+  border: 2px solid var(--ds-danger-zone-border);
+  background: var(--ds-danger-zone-bg);
+  padding: 0.85rem 1rem;
+  border-radius: 6px;
+  margin-top: 1rem;
+}
+
+.danger-zone h4 {
+  margin-top: 0;
+  color: var(--ds-danger-zone-heading);
+  font-size: 1rem;
+}
+
+/* --- Bandeau sémantique unique (issue-022) --- */
+
+.ds-banner {
+  border-radius: 6px;
+  border: 1px solid transparent;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.ds-banner:last-child {
+  margin-bottom: 0;
+}
+
+.ds-banner__title {
+  display: block;
+  margin: 0 0 0.25rem 0;
+  font-size: 0.95rem;
+}
+
+.ds-banner__message {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.ds-banner a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ds-banner a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.ds-banner:focus-visible {
+  outline: 2px solid var(--ds-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.ds-banner--success {
+  background: var(--ds-banner-success-bg);
+  color: var(--ds-banner-success-text);
+  border-color: var(--ds-banner-success-border);
+}
+
+.ds-banner--success a {
+  color: var(--ds-banner-success-link);
+}
+
+.ds-banner--warning {
+  background: var(--ds-banner-warning-bg);
+  color: var(--ds-banner-warning-text);
+  border-color: var(--ds-banner-warning-border);
+}
+
+.ds-banner--warning a {
+  color: var(--ds-banner-warning-link);
+}
+
+.ds-banner--danger {
+  background: var(--ds-banner-danger-bg);
+  color: var(--ds-banner-danger-text);
+  border-color: var(--ds-banner-danger-border);
+}
+
+.ds-banner--danger a {
+  color: var(--ds-banner-danger-link);
+}
+
+.ds-banner--info {
+  background: var(--ds-banner-info-bg);
+  color: var(--ds-banner-info-text);
+  border-color: var(--ds-banner-info-border);
+}
+
+.ds-banner--info a {
+  color: var(--ds-banner-info-link);
+}
+
+.ds-banner-stack {
+  min-height: 0;
+}
+
+.ds-migration-banner {
+  margin-bottom: 0.75rem;
+}

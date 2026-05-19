@@ -42,7 +42,8 @@ def test_migration_info_banner_html_escapes_markup(monkeypatch: pytest.MonkeyPat
     frag = migration_info_banner_html_fragment()
     assert "<script>" not in frag
     assert "&lt;script&gt;" in frag
-    assert "migration-info" in frag
+    assert "ds-banner--info" in frag
+    assert "ds-migration-banner" in frag
 
 
 def test_index_template_contains_placeholder() -> None:
