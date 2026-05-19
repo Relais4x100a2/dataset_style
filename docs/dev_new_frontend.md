@@ -35,7 +35,7 @@ Interface locale : `http://localhost:8080` — healthcheck ops : `http://localho
 - Aligner **`APP_PUBLIC_BASE_URL`** sur l’URL réellement servie aux testeurs (ex. `http://localhost:8080` pour un test local du slice web seul), afin que les liens invitation / reset et les cookies SuperTokens restent cohérents.
 - **`WEBAPP_CORS_ORIGINS`** : liste fermée d’origines autorisées (séparées par des virgules) si le navigateur appelle le BFF depuis une origine distincte ; en monorigine (même schéma, hôte et port), la valeur par défaut `http://localhost:8080` suffit.
 
-Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique).
+Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` (statut **accepté** après jalon UX liste + fiche + IA / LT — GitHub **#177**) et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique). Pour rejouer le jalon : ouvrir `http://localhost:8080/` (après `make dev-web`), sélectionner un projet, parcourir **Gestion & édition**, **Nouvelle entrée** (IA) et les contrôles LT associés.
 
 ## Tests et CI
 

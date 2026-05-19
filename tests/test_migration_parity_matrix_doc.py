@@ -57,3 +57,10 @@ def test_migration_parity_matrix_documents_issue007_vertical_slice() -> None:
     assert "webapp" in text.lower()
     assert "EXP-DL" in text
     assert "/api/projects/{id}/dashboard" in text or "/dashboard" in text
+
+
+def test_migration_parity_matrix_links_adr0006_front_stack_decision() -> None:
+    """ADR 0006 — ancrage explicite depuis la matrice (jalon UX / GitHub #177)."""
+    text = _DOC_PATH.read_text()
+    assert "## Décision stack frontal (ADR 0006 / GitHub #177)" in text
+    assert "docs/adr/0006-front-stack-bff-spa-vs-htmx.md" in text
