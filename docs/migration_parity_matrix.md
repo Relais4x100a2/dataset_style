@@ -72,7 +72,7 @@ Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par 
 | EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès ; filtres édition optionnels sur `GET .../entries` (`edition_*`) |
 | EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` (plafond `WEBAPP_EXPORT_MAX_ROWS`, JSONL stylométrie issue-015) |
 
-**Issue-010 (coquille curateur / webapp)** : navigation par onglets alignée sur `main_tab_labels` (`GET /api/me`), persistance du projet actif côté client (`sessionStorage` + `active_hint` sur `GET /api/projects`), création et suppression projet via `POST` / `DELETE /api/projects` (primitives `database.create_project`, `delete_project_as_admin`). Voir `src/webapp/index_template.py`, `src/webapp/workspace_payload.py`.
+**Issue-010 (coquille curateur / webapp / GitHub #132)** : navigation par onglets alignée sur `main_tab_labels` (`GET /api/me`), ordre workflow = `EXPECTED_WORKFLOW_TAB_ORDER` + `Mon compte` (+ `Super Admin` si super-admin), persistance du projet actif côté client (`sessionStorage` clé `webapp_active_project_id` + paramètre query `active_hint` sur `GET /api/projects`), création et suppression projet via `POST` / `DELETE /api/projects` (primitives `database.create_project`, `delete_project_as_admin` / RBAC `require_admin`). Voir `src/webapp/index_template.py`, `src/webapp/workspace_payload.py`. Tests automatisés : `tests/test_webapp_issue010_shell.py`.
 
 Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
@@ -169,6 +169,7 @@ Exemples de commandes ciblées (à intégrer dans CI ou lancer localement) :
 
 ```bash
 python3 -m pytest tests/test_curator_dashboard_snapshot.py tests/test_webapp_vertical_slice.py -q
+python3 -m pytest tests/test_webapp_issue010_shell.py -q
 python3 -m pytest tests/test_webapp_project_dimensions_settings.py tests/test_presets_dimensions_patch_validation.py -q
 python3 -m pytest tests/test_migration_parity_matrix_doc.py -q
 # issue-009 / GitHub #131 : persistance Postgres + export (PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL)
