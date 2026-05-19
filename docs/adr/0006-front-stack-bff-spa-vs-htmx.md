@@ -88,7 +88,7 @@ Le fichier `src/webapp/index_template.py` est aujourd’hui **monolithique**. Si
 
 ## Décision tranchée (post-jalon)
 
-1. **Stack cible** : **FastAPI + gabarits** (Jinja / HTML statique servi par FastAPI) avec **consommation JSON** côté navigateur (`fetch`) sur les routes `/api/...` existantes ; **pas** d’exigence « SPA jour 1 » ni d’empilement HTMX obligatoire tant que la navigation reste prévisible et testable.
+1. **Stack cible** : **FastAPI + gabarits** (HTML statique servi par FastAPI — aujourd’hui `INDEX_HTML` dans `src/webapp/index_template.py` ; évolution possible vers Jinja2 ou swaps HTMX ciblés) avec **consommation JSON** côté navigateur (`fetch`) sur les routes `/api/...` existantes ; **pas** d’exigence « SPA jour 1 » ni d’empilement HTMX obligatoire tant que la navigation reste prévisible et testable.
 2. **Pas de rejet** du scénario SPA : il reste **plan B** documenté ci-dessous si un besoin **C/D** apparaît (grille extrême, exigence produit cross-origin non résolvable, ou autre).
 3. **Re-décision** : déclenchée seulement si les conditions du § *Re-decision* ci-dessous se réalisent **après** ce jalon.
 
