@@ -30,12 +30,18 @@ docker compose --env-file .env up postgres supertokens webapp
 
 Interface locale : `http://localhost:8080` — healthcheck ops : `http://localhost:8080/health`.
 
+Les **assets statiques** du slice (tokens CSS, etc.) sont servis sous `http://localhost:8080/static/…` (ex. `design_tokens.css`). Voir `docs/design_tokens_webapp.md`.
+
 ## Cohérence auth (ADR 0006)
 
 - Aligner **`APP_PUBLIC_BASE_URL`** sur l’URL réellement servie aux testeurs (ex. `http://localhost:8080` pour un test local du slice web seul), afin que les liens invitation / reset et les cookies SuperTokens restent cohérents.
 - **`WEBAPP_CORS_ORIGINS`** : liste fermée d’origines autorisées (séparées par des virgules) si le navigateur appelle le BFF depuis une origine distincte ; en monorigine (même schéma, hôte et port), la valeur par défaut `http://localhost:8080` suffit.
 
 Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique).
+
+## Bannière d’information (optionnel)
+
+Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la page `GET /` du service `webapp` (ainsi que dans Streamlit lorsque les deux coexistent en recette). Voir `docs/migration_communication_plan.md`. Laisser vide pour masquer.
 
 ## Tests et CI
 
@@ -45,3 +51,9 @@ Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slic
 
 - `GET /api/projects/{project_id}/settings/dimensions` — lecture après contrôle d’accès (`load_project_entries`) : `activePresetKey`, `dimensions` (effectives), liste `presets` (`key` + `label`), `projectRole`, `canEditDimensions` (admin projet uniquement).
 - `PATCH /api/projects/{project_id}/settings/dimensions` — mutations réservées à l’admin (`require_admin` + `update_project_settings`), corps JSON `action` : `load_preset` (`preset_key`), `replace_dimensions` (`dimensions` objet), `save_custom_preset` (`custom_preset_name`, `custom_preset_label`, `dimensions`). Validation et persistance alignées sur `src/presets.py` (mêmes champs `project_settings` que Streamlit).
+
+## Préférences d'affichage (issue-023)
+
+- Lecture : champ `uiPreferences` sur `GET /api/account` (`density`, `readingComfort`, valeurs par défaut `default`).
+- Mise à jour : `PATCH /api/account/ui-preferences` avec corps JSON partiel (`density` et/ou `readingComfort`). Réponse : `{ "uiPreferences": { ... } }`.
+- Persistance : colonne `users.ui_preferences_json` (créée par `ensure_schema()` au boot Streamlit / webapp). Détails UX et mapping CSS : `docs/ui_display_preferences.md`.

@@ -119,6 +119,8 @@ Train de release (branches `main` / `deploy-caprover-relais4`, CI, contrats auth
 
 Stratégie de bascule Streamlit → nouveau frontal (prérequis des stories **007–016**) : **`docs/streamlit_to_new_frontend_cutover.md`**.
 
+Plan de communication migration (e-mail type, recette, exports `export_utils`, bannière `APP_MIGRATION_INFO_BANNER`) : **`docs/migration_communication_plan.md`**.
+
 1. Définir une seule variable `APP_CONFIG_JSON` dans CapRover (voir `docs/caprover_env_example.md`).
 2. Déployer:
 

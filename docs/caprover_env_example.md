@@ -22,6 +22,8 @@ Exemple:
 
 `DISABLE_SELF_SERVICE_PROJECT_CREATION` : laisser vide pour autoriser la création du premier projet depuis l’UI ; mettre `"true"` (ou `"1"`) pour un parcours **invitation uniquement** (message sans formulaire pour les utilisateurs sans projet).
 
+`APP_MIGRATION_INFO_BANNER` *(optionnel, issue-021 / #143)* : texte court affiché aux curateurs dans Streamlit et sur la page d’accueil du service `webapp` pendant une phase de communication (migration, maintenance annoncée). Laisser **absent** ou **vide** pour désactiver après cutover. Texte brut uniquement (pas de HTML).
+
 Ensuite, déploiement en une commande:
 
 ```bash

@@ -39,3 +39,9 @@ Pour tout merge vers **`deploy-caprover-relais4`** (prod Relais4), suivre la pro
 - [ ] `MAIL_MODE=smtp` testé bout-en-bout (invitation + reset).
 - [ ] SPF/DKIM/DMARC validés sur le domaine d’envoi.
 - [ ] Runbook incident disponible et relu (`docs/incident_accounts_runbook.md`).
+
+## 6) Communication migration (cutover frontal)
+
+- [ ] Message interne / support aligné sur `docs/streamlit_to_new_frontend_cutover.md` (une URL prod, pas de double interface officielle pérenne).
+- [ ] Modèle e-mail et recette exports : `docs/migration_communication_plan.md`.
+- [ ] Bannière optionnelle : si utilisée, `APP_MIGRATION_INFO_BANNER` retirée ou vidée après cutover (`docs/caprover_env_example.md`).
