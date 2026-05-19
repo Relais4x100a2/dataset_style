@@ -379,6 +379,135 @@ def test_get_entries_invalid_edition_score_mode_returns_400() -> None:
     assert "error" in r.json()
 
 
+def test_patch_entries_response_honors_edition_filters_like_get() -> None:
+    """issue-179 : ``entries`` après PATCH suit les ``edition_*`` comme GET."""
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df = pd.DataFrame(
+        [
+            {
+                "id": "e1",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "a",
+                "output": "b",
+                "statut": "En cours",
+                "notes": "",
+                "_coherence_score": "50",
+            },
+            {
+                "id": "e2",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "c",
+                "output": "d",
+                "statut": "Fait et validé",
+                "notes": "",
+                "_coherence_score": "80",
+            },
+        ]
+    )
+    df_after = df.copy()
+    df_after.loc[df_after["id"] == "e1", "input"] = "patched"
+    params = {"edition_statut": "En cours"}
+    with (
+        patch("src.webapp.entry_mutations.load_project_entries", return_value=df),
+        patch(
+            "src.webapp.entry_mutations.persist_edited_entry_with_nlp_cache",
+        ),
+        patch("src.webapp.app.load_project_entries", return_value=df_after),
+    ):
+        with TestClient(app) as client:
+            r_get = client.get(
+                "/api/projects/p1/entries",
+                params=params,
+                headers={"Authorization": "Bearer t"},
+            )
+            r_patch = client.patch(
+                "/api/projects/p1/entries/e1",
+                params=params,
+                headers={"Authorization": "Bearer t"},
+                json={"input": "patched", "output": "b"},
+            )
+    assert r_get.status_code == 200
+    assert r_patch.status_code == 200
+    assert r_patch.json()["entries"] == r_get.json()["entries"]
+    assert [row["id"] for row in r_patch.json()["entries"]] == ["e1"]
+    assert r_patch.json()["entries"][0]["input"] == "patched"
+
+
+def test_post_entries_response_honors_edition_filters_like_get() -> None:
+    """issue-179 : après POST, ``entries`` filtré aligné sur GET (mêmes ``edition_*``)."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    df_after = pd.DataFrame(
+        [
+            {
+                "id": "e_old",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "x",
+                "output": "y",
+                "statut": "Fait et validé",
+                "notes": "",
+                "_coherence_score": "90",
+            },
+            {
+                "id": "e_new",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "i",
+                "output": "o",
+                "statut": "En cours",
+                "notes": "",
+                "_coherence_score": "",
+            },
+        ]
+    )
+    params = {"edition_statut": "En cours"}
+    with (
+        patch("src.webapp.app.entry_mutations.append_minimal_entry", return_value="e_new"),
+        patch("src.webapp.app.load_project_entries", return_value=df_after),
+    ):
+        with TestClient(app) as client:
+            r_get = client.get(
+                "/api/projects/p1/entries",
+                params=params,
+                headers={"Authorization": "Bearer t"},
+            )
+            r_post = client.post(
+                "/api/projects/p1/entries",
+                params=params,
+                headers={"Authorization": "Bearer t"},
+                json={"input": "i", "output": "o"},
+            )
+    assert r_get.status_code == 200
+    assert r_post.status_code == 200
+    assert r_post.json()["entries"] == r_get.json()["entries"]
+    assert [row["id"] for row in r_post.json()["entries"]] == ["e_new"]
+
+
 def test_append_minimal_entry_checks_role_before_project_settings() -> None:
     """Refus d'accès : ``require_role`` avant ``get_project_settings`` (pas de fuite IDOR)."""
     engine = MagicMock()
