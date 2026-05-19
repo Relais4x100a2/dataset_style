@@ -2,6 +2,21 @@
 
 **Objectif :** figer une baseline **Streamlit** reproductible pour comparer la future webapp en fin de migration (issue-001 archive de bascule), sans persistance PostgreSQL des événements UX (v1).
 
+## Protocole « une surface à la fois » (obligatoire en coexistence)
+
+Pendant la coexistence dev/staging **Streamlit** vs **webapp**, toute collecte baseline ou télémétrie issue de ce document reste **mono-surface par `run_id`** : les jalons (`SB-CTX`, `ENT-NEW-WRITE` ou `EDI-SAVE`, `EXP-SCOPE`, `EXP-DL`) émis pour un `run_id` donné proviennent **d’une seule** origine UI (Streamlit **ou** webapp). Ne pas changer d’origine avant **fin de scénario** (export `EXP-DL` réussi ou fin explicite du parcours). Règle PR / pré-merge : **`docs/merge_ready_checklist.md`** §6 ; alignement IDs flux : **`docs/migration_parity_matrix.md`** (section *Protocole recette : une surface à la fois*).
+
+**Séparation des garanties** : la base PostgreSQL est **partagée** entre les deux interfaces — la non-régression **données** (tests, API) et la non-régression **perception UI** (cache client, reruns, HTMX, session) se distinguent. Le protocole limite les biais d’**attribution causale** sur cette seconde catégorie.
+
+### Seuls cas d’alternance volontaire (à documenter avant la collecte)
+
+Chaque exception doit être **nommée** avec **objectif** et **données figées** (ticket, feuille de recette ou annexe PR) :
+
+| Cas | Objectif | Données figées |
+| --- | --- | --- |
+| **Test de divergence volontaire** | Comparer deux surfaces sur un état de corpus identique | Compte, projet, révision des entrées ; pas d’écritures concurrentes pendant la fenêtre de comparaison |
+| **Reprise après interruption** | Reprendre après expiration de session ou incident | Nouveau `run_id` ou nouveau scénario explicite ; surface de reprise notée |
+
 ## Scénario produit (aligné issue-009)
 
 Parcours **projet → entrée → contrôle → export** :

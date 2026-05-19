@@ -39,3 +39,11 @@ Pour tout merge vers **`deploy-caprover-relais4`** (prod Relais4), suivre la pro
 - [ ] `MAIL_MODE=smtp` testé bout-en-bout (invitation + reset).
 - [ ] SPF/DKIM/DMARC validés sur le domaine d’envoi.
 - [ ] Runbook incident disponible et relu (`docs/incident_accounts_runbook.md`).
+
+## 6) Recette coexistence dev/staging : une surface à la fois (obligatoire)
+
+Pendant la coexistence **Streamlit** (port **8501**) et **webapp** FastAPI (port **8080** par défaut), la recette manuelle ou la collecte **baseline UX** (issue-020) doit respecter le protocole **« un scénario = une UI »** jusqu’à **export réussi** (`EXP-DL`) ou **fin explicite** du scénario (abandon noté, fin de session). Détail, exemples et cas d’exception : **`docs/migration_parity_matrix.md`** (section *Protocole recette : une surface à la fois*) ; jalons et télémétrie : **`docs/ux_baseline_issue_020.md`**.
+
+- [ ] **Un scénario = une origine UI** : ne pas alterner Streamlit ↔ webapp au milieu d’un même parcours (liste → fiche → export) pour le même compte et le même projet, sauf **cas d’essai volontaire documenté** (nom, objectif, données figées — voir la matrice).
+- [ ] **Mono-surface par `run_id`** : toute collecte baseline / télémétrie issue-020 reste attachée à **une seule** surface pour la durée du `run_id` ; pas de changement d’origine avant fin de scénario.
+- [ ] **BDD partagée** : séparer **non-régression données** (PostgreSQL, API, tests automatisés) et **non-régression perception UI** (cache client, reruns Streamlit, fragments HTMX, session auth). Le protocole vise surtout cette seconde catégorie. Toute PR concluant à une régression **sans** respecter ce protocole doit être **requalifiée** avant ouverture de défaut backend.
