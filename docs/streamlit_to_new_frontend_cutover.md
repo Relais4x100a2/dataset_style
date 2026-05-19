@@ -73,6 +73,8 @@ Les user stories **007 à 016** (implémentation du nouveau frontal, côté dép
 - Train de release et branche prod : `docs/release_train_caprover.md`
 - Déploiement CapRover : `docs/caprover_deployment.md`
 - Variables d’environnement : `docs/caprover_env_example.md`
+- Stack frontal cible (jalon UX, ADR accepté) : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md`
+- Parité fonctionnelle Streamlit → API : `docs/migration_parity_matrix.md`
 - Communication migration (e-mail type, exports, bannière optionnelle) : `docs/migration_communication_plan.md`
 
 ## 8. Artefacts mesure UX (issue-020 / #142)

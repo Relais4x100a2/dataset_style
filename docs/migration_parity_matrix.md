@@ -10,6 +10,14 @@ Cette matrice sert de carte pour exposer une API HTTP (ou équivalent) sans perd
 
 ---
 
+## Décision stack frontal (ADR 0006 / GitHub #177)
+
+**Statut** : **accepté** (2026-05-19) — jalon UX « écran dense » : liste d’entrées, fiche édition, **Génération IA** et **LanguageTool** sur la webapp (`GET /`, `src/webapp/index_template.py`, routes `src/webapp/app.py` et logique `src/webapp/curator_ai.py`). La trajectoire reste **FastAPI + gabarits HTML + API JSON** (SPA non imposée au jour 1). Critères de notation, redevables, plan B chiffré et conditions de re-décision : **`docs/adr/0006-front-stack-bff-spa-vs-htmx.md`** (section *Jalon UX*).
+
+**Post-mutation (webapp)** : inchangé par rapport au contrat décrit ci-dessous — corps `entries` après succès sur création / patch d’entrées, aligné sur l’équivalent Streamlit (`invalidate_project_entries_cache` + relecture).
+
+---
+
 ## Ordre des onglets (alignement code)
 
 Ordre courant après sélection d’un projet (bandeau `st.tabs`) :
