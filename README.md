@@ -119,6 +119,8 @@ Train de release (branches `main` / `deploy-caprover-relais4`, CI, contrats auth
 
 Stratégie de bascule Streamlit → nouveau frontal (prérequis des stories **007–016**) : **`docs/streamlit_to_new_frontend_cutover.md`**.
 
+Plan de communication migration (e-mail type, recette, exports `export_utils`, bannière `APP_MIGRATION_INFO_BANNER`) : **`docs/migration_communication_plan.md`**.
+
 1. Définir une seule variable `APP_CONFIG_JSON` dans CapRover (voir `docs/caprover_env_example.md`).
 2. Déployer:
 
@@ -223,7 +225,7 @@ Toutes les actions sensibles (suppression projet, réglages) sont validées côt
 
 - `docs/multi_tenant_architecture.md` — vue d'ensemble multi-tenant.
 - `docs/architecture/project_access_model.md` — **issue-003** : propriétaire vs `project_memberships`, super-admin, implications API/UI.
-- `docs/ux_baseline_issue_020.md` — **issue-020** : baseline UX scénario critique (jalons, télémétrie fichier optionnelle, questionnaire interne).
+- `docs/ux_baseline_issue_020.md` — **issue-020** : baseline UX scénario critique (jalons, télémétrie fichier optionnelle, questionnaire interne) ; agrégation : `scripts/aggregate_ux_baseline_jsonl.py`.
 
 ## Merge-ready & incidents
 

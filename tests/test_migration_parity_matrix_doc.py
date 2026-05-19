@@ -64,3 +64,10 @@ def test_migration_parity_matrix_links_adr0006_front_stack_decision() -> None:
     text = _DOC_PATH.read_text()
     assert "## Décision stack frontal (ADR 0006 / GitHub #177)" in text
     assert "docs/adr/0006-front-stack-bff-spa-vs-htmx.md" in text
+
+
+def test_migration_parity_matrix_documents_issue010_regression_and_github() -> None:
+    """issue-010 : trace GitHub #132 et jeu de tests shell dans la matrice versionnée."""
+    text = _DOC_PATH.read_text()
+    assert "GitHub #132" in text
+    assert "test_webapp_issue010_shell.py" in text

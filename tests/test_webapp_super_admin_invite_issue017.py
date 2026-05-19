@@ -42,6 +42,27 @@ def test_super_admin_invite_returns_403_for_non_super_admin() -> None:
     assert r.json()["error"]["code"] == "FORBIDDEN"
 
 
+def test_super_admin_invite_invalid_email_returns_422() -> None:
+    app = create_slice_app(engine=MagicMock())
+    user = UserRecord(
+        user_id="admin1",
+        email="admin@example.com",
+        display_name="A",
+        is_super_admin=True,
+    )
+    app.dependency_overrides[webapp_deps.require_app_user] = lambda: user
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/super-admin/invite",
+            headers={"Authorization": "Bearer t"},
+            json={"email": "sans-arobase"},
+        )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, list) and detail
+    assert "Adresse e-mail invalide" in str(detail[0].get("msg", ""))
+
+
 def test_super_admin_invite_returns_200_without_raw_token_in_json() -> None:
     engine = MagicMock()
     app = create_slice_app(engine=engine)
@@ -76,6 +97,7 @@ def test_super_admin_invite_returns_200_without_raw_token_in_json() -> None:
     assert body["status"] == "ok"
     assert body["mailMode"] == "dev"
     assert "masked-preview" in body["message"]
+    assert "déjà un compte" in body["message"]
     assert secret_token not in body["message"]
     raw = r.text
     assert secret_token not in raw
@@ -111,3 +133,26 @@ def test_super_admin_invite_smtp_success_message() -> None:
     assert r.status_code == 200
     assert r.json()["mailMode"] == "smtp"
     assert "Invitation envoyée" in r.json()["message"]
+    assert "déjà un compte" in r.json()["message"]
+
+
+def test_invite_collaborator_by_email_appends_support_note_smtp() -> None:
+    """Unitaire : message succès SMTP inclut la note e-mail déjà connu (support)."""
+    from src.webapp.super_admin_invite import invite_collaborator_by_email
+
+    engine = MagicMock()
+    delivery = MailDeliveryResult(mode="smtp", delivered=True, preview="x")
+    with (
+        patch(
+            "src.webapp.super_admin_invite.create_invitation_link",
+            return_value="https://app.example/?flow=set-password&token=abc",
+        ),
+        patch(
+            "src.webapp.super_admin_invite.send_account_link_email",
+            return_value=delivery,
+        ),
+    ):
+        out = invite_collaborator_by_email(engine, "actor", "bob@example.com")
+    assert out.mail_mode == "smtp"
+    assert "Invitation envoyée" in out.message_fr
+    assert "déjà un compte" in out.message_fr

@@ -161,6 +161,19 @@ Pour une **recette CapRover** (typiquement préprod) où Streamlit et le slice F
 
 **CORS et URL canonique** : si le frontal et le BFF ne partagent pas la même origine, appliquer l’ADR `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` (`WEBAPP_CORS_ORIGINS` liste fermée, `APP_PUBLIC_BASE_URL` aligné sur l’hôte réellement servi).
 
+### 4.6 Environnement CapRover **staging / préprod** (branche `deploy-newfrontend`)
+
+Objectif : valider le jalon **009** et la migration **Streamlit → FastAPI** sans impacter la prod Relais4 (`deploy-caprover-relais4`). Le triplet logique est le même qu’en prod : **PostgreSQL + SuperTokens + application(s) Dataset Style**, avec des **valeurs d’environnement propres à la préprod** (base dédiée, core SuperTokens distinct ou schéma isolé, URL publique de test).
+
+| Couche | Rôle préprod | Variables / remarques |
+|--------|----------------|------------------------|
+| **PostgreSQL** | Instance ou base **distincte** de la production (recommandé : même recette CapRover qu’en §2, autre `POSTGRES_DB` / autre app `postgresql-staging`). | `DATABASE_URL` côté apps : `postgresql+psycopg://…/dataset_style_staging` (exemple) — jamais la même base que la prod. |
+| **SuperTokens** | Service core **aligné sur la base préprod** (nouvelle app CapRover `supertokens-staging` ou équivalent). | `POSTGRESQL_CONNECTION_URI` en `postgresql://…` vers la PG préprod ; `API_KEYS` **distinct** de la prod. Les apps préprod pointent avec `SUPERTOKENS_CONNECTION_URI` + `SUPERTOKENS_API_KEY` vers **ce** core. |
+| **App(s) Dataset Style** | Une ou deux apps selon la recette (voir §4.5). | `APP_PUBLIC_BASE_URL` = **URL HTTPS canonique de préprod** (domaine CapRover du slice testé : Streamlit, webapp ou les deux). Doit correspondre à l’origine réelle des cookies et aux liens invitation/reset de test. |
+| **FastAPI séparé** (option recette double app) | Deuxième app (ex. `dataset-style-web-staging`), port interne **8080**, commande `uvicorn` comme en §4.5. | Mêmes secrets logiques que l’app Streamlit préprod **sauf** si la recette impose un découpage ; `WEBAPP_CORS_ORIGINS` **liste fermée** si le navigateur parle à une origine différente de celle du BFF (voir ADR 0006). |
+
+Checklist rapide : healthchecks §7.2–7.4 ; smoke login sur l’URL préprod ; aucune variable de prod réutilisée par copier-coller sans revue.
+
 ---
 
 ## 5. Déploiement
@@ -170,13 +183,16 @@ Pour une **recette CapRover** (typiquement préprod) où Streamlit et le slice F
 ```bash
 # Depuis la racine du projet
 caprover login
+# Production Relais4 (branche réelle au tiret, pas de slash dans le nom Git)
 caprover deploy --appName dataset-style --branch deploy-caprover-relais4
+# Préprod / staging (après création de la branche distante `deploy-newfrontend`, voir release_train)
+caprover deploy --appName dataset-style-staging --branch deploy-newfrontend
 ```
 
 ### 5.2 Via GitHub Actions (CI/CD)
 
 Le workflow `.github/workflows/ci.yml` exécute lint et tests sur **push** et **pull_request**
-vers `main` et `deploy-caprover-relais4`. Un déploiement automatique CapRover via GitHub Actions
+vers `main`, `deploy-caprover-relais4` et **`deploy-newfrontend`** (branche d’intégration préprod, voir `docs/release_train_caprover.md`). Un déploiement automatique CapRover via GitHub Actions
 n’est documenté ici que si l’équipe ajoute un job dédié et les secrets requis ; le chemin nominal
 reste `make prod` / `caprover deploy` depuis la branche de déploiement (voir `docs/release_train_caprover.md`).
 

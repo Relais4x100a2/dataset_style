@@ -2,6 +2,10 @@
 
 Référence pour l’issue **017** (texte LLM + isolation multi-utilisateur). Les clés sont construites dans `src/ui_components.py`.
 
+## Équivalent webapp (issue-010)
+
+Le service **webapp** (FastAPI, page `GET /`) n’utilise pas `st.session_state` : le **projet courant** est stocké dans le **`sessionStorage`** du navigateur sous la clé fixe **`webapp_active_project_id`**. Au chargement des projets, la valeur est renvoyée au serveur comme **`active_hint`** sur `GET /api/projects` pour retrouver le même projet actif que dans la session Streamlit (voir `src/webapp/workspace_payload.py` et `src/project_session.py`).
+
 ## Préfixe
 
 - **Modèle** : `new_entry_{project_id}_u_{user_id_sanitisé}_*`

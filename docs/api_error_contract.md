@@ -56,3 +56,8 @@ Les entrées du tableau correspondent aux constantes et textes dans `src/api_err
 ## UI Streamlit (préparation issue-022)
 
 - `src/flash_messages.py` accepte un champ optionnel **`code`** sur les flashes post-rerun ; le rendu affiche une légende `code: …` pour corrélation support / futur mapping toasts.
+
+## Slice webapp (issue-022 livré)
+
+- Fichier CSS : `src/webapp/static/design_tokens.css` ; mapping Python `error.code` → variant : `src/webapp/ui_semantics.py`.
+- Guide produit / contraste / XSS : `docs/design_tokens_webapp.md`.

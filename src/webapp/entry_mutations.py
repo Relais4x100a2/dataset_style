@@ -22,6 +22,25 @@ from src.services.entry_nlp_persist_service import (
     persist_new_entry_with_nlp_cache,
 )
 
+
+def _resolve_closed_dimension_value(
+    dims: dict[str, list[str]],
+    dim_key: str,
+    override: str | None,
+) -> str:
+    """Retourne une valeur de dimension ; ``override`` doit être dans la liste projet si fourni."""
+    raw = dims.get(dim_key) or [""]
+    allowed = [str(x) for x in raw]
+    default = str(allowed[0]) if allowed else ""
+    if override is None:
+        return default
+    choice = str(override).strip()
+    if choice not in allowed:
+        msg = f"Dimension « {dim_key} » : valeur non autorisée pour ce projet."
+        raise ValueError(msg)
+    return choice
+
+
 _PATCHABLE: frozenset[str] = frozenset(
     {
         "input",
@@ -37,6 +56,16 @@ _PATCHABLE: frozenset[str] = frozenset(
     }
 )
 
+# Champs d'entrée → clés ``load_active_dimensions`` (listes fermées), alignés sur ``append_minimal_entry``.
+_PATCH_CLOSED_FIELD_TO_DIMS_KEY: dict[str, str] = {
+    "type": "types",
+    "structure": "structures",
+    "ton": "tons",
+    "format": "formats",
+    "public": "publics",
+    "statut": "statuts",
+}
+
 
 def apply_entry_field_updates(
     engine: Engine,
@@ -45,17 +74,31 @@ def apply_entry_field_updates(
     entry_id: str,
     updates: dict[str, Any],
 ) -> None:
-    """Met à jour les champs autorisés d'une ligne puis persiste via le cache NLP."""
+    """Met à jour les champs autorisés d'une ligne puis persiste via le cache NLP.
+
+    Les dimensions fermées (``type``, ``structure``, etc.) sont validées contre
+    ``load_active_dimensions`` comme à la création (``_resolve_closed_dimension_value``).
+    """
     df = load_project_entries(engine, project_id, user_id)
     mask = df["id"] == entry_id
     if not mask.any():
         raise KeyError("entry_not_found")
+
+    dims: dict[str, list[str]] | None = None
+    if updates.keys() & _PATCH_CLOSED_FIELD_TO_DIMS_KEY.keys():
+        settings = get_project_settings(engine, project_id)
+        dims = load_active_dimensions(settings)[2]
+
     for key, raw in updates.items():
         if key not in _PATCHABLE:
             continue
         if key not in df.columns:
             continue
-        df.loc[mask, key] = str(raw)
+        if dims is not None and key in _PATCH_CLOSED_FIELD_TO_DIMS_KEY:
+            dim_key = _PATCH_CLOSED_FIELD_TO_DIMS_KEY[key]
+            df.loc[mask, key] = _resolve_closed_dimension_value(dims, dim_key, str(raw))
+        else:
+            df.loc[mask, key] = str(raw)
     input_text = str(df.loc[mask, "input"].iloc[0])
     output_text = str(df.loc[mask, "output"].iloc[0])
     persist_edited_entry_with_nlp_cache(
@@ -77,30 +120,36 @@ def append_minimal_entry(
     *,
     input_text: str,
     output_text: str,
+    type_: str | None = None,
+    structure: str | None = None,
+    ton: str | None = None,
+    format_: str | None = None,
+    public: str | None = None,
+    statut: str | None = None,
+    notes: str | None = None,
 ) -> str:
-    """Ajoute une fiche avec dimensions par défaut du preset actif (admin ou collaborateur)."""
+    """Ajoute une fiche avec dimensions du preset actif (admin ou collaborateur).
+
+    Les champs de dimension fermée non fournis prennent la première valeur du preset.
+    Une valeur fournie doit appartenir à la liste active du projet.
+    """
     require_role(engine, project_id, user_id, ("admin", "collaborator"))
     settings = get_project_settings(engine, project_id)
     _pk, _custom, dims = load_active_dimensions(settings)
-    types = dims.get("types") or [""]
-    structures = dims.get("structures") or [""]
-    tons = dims.get("tons") or [""]
-    formats = dims.get("formats") or [""]
-    publics = dims.get("publics") or [""]
-    statuts = dims.get("statuts") or ["En cours"]
     new_id = f"e_{uuid.uuid4().hex[:12]}"
+    notes_val = "" if notes is None else str(notes)
     row = {
         "id": new_id,
         "date": date.today().isoformat(),
-        "type": str(types[0]),
-        "structure": str(structures[0]),
-        "ton": str(tons[0]),
-        "format": str(formats[0]),
-        "public": str(publics[0]),
+        "type": _resolve_closed_dimension_value(dims, "types", type_),
+        "structure": _resolve_closed_dimension_value(dims, "structures", structure),
+        "ton": _resolve_closed_dimension_value(dims, "tons", ton),
+        "format": _resolve_closed_dimension_value(dims, "formats", format_),
+        "public": _resolve_closed_dimension_value(dims, "publics", public),
         "input": input_text,
         "output": output_text,
-        "statut": str(statuts[0]),
-        "notes": "",
+        "statut": _resolve_closed_dimension_value(dims, "statuts", statut),
+        "notes": notes_val,
     }
     for col in CACHE_COLUMNS:
         row[col] = ""
