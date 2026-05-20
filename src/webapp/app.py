@@ -23,6 +23,7 @@ from sqlalchemy.exc import OperationalError
 from src.api_errors import (
     ExportPayloadTooLargeError,
     TenantResourceOpaqueDenial,
+    curator_languagetool_unavailable_envelope,
     error_envelope_for_client,
     log_resolved_api_error,
 )
@@ -696,7 +697,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             logger.warning("curator_languagetool_check failed: %s", exc, exc_info=True)
             raise EnvelopeHttpError(
                 503,
-                curator_ai.curator_languagetool_unavailable_envelope(),
+                curator_languagetool_unavailable_envelope(),
             ) from exc
 
     @app.post("/api/super-admin/invite")
