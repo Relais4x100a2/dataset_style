@@ -30,7 +30,7 @@ Sans projet actif, les onglets workflow 2–5 affichent un message guidé ; la c
 
 Légende **Lecture / Écriture (cible API)** : noms indicatifs REST à figer dans l’OpenAPI ; l’implémentation peut différer (GraphQL, RPC) tant que le contrat fonctionnel reste équivalent.
 
-Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaque écriture qui change les lignes `entries` ou le contexte projet, l’UI appelle `invalidate_project_entries_cache()` (`src/project_entries_cache.py`) puis `st.rerun()` pour que `cached_load_project_entries` relise via `load_project_entries` (`database.py`). Toute API doit exposer un comportement cohérent (invalidation côté client, ETag, ou relecture explicite). **Webapp (issue-012)** : les réponses `POST` / `PATCH` sur les entrées incluent un tableau `entries` issu d’un `load_project_entries` immédiat après succès ; le client peut rafraîchir sans logique dupliquée.
+Légende **Post-mutation (équivalent Streamlit)** : aujourd’hui, après chaque écriture qui change les lignes `entries` ou le contexte projet, l’UI appelle `invalidate_project_entries_cache()` (`src/project_entries_cache.py`) puis `st.rerun()` pour que `cached_load_project_entries` relise via `load_project_entries` (`database.py`). Toute API doit exposer un comportement cohérent (invalidation côté client, ETag, ou relecture explicite). **Webapp (issue-012 / issue-179)** : les réponses `POST` / `PATCH` sur les entrées incluent un tableau `entries` issu d’un `load_project_entries` immédiat après succès ; si la requête porte les mêmes paramètres query `edition_*` que la liste, ce tableau est **filtré comme** `GET …/entries` (pas de double logique côté client). Le client peut rafraîchir sans état fantôme sur les champs persistés.
 
 | Onglet Streamlit | ID flux | Lecture (UI / service actuel) | Écriture (UI actuelle) | Post-mutation | Primitives `database.py` (indicatif) | Autres modules |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par 
 | --- | --- |
 | SB-CTX | OK — jeton vérifié (`/recipe/session/verify`) + résolution `users.su_user_id` |
 | PRJ-VIEW | OK — `GET /api/projects` |
-| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès ; filtres édition optionnels sur `GET .../entries` (`edition_*`) |
+| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès (filtré comme `GET` si mêmes query `edition_*`) ; filtres édition optionnels sur `GET .../entries` (`edition_*`) |
 | EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` (plafond `WEBAPP_EXPORT_MAX_ROWS`, JSONL stylométrie issue-015) |
 
 **Issue-010 (coquille curateur / webapp)** : navigation par onglets alignée sur `main_tab_labels` (`GET /api/me`), persistance du projet actif côté client (`sessionStorage` + `active_hint` sur `GET /api/projects`), création et suppression projet via `POST` / `DELETE /api/projects` (primitives `database.create_project`, `delete_project_as_admin`). Voir `src/webapp/index_template.py`, `src/webapp/workspace_payload.py`.

@@ -42,6 +42,11 @@ INDEX_HTML = """<!DOCTYPE html>
     table.sa-saga th, table.sa-saga td { border: 1px solid #ccd; padding: 0.3rem 0.45rem; text-align: left; word-break: break-all; }
     .danger-zone { border: 2px solid #c0392b; background: #fdecea; padding: 0.85rem 1rem; border-radius: 6px; margin-top: 1rem; }
     .danger-zone h4 { margin-top: 0; color: #7b241c; font-size: 1rem; }
+    .entries-toolbar label { margin-top: 0.35rem; }
+    .entries-toolbar input[type="number"] { max-width: 8rem; }
+    table.entries-list { border-collapse: collapse; font-size: 0.9rem; margin-top: 0.35rem; }
+    table.entries-list th, table.entries-list td { border: 1px solid #ccd; padding: 0.35rem 0.45rem; text-align: left; }
+    tr.entries-row-openable:hover { background: #eef4ff; }
   </style>
 </head>
 <body>
@@ -103,7 +108,33 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="3">
       <h2>Gestion &amp; édition</h2>
+      <p class="muted">Filtres <code>edition_*</code> : même logique que <code>GET /api/projects/{id}/entries</code>.
+        Valeurs persistées par projet dans <code>sessionStorage</code> (clé <code>webapp_edition_filters:&lt;project_id&gt;</code>).
+        Après <code>POST</code>/<code>PATCH</code>, la liste et les champs persistés de la fiche se basent sur le tableau <code>entries</code> de la réponse (mêmes filtres en query).</p>
+      <div class="entries-toolbar">
+        <label>Statut
+          <select id="editionStatutFilter">
+            <option value="">(tous)</option>
+            <option value="A faire">A faire</option>
+            <option value="En cours">En cours</option>
+            <option value="Fait et validé">Fait et validé</option>
+          </select>
+        </label>
+        <label>Score cohérence
+          <select id="editionScoreMode">
+            <option value="">(aucun filtre score)</option>
+            <option value="all">Tous les scores</option>
+            <option value="below">Strictement sous le seuil</option>
+            <option value="bucket">Tranche (décile 0–9)</option>
+            <option value="na_only">Sans score (N/A)</option>
+          </select>
+        </label>
+        <label>Seuil &lt; (0–100) <input type="number" id="editionScoreThreshold" min="0" max="100" value="50" /></label>
+        <label>Décile (0–9) <input type="number" id="editionScoreDecile" min="0" max="9" value="0" /></label>
+        <label><input type="checkbox" id="editionScoreIncludeNa" /> Inclure N/A (sous seuil / tranche)</label>
+      </div>
       <p><button type="button" id="btnReloadEntries">Recharger les entrées</button></p>
+      <p id="entriesStatus" role="status" class="muted" aria-live="polite"></p>
       <div id="entriesTable"></div>
       <h3>Édition (id de fiche)</h3>
       <label>id <input type="text" id="entryId" /></label>
@@ -168,6 +199,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <script>
     const LS = "slice_vertical_access_token";
     const SS = "webapp_active_project_id";
+    const SS_EDITION_FILTER_PREFIX = "webapp_edition_filters:";
     const authMsg = document.getElementById("authMsg");
     const workspace = document.getElementById("workspace");
     const mainNav = document.getElementById("mainNav");
@@ -190,6 +222,126 @@ INDEX_HTML = """<!DOCTYPE html>
       ids.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
       const div = document.getElementById("entriesTable");
       if (div) div.innerHTML = "";
+      const st = document.getElementById("entriesStatus");
+      if (st) st.textContent = "";
+    }
+
+    function editionFilterStorageKey(pid) {
+      return SS_EDITION_FILTER_PREFIX + pid;
+    }
+
+    function persistEditionFiltersToSession() {
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) return;
+      const payload = {
+        statut: (document.getElementById("editionStatutFilter") || {}).value || "",
+        scoreMode: (document.getElementById("editionScoreMode") || {}).value || "",
+        threshold: (document.getElementById("editionScoreThreshold") || {}).value || "50",
+        decile: (document.getElementById("editionScoreDecile") || {}).value || "0",
+        includeNa: !!(document.getElementById("editionScoreIncludeNa") || {}).checked,
+      };
+      sessionStorage.setItem(editionFilterStorageKey(pid), JSON.stringify(payload));
+    }
+
+    function restoreEditionFiltersFromSession() {
+      const sel = document.getElementById("projectSel");
+      const pid = sel ? sel.value : "";
+      if (!pid) return;
+      const raw = sessionStorage.getItem(editionFilterStorageKey(pid));
+      if (!raw) return;
+      try {
+        const o = JSON.parse(raw);
+        const a = document.getElementById("editionStatutFilter");
+        if (a && o.statut !== undefined) a.value = o.statut;
+        const b = document.getElementById("editionScoreMode");
+        if (b && o.scoreMode !== undefined) b.value = o.scoreMode;
+        const c = document.getElementById("editionScoreThreshold");
+        if (c && o.threshold !== undefined) c.value = o.threshold;
+        const d = document.getElementById("editionScoreDecile");
+        if (d && o.decile !== undefined) d.value = o.decile;
+        const e = document.getElementById("editionScoreIncludeNa");
+        if (e) e.checked = !!o.includeNa;
+      } catch (_) { /* ignore */ }
+    }
+
+    function buildEntriesQueryString() {
+      const params = new URLSearchParams();
+      const est = document.getElementById("editionStatutFilter");
+      if (est && est.value) params.set("edition_statut", est.value);
+      const modeEl = document.getElementById("editionScoreMode");
+      const mode = modeEl && modeEl.value;
+      if (mode) {
+        params.set("edition_score_mode", mode);
+        if (mode === "below") {
+          const th = document.getElementById("editionScoreThreshold");
+          const t = parseInt(th && th.value, 10);
+          if (!isNaN(t)) params.set("edition_score_threshold_lt", String(t));
+        }
+        if (mode === "bucket") {
+          const dc = document.getElementById("editionScoreDecile");
+          const d = parseInt(dc && dc.value, 10);
+          if (!isNaN(d)) params.set("edition_score_bucket_decile", String(d));
+        }
+        const inc = document.getElementById("editionScoreIncludeNa");
+        if (inc && inc.checked) params.set("edition_score_include_na", "true");
+      }
+      const s = params.toString();
+      return s ? ("?" + s) : "";
+    }
+
+    function renderEntriesTableFromPayload(entries) {
+      const div = document.getElementById("entriesTable");
+      if (!div) return;
+      if (!entries || !entries.length) {
+        div.textContent = "(aucune fiche dans cette vue)";
+        return;
+      }
+      const t = document.createElement("table");
+      t.className = "entries-list";
+      const keys = Object.keys(entries[0]).filter((k) => !k.startsWith("_"));
+      const trh = document.createElement("tr");
+      for (const k of keys) {
+        const th = document.createElement("th");
+        th.textContent = k;
+        trh.appendChild(th);
+      }
+      t.appendChild(trh);
+      for (const row of entries) {
+        const tr = document.createElement("tr");
+        tr.className = "entries-row-openable";
+        tr.title = "Ouvrir la fiche (données serveur)";
+        tr.onclick = () => openEntryFromServerRow(row);
+        for (const k of keys) {
+          const td = document.createElement("td");
+          td.textContent = row[k] == null ? "" : String(row[k]);
+          tr.appendChild(td);
+        }
+        t.appendChild(tr);
+      }
+      div.innerHTML = "";
+      div.appendChild(t);
+    }
+
+    function openEntryFromServerRow(row) {
+      const idEl = document.getElementById("entryId");
+      const inEl = document.getElementById("fldInput");
+      const outEl = document.getElementById("fldOutput");
+      const st = document.getElementById("entriesStatus");
+      if (idEl) idEl.value = row.id != null ? String(row.id) : "";
+      if (inEl) inEl.value = row.input != null ? String(row.input) : "";
+      if (outEl) outEl.value = row.output != null ? String(row.output) : "";
+      if (st) st.textContent = "Fiche ouverte : " + (row.id != null ? String(row.id) : "");
+    }
+
+    function syncFormFieldsFromEntryId(entries, eid) {
+      if (!eid || !entries || !entries.length) return;
+      const row = entries.find((r) => String(r.id) === String(eid));
+      if (!row) return;
+      const inEl = document.getElementById("fldInput");
+      const outEl = document.getElementById("fldOutput");
+      if (inEl) inEl.value = row.input != null ? String(row.input) : "";
+      if (outEl) outEl.value = row.output != null ? String(row.output) : "";
     }
 
     function showErr(obj) {
@@ -494,6 +646,19 @@ INDEX_HTML = """<!DOCTYPE html>
       }
     }
 
+    function wireEditionFilterControls() {
+      const onFilterChange = () => {
+        persistEditionFiltersToSession();
+        loadEntries().catch(showErr);
+      };
+      ["editionStatutFilter", "editionScoreMode", "editionScoreThreshold", "editionScoreDecile"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.onchange = onFilterChange;
+      });
+      const inc = document.getElementById("editionScoreIncludeNa");
+      if (inc) inc.onchange = onFilterChange;
+    }
+
     function wireProjectAndEntries() {
       const ps = document.getElementById("projectSel");
       if (ps) ps.onchange = onProjectChanged;
@@ -511,6 +676,7 @@ INDEX_HTML = """<!DOCTYPE html>
       if (b6) b6.onclick = () => downloadCsv();
       const b7 = document.getElementById("btnJsonl");
       if (b7) b7.onclick = () => downloadJsonl();
+      wireEditionFilterControls();
       wireSuperAdminAccountsPanel();
     }
 
@@ -578,6 +744,7 @@ INDEX_HTML = """<!DOCTYPE html>
       const pid = sel ? sel.value : "";
       setActiveProjectHint(pid);
       clearEntryState();
+      restoreEditionFiltersFromSession();
       loadEntries().catch(showErr);
     }
 
@@ -585,23 +752,29 @@ INDEX_HTML = """<!DOCTYPE html>
       const sel = document.getElementById("projectSel");
       const pid = sel ? sel.value : "";
       if (!pid) return;
-      const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries");
-      const div = document.getElementById("entriesTable");
-      if (!div) return;
-      if (!data.entries.length) { div.textContent = "(aucune fiche)"; return; }
-      const t = document.createElement("table");
-      t.border = "1";
-      const keys = Object.keys(data.entries[0]).filter(k => !k.startsWith("_"));
-      const trh = document.createElement("tr");
-      for (const k of keys) { const th = document.createElement("th"); th.textContent = k; trh.appendChild(th); }
-      t.appendChild(trh);
-      for (const row of data.entries) {
-        const tr = document.createElement("tr");
-        for (const k of keys) { const td = document.createElement("td"); td.textContent = row[k]; tr.appendChild(td); }
-        t.appendChild(tr);
+      restoreEditionFiltersFromSession();
+      const qs = buildEntriesQueryString();
+      const statusEl = document.getElementById("entriesStatus");
+      const reloadBtn = document.getElementById("btnReloadEntries");
+      if (reloadBtn) {
+        reloadBtn.setAttribute("aria-busy", "true");
+        reloadBtn.disabled = true;
       }
-      div.innerHTML = "";
-      div.appendChild(t);
+      try {
+        const data = await api("/api/projects/" + encodeURIComponent(pid) + "/entries" + qs);
+        renderEntriesTableFromPayload(data.entries);
+        if (statusEl) {
+          const n = (data.entries || []).length;
+          statusEl.textContent = n + " fiche(s) dans la vue (alignée sur le serveur).";
+        }
+      } catch (e) {
+        showErr(e);
+      } finally {
+        if (reloadBtn) {
+          reloadBtn.removeAttribute("aria-busy");
+          reloadBtn.disabled = false;
+        }
+      }
     }
 
     async function saveEntry() {
@@ -609,31 +782,62 @@ INDEX_HTML = """<!DOCTYPE html>
       const eid = document.getElementById("entryId").value.trim();
       const input = document.getElementById("fldInput").value;
       const output = document.getElementById("fldOutput").value;
+      const qs = buildEntriesQueryString();
+      const btn = document.getElementById("btnSave");
+      if (btn) {
+        btn.setAttribute("aria-busy", "true");
+        btn.disabled = true;
+      }
       try {
-        await api("/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid), {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input, output }),
-        });
+        const out = await api(
+          "/api/projects/" + encodeURIComponent(pid) + "/entries/" + encodeURIComponent(eid) + qs,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ input, output }),
+          }
+        );
         showOk("Fiche enregistrée.");
-        await loadEntries();
-      } catch (e) { showErr(e); }
+        renderEntriesTableFromPayload(out.entries || []);
+        syncFormFieldsFromEntryId(out.entries || [], eid);
+      } catch (e) {
+        showErr(e);
+      } finally {
+        if (btn) {
+          btn.removeAttribute("aria-busy");
+          btn.disabled = false;
+        }
+      }
     }
 
     async function createEntry() {
       const pid = document.getElementById("projectSel").value;
       const input = document.getElementById("newInput").value;
       const output = document.getElementById("newOutput").value;
+      const qs = buildEntriesQueryString();
+      const btn = document.getElementById("btnCreate");
+      if (btn) {
+        btn.setAttribute("aria-busy", "true");
+        btn.disabled = true;
+      }
       try {
-        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/entries", {
+        const out = await api("/api/projects/" + encodeURIComponent(pid) + "/entries" + qs, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ input, output }),
         });
         document.getElementById("entryId").value = out.id;
         showOk("Fiche créée : " + out.id);
-        await loadEntries();
-      } catch (e) { showErr(e); }
+        renderEntriesTableFromPayload(out.entries || []);
+        syncFormFieldsFromEntryId(out.entries || [], out.id);
+      } catch (e) {
+        showErr(e);
+      } finally {
+        if (btn) {
+          btn.removeAttribute("aria-busy");
+          btn.disabled = false;
+        }
+      }
     }
 
     async function createProject() {
