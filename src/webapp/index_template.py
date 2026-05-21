@@ -7,55 +7,10 @@ INDEX_HTML = """<!DOCTYPE html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dataset Style — curateur</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f6f7f9; color: #1a1a1a; }
-    .wrap { max-width: 56rem; margin: 0 auto; padding: 1rem 1rem 2rem; }
-    label { display: block; margin-top: 0.75rem; }
-    input, textarea, select, button { width: 100%; max-width: 36rem; box-sizing: border-box; }
-    textarea { min-height: 5rem; }
-    .row { margin: 0.75rem 0; }
-    .err { color: #a40000; white-space: pre-wrap; }
-    .ok { color: #0b5; }
-    .warn { color: #964; white-space: pre-wrap; }
-    code { font-size: 0.85rem; }
-    nav#mainNav {
-      display: flex; flex-wrap: wrap; gap: 0.25rem; border-bottom: 1px solid #ccd; margin: 0.5rem 0 1rem;
-      background: #fff; padding: 0.35rem 0.25rem 0; border-radius: 6px 6px 0 0;
-    }
-    nav#mainNav button {
-      width: auto; max-width: none; padding: 0.45rem 0.65rem; border: 1px solid transparent;
-      background: transparent; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 0.9rem;
-    }
-    nav#mainNav button:hover { background: #eef1f6; }
-    nav#mainNav button.active { background: #f6f7f9; border-color: #ccd #ccd #f6f7f9; font-weight: 600; }
-    .panel { display: none; background: #fff; padding: 1rem; border: 1px solid #ccd; border-top: none; border-radius: 0 0 6px 6px; }
-    .panel.active { display: block; }
-    .muted { color: #555; font-size: 0.9rem; }
-    h1 { font-size: 1.35rem; }
-    h2 { font-size: 1.1rem; margin-top: 0; }
-    .banner { font-size: 0.85rem; color: #444; margin-bottom: 1rem; }
-    .account-dl dt { font-weight: 600; margin-top: 0.5rem; }
-    .account-dl dd { margin: 0.15rem 0 0 0; }
-    table.sa-accounts { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
-    table.sa-accounts th, table.sa-accounts td { border: 1px solid #ccd; padding: 0.35rem 0.5rem; text-align: left; }
-    table.sa-saga { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.35rem; }
-    table.sa-saga th, table.sa-saga td { border: 1px solid #ccd; padding: 0.3rem 0.45rem; text-align: left; word-break: break-all; }
-    .danger-zone { border: 2px solid #c0392b; background: #fdecea; padding: 0.85rem 1rem; border-radius: 6px; margin-top: 1rem; }
-    .danger-zone h4 { margin-top: 0; color: #7b241c; font-size: 1rem; }
-    .entries-toolbar label { margin-top: 0.35rem; }
-    .entries-toolbar input[type="number"] { max-width: 8rem; }
-    table.entries-list { border-collapse: collapse; font-size: 0.9rem; margin-top: 0.35rem; }
-    table.entries-list th, table.entries-list td { border: 1px solid #ccd; padding: 0.35rem 0.45rem; text-align: left; }
-    tr.entries-row-openable:hover { background: #eef4ff; }
-    details.curator-assist { margin-top: 1rem; padding: 0.5rem 0; }
-    details.curator-assist summary { cursor: pointer; font-weight: 600; }
-    .assist-busy { color: #555; font-size: 0.9rem; margin: 0.35rem 0; }
-    details.curator-assist.htmx-request { outline: 2px dashed #7a9fd1; }
-    p.hx-indicator { margin: 0.35rem 0; }
-  </style>
+  <link rel="stylesheet" href="/static/design_tokens.css" />
 </head>
 <body>
-  <div class="wrap">
+  <div class="ds-wrap">
     <h1>Dataset Style — coquille curateur</h1>
     <p class="banner">Shell de navigation aligné sur Streamlit (ordre des onglets via <code>/api/me</code>).
       Streamlit reste sur le port <code>8501</code> ; ce service <code>webapp</code> porte le slice API + UI minimale.</p>
@@ -64,8 +19,8 @@ INDEX_HTML = """<!DOCTYPE html>
       <h2>Connexion</h2>
       <label>Email <input type="email" id="email" autocomplete="username" /></label>
       <label>Mot de passe <input type="password" id="password" autocomplete="current-password" /></label>
-      <div class="row"><button type="button" id="btnSignin">Se connecter</button></div>
-      <div class="row"><button type="button" id="btnSignout">Se déconnecter</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--primary" id="btnSignin">Se connecter</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnSignout">Se déconnecter</button></div>
       <p id="authMsg" class="err" aria-live="polite"></p>
     </section>
 
@@ -84,11 +39,11 @@ INDEX_HTML = """<!DOCTYPE html>
       <h3>Créer un projet</h3>
       <label>Nom <input type="text" id="newProjectName" maxlength="500" /></label>
       <label>Description (optionnel) <input type="text" id="newProjectDesc" maxlength="10000" /></label>
-      <div class="row"><button type="button" id="btnCreateProject">Créer</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--primary" id="btnCreateProject">Créer</button></div>
       <h3>Supprimer le projet actif</h3>
       <label><input type="checkbox" id="delProjConfirm" /> Je confirme vouloir supprimer ce projet</label>
       <label>Retaper le nom exact du projet pour confirmer <input type="text" id="delProjName" /></label>
-      <div class="row"><button type="button" id="btnDeleteProject">Supprimer ce projet</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--danger" id="btnDeleteProject">Supprimer ce projet</button></div>
     </div>
     <div class="panel" data-tab-idx="1">
       <h2>Réglages &amp; Export</h2>
@@ -99,9 +54,9 @@ INDEX_HTML = """<!DOCTYPE html>
           <option value="full_dataset">Tout le dataset</option>
         </select>
       </label>
-      <div class="row">
-        <button type="button" id="btnCsv">Télécharger CSV</button>
-        <button type="button" id="btnJsonl">Télécharger JSONL (LFM2)</button>
+      <div class="ds-row ds-row--inline">
+        <button type="button" class="ds-btn ds-btn--secondary" id="btnCsv">Télécharger CSV</button>
+        <button type="button" class="ds-btn ds-btn--secondary" id="btnJsonl">Télécharger JSONL (LFM2)</button>
       </div>
     </div>
     <div class="panel" data-tab-idx="2">
@@ -109,30 +64,30 @@ INDEX_HTML = """<!DOCTYPE html>
       <p class="muted">Création minimale (slice issue-007).</p>
       <label>input <textarea id="newInput"></textarea></label>
       <label>output <textarea id="newOutput"></textarea></label>
-      <div class="row"><button type="button" id="btnCreate">Créer une fiche</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--primary" id="btnCreate">Créer une fiche</button></div>
       <details class="curator-assist">
         <summary>Assistance IA &amp; LanguageTool</summary>
         <p class="muted">Aucune écriture en base : les résultats restent dans le navigateur jusqu'à la création de la fiche.
           Appels stateless : <code>/curator/llm-generate</code>, <code>/curator/languagetool-check</code>.</p>
-        <p id="assistBusyNew" class="assist-busy hx-indicator" style="display:none" aria-live="polite">Chargement…</p>
+        <p id="assistBusyNew" class="assist-busy hx-indicator ds-hidden" aria-live="polite"><span class="ds-skeleton-line" aria-hidden="true"></span><span>Chargement…</span></p>
         <label>Type <select id="assistNewType"><option value="">—</option></select></label>
         <label>Structure <select id="assistNewStructure"><option value="">—</option></select></label>
         <label>Ton <select id="assistNewTon"><option value="">—</option></select></label>
         <label>Format <select id="assistNewFormat"><option value="">—</option></select></label>
         <label>Public <select id="assistNewPublic"><option value="">—</option></select></label>
-        <div class="row"><button type="button" id="btnAssistLlmDoNew">Générer output depuis le brouillon (IA)</button></div>
-        <div class="row"><button type="button" id="btnAssistLlmOdNew">Générer brouillon depuis l'output (IA)</button></div>
-        <div class="row"><button type="button" id="btnAssistLtNew">Contrôler LanguageTool sur l'output</button></div>
+        <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLlmDoNew">Générer output depuis le brouillon (IA)</button></div>
+        <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLlmOdNew">Générer brouillon depuis l'output (IA)</button></div>
+        <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLtNew">Contrôler LanguageTool sur l'output</button></div>
         <p id="assistMsgNew" role="status" class="muted" aria-live="polite"></p>
         <div id="assistLlmPreviewNew" class="muted" hidden></div>
-        <div class="row" id="assistLlmActionsNew" hidden>
-          <button type="button" id="btnAssistLlmInsertNew">Insérer le résultat IA</button>
-          <button type="button" id="btnAssistLlmDismissNew">Ignorer</button>
+        <div class="ds-row ds-row--inline" id="assistLlmActionsNew" hidden>
+          <button type="button" class="ds-btn ds-btn--primary" id="btnAssistLlmInsertNew">Insérer le résultat IA</button>
+          <button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLlmDismissNew">Ignorer</button>
         </div>
         <div id="assistLtPreviewNew" class="muted" hidden></div>
-        <div class="row" id="assistLtActionsNew" hidden>
-          <button type="button" id="btnAssistLtReplaceNew">Remplacer tout l'output par la proposition LanguageTool</button>
-          <button type="button" id="btnAssistLtDismissNew">Ignorer la proposition</button>
+        <div class="ds-row ds-row--inline" id="assistLtActionsNew" hidden>
+          <button type="button" class="ds-btn ds-btn--primary" id="btnAssistLtReplaceNew">Remplacer tout l'output par la proposition LanguageTool</button>
+          <button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLtDismissNew">Ignorer la proposition</button>
         </div>
       </details>
     </div>
@@ -163,37 +118,37 @@ INDEX_HTML = """<!DOCTYPE html>
         <label>Décile (0–9) <input type="number" id="editionScoreDecile" min="0" max="9" value="0" /></label>
         <label><input type="checkbox" id="editionScoreIncludeNa" /> Inclure N/A (sous seuil / tranche)</label>
       </div>
-      <p><button type="button" id="btnReloadEntries">Recharger les entrées</button></p>
+      <p><button type="button" class="ds-btn ds-btn--secondary" id="btnReloadEntries">Recharger les entrées</button></p>
       <p id="entriesStatus" role="status" class="muted" aria-live="polite"></p>
       <div id="entriesTable"></div>
       <h3>Édition (id de fiche)</h3>
       <label>id <input type="text" id="entryId" /></label>
       <label>input <textarea id="fldInput"></textarea></label>
       <label>output <textarea id="fldOutput"></textarea></label>
-      <div class="row"><button type="button" id="btnSave">Enregistrer</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--primary" id="btnSave">Enregistrer</button></div>
       <details class="curator-assist">
         <summary>Assistance IA &amp; LanguageTool</summary>
         <p class="muted">Aucune écriture en base : enregistrez la fiche (<code>PATCH …/entries/…</code>) pour persister les changements.
           Appels stateless : <code>/curator/llm-generate</code>, <code>/curator/languagetool-check</code>.</p>
-        <p id="assistBusyEdit" class="assist-busy hx-indicator" style="display:none" aria-live="polite">Chargement…</p>
+        <p id="assistBusyEdit" class="assist-busy hx-indicator ds-hidden" aria-live="polite"><span class="ds-skeleton-line" aria-hidden="true"></span><span>Chargement…</span></p>
         <label>Type <select id="assistEditType"><option value="">—</option></select></label>
         <label>Structure <select id="assistEditStructure"><option value="">—</option></select></label>
         <label>Ton <select id="assistEditTon"><option value="">—</option></select></label>
         <label>Format <select id="assistEditFormat"><option value="">—</option></select></label>
         <label>Public <select id="assistEditPublic"><option value="">—</option></select></label>
-        <div class="row"><button type="button" id="btnAssistLlmDoEdit">Générer output depuis le brouillon (IA)</button></div>
-        <div class="row"><button type="button" id="btnAssistLlmOdEdit">Générer brouillon depuis l'output (IA)</button></div>
-        <div class="row"><button type="button" id="btnAssistLtEdit">Contrôler LanguageTool sur l'output</button></div>
+        <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLlmDoEdit">Générer output depuis le brouillon (IA)</button></div>
+        <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLlmOdEdit">Générer brouillon depuis l'output (IA)</button></div>
+        <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLtEdit">Contrôler LanguageTool sur l'output</button></div>
         <p id="assistMsgEdit" role="status" class="muted" aria-live="polite"></p>
         <div id="assistLlmPreviewEdit" class="muted" hidden></div>
-        <div class="row" id="assistLlmActionsEdit" hidden>
-          <button type="button" id="btnAssistLlmInsertEdit">Insérer le résultat IA</button>
-          <button type="button" id="btnAssistLlmDismissEdit">Ignorer</button>
+        <div class="ds-row ds-row--inline" id="assistLlmActionsEdit" hidden>
+          <button type="button" class="ds-btn ds-btn--primary" id="btnAssistLlmInsertEdit">Insérer le résultat IA</button>
+          <button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLlmDismissEdit">Ignorer</button>
         </div>
         <div id="assistLtPreviewEdit" class="muted" hidden></div>
-        <div class="row" id="assistLtActionsEdit" hidden>
-          <button type="button" id="btnAssistLtReplaceEdit">Remplacer tout l'output par la proposition LanguageTool</button>
-          <button type="button" id="btnAssistLtDismissEdit">Ignorer la proposition</button>
+        <div class="ds-row ds-row--inline" id="assistLtActionsEdit" hidden>
+          <button type="button" class="ds-btn ds-btn--primary" id="btnAssistLtReplaceEdit">Remplacer tout l'output par la proposition LanguageTool</button>
+          <button type="button" class="ds-btn ds-btn--secondary" id="btnAssistLtDismissEdit">Ignorer la proposition</button>
         </div>
       </details>
     </div>
@@ -211,7 +166,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <h2>Super Admin</h2>
       <p class="muted">Invitation d’un collaborateur (invitation-only). Aucune inscription publique.</p>
       <label>E-mail du collaborateur <input type="email" id="saInviteEmail" autocomplete="off" /></label>
-      <div class="row"><button type="button" id="btnSaInvite">Envoyer l’invitation</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--primary" id="btnSaInvite">Envoyer l’invitation</button></div>
       <p id="saInviteMsg" class="muted" aria-live="polite"></p>
       <h3>Comptes actifs</h3>
       <p class="muted">Liste paginée via <code>GET /api/super-admin/accounts</code> : <code>page</code> ≥ 1 ;
@@ -225,14 +180,14 @@ INDEX_HTML = """<!DOCTYPE html>
         </select>
       </label>
       <label>Page <input type="number" id="saAccountsPage" min="1" value="1" /></label>
-      <div class="row"><button type="button" id="btnSaAccountsReload">Actualiser la liste</button></div>
+      <div class="ds-row"><button type="button" class="ds-btn ds-btn--secondary" id="btnSaAccountsReload">Actualiser la liste</button></div>
       <p id="saAccountsErr" class="err" aria-live="polite"></p>
       <p id="saAccountsSummary" class="muted"></p>
       <div id="saAccountsTableWrap"></div>
       <h3>Panneau technique (saga)</h3>
       <p class="muted">Métriques alignées sur le studio : cartes = répartition sur les N dernières mises à jour ;
         totaux = ensemble de la table. File = opérations éligibles au worker (<code>retry_deprovision_ops</code>).</p>
-      <p><button type="button" id="btnSaSagaReload">Actualiser la télémétrie</button></p>
+      <p><button type="button" class="ds-btn ds-btn--secondary" id="btnSaSagaReload">Actualiser la télémétrie</button></p>
       <p id="saSagaErr" class="err" aria-live="polite"></p>
       <div id="saSagaSummary" class="muted"></div>
       <div id="saSagaTables"></div>
@@ -243,8 +198,8 @@ INDEX_HTML = """<!DOCTYPE html>
           <select id="saSagaDlqSelect"></select>
         </label>
         <label><input type="checkbox" id="saSagaReplayConfirm" /> Je confirme la remise en file de l'opération sélectionnée</label>
-        <div class="row">
-          <button type="button" id="btnSaSagaReplay" disabled>Relancer l'opération</button>
+        <div class="ds-row">
+          <button type="button" class="ds-btn ds-btn--danger" id="btnSaSagaReplay" disabled>Relancer l'opération</button>
         </div>
         <p id="saSagaReplayMsg" class="muted" aria-live="polite"></p>
       </div>
@@ -484,7 +439,7 @@ INDEX_HTML = """<!DOCTYPE html>
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = label;
-        b.className = "main-tab";
+        b.className = "main-tab ds-main-tab";
         const idx = i;
         b.onclick = () => activateMainTab(idx);
         if (i === 0) b.classList.add("active");
@@ -718,7 +673,7 @@ INDEX_HTML = """<!DOCTYPE html>
     function assistSetBusy(prefix, busy) {
       const busyEl = document.getElementById("assistBusy" + prefix);
       const det = busyEl ? busyEl.closest("details.curator-assist") : null;
-      if (busyEl) busyEl.style.display = busy ? "block" : "none";
+      if (busyEl) busyEl.classList.toggle("ds-hidden", !busy);
       if (det) det.classList.toggle("htmx-request", !!busy);
       [
         "btnAssistLlmDo" + prefix,
@@ -872,7 +827,7 @@ INDEX_HTML = """<!DOCTYPE html>
               if (lp) {
                 lp.hidden = false;
                 lp.innerHTML =
-                  "<strong>Proposition IA</strong><pre style='white-space:pre-wrap'>"
+                  "<strong class=\\"ds-preview-label\\">Proposition IA</strong><pre class=\\"ds-pre\\">"
                   + escapeHtml(res.text) + "</pre>";
               }
               if (insBtn) {
@@ -976,7 +931,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 if (preview) {
                   preview.hidden = false;
                   preview.innerHTML =
-                    "<strong>Texte corrigé proposé</strong><pre style='white-space:pre-wrap'>"
+                    "<strong class=\\"ds-preview-label\\">Texte corrigé proposé</strong><pre class=\\"ds-pre\\">"
                     + escapeHtml(res.corrected) + "</pre>";
                 }
                 if (actions) actions.hidden = false;

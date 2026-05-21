@@ -1,0 +1,547 @@
+/**
+ * Design tokens — webapp curateur (issue-011 / #185).
+ * Source unique des couleurs, rayons et espacements des composants transverses.
+ */
+
+:root {
+  /* Surfaces */
+  --ds-color-canvas: #f6f7f9;
+  --ds-color-surface: #ffffff;
+  --ds-color-surface-raised: #ffffff;
+  --ds-color-border-subtle: #ccd0d8;
+  --ds-color-border-strong: #9aa3b2;
+
+  /* Texte */
+  --ds-color-fg-default: #1a1a1a;
+  --ds-color-fg-muted: #555555;
+  --ds-color-fg-subtle: #444444;
+
+  /* Sémantique */
+  --ds-color-danger-fg: #a40000;
+  --ds-color-danger-bg-subtle: #fdecea;
+  --ds-color-danger-border: #c0392b;
+  --ds-color-danger-heading: #7b241c;
+  --ds-color-success-fg: #0d8050;
+  --ds-color-warning-fg: #8b5a00;
+
+  /* Action primaire (remplissage optionnel — contraste AA texte blanc sur fond) */
+  --ds-color-action-fill: #1451cc;
+  --ds-color-action-fill-hover: #1145b0;
+  --ds-color-action-fill-active: #0e3a96;
+  --ds-color-on-action-fill: #ffffff;
+  --ds-color-action-focus-ring: #7a9fd1;
+
+  /* Secondaire (contour) */
+  --ds-color-action-outline: #1451cc;
+  --ds-color-action-outline-hover-bg: #eef4ff;
+  --ds-color-on-surface: #1a1a1a;
+
+  /* Danger bouton */
+  --ds-color-danger-fill: #b42318;
+  --ds-color-danger-fill-hover: #961d15;
+  --ds-color-danger-fill-active: #7a1810;
+  --ds-color-on-danger-fill: #ffffff;
+
+  /* Lignes / listes / tableaux */
+  --ds-color-row-hover: #eef4ff;
+  --ds-color-row-selected-bg: #f6f7f9;
+  --ds-color-row-border: var(--ds-color-border-subtle);
+
+  /* Chips (badges légers — sprint MUST / écrans 012–013–017) */
+  --ds-chip-bg: #eef1f6;
+  --ds-chip-fg: #1a1a1a;
+  --ds-chip-border: #ccd0d8;
+  --ds-chip-radius: 999px;
+  --ds-chip-padding-x: 0.5rem;
+  --ds-chip-padding-y: 0.2rem;
+
+  /* Espacements (échelle fixe ; densité issue-023) */
+  --ds-space-0: 0;
+  --ds-space-1: 0.25rem;
+  --ds-space-2: 0.35rem;
+  --ds-space-3: 0.5rem;
+  --ds-space-4: 0.65rem;
+  --ds-space-5: 0.75rem;
+  --ds-space-6: 1rem;
+  --ds-space-7: 1.25rem;
+  --ds-space-8: 2rem;
+
+  /* Rayons */
+  --ds-radius-sm: 4px;
+  --ds-radius-md: 6px;
+  --ds-radius-pill: 999px;
+
+  /* Ombres (discrètes) */
+  --ds-shadow-nav: 0 1px 0 rgba(0, 0, 0, 0.04);
+
+  /* Skeleton */
+  --ds-skeleton-base: #e2e6ee;
+  --ds-skeleton-shine: #f0f2f7;
+  --ds-skeleton-duration: 1.1s;
+}
+
+/* --- Base page --- */
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: var(--ds-color-canvas);
+  color: var(--ds-color-fg-default);
+}
+
+.ds-wrap {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: var(--ds-space-6) var(--ds-space-6) var(--ds-space-8);
+}
+
+label {
+  display: block;
+  margin-top: var(--ds-space-5);
+}
+
+input,
+textarea,
+select,
+button {
+  width: 100%;
+  max-width: 36rem;
+  box-sizing: border-box;
+}
+
+textarea {
+  min-height: 5rem;
+}
+
+.ds-row {
+  margin: var(--ds-space-5) 0;
+}
+
+.ds-row--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+  align-items: center;
+}
+
+.ds-row--inline > button {
+  width: auto;
+  max-width: none;
+}
+
+.err {
+  color: var(--ds-color-danger-fg);
+  white-space: pre-wrap;
+}
+
+.ok {
+  color: var(--ds-color-success-fg);
+}
+
+.warn {
+  color: var(--ds-color-warning-fg);
+  white-space: pre-wrap;
+}
+
+code {
+  font-size: 0.85rem;
+}
+
+h1 {
+  font-size: 1.35rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin-top: 0;
+}
+
+.muted {
+  color: var(--ds-color-fg-muted);
+  font-size: 0.9rem;
+}
+
+.banner {
+  font-size: 0.85rem;
+  color: var(--ds-color-fg-subtle);
+  margin-bottom: var(--ds-space-6);
+}
+
+/* --- Navigation principale (onglets) --- */
+nav#mainNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1);
+  border-bottom: 1px solid var(--ds-color-border-subtle);
+  margin: var(--ds-space-3) 0 var(--ds-space-6);
+  background: var(--ds-color-surface);
+  padding: var(--ds-space-2) var(--ds-space-2) 0;
+  border-radius: var(--ds-radius-md) var(--ds-radius-md) 0 0;
+  box-shadow: var(--ds-shadow-nav);
+}
+
+nav#mainNav button,
+nav#mainNav .ds-main-tab {
+  width: auto;
+  max-width: none;
+  padding: var(--ds-space-4) var(--ds-space-4);
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--ds-radius-sm) var(--ds-radius-sm) 0 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--ds-color-on-surface);
+}
+
+nav#mainNav button:hover,
+nav#mainNav .ds-main-tab:hover {
+  background: var(--ds-chip-bg);
+}
+
+nav#mainNav button.active,
+nav#mainNav .ds-main-tab.active {
+  background: var(--ds-color-canvas);
+  border-color: var(--ds-color-border-subtle) var(--ds-color-border-subtle) var(--ds-color-canvas);
+  font-weight: 600;
+}
+
+/* --- Panneaux --- */
+.panel {
+  display: none;
+  background: var(--ds-color-surface);
+  padding: var(--ds-space-6);
+  border: 1px solid var(--ds-color-border-subtle);
+  border-top: none;
+  border-radius: 0 0 var(--ds-radius-md) var(--ds-radius-md);
+}
+
+.panel.active {
+  display: block;
+}
+
+/* --- Boutons transverses --- */
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-2);
+  min-height: 2.25rem;
+  padding: var(--ds-space-3) var(--ds-space-5);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  box-sizing: border-box;
+  text-decoration: none;
+  width: 100%;
+  max-width: 36rem;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.ds-row .ds-btn,
+.ds-row--inline .ds-btn {
+  width: auto;
+  max-width: none;
+}
+
+.ds-btn:focus-visible {
+  outline: 2px solid var(--ds-color-action-focus-ring);
+  outline-offset: 2px;
+}
+
+.ds-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ds-btn--primary {
+  background: var(--ds-color-action-fill);
+  color: var(--ds-color-on-action-fill);
+  border-color: var(--ds-color-action-fill);
+}
+
+.ds-btn--primary:hover:not(:disabled) {
+  background: var(--ds-color-action-fill-hover);
+  border-color: var(--ds-color-action-fill-hover);
+}
+
+.ds-btn--primary:active:not(:disabled) {
+  background: var(--ds-color-action-fill-active);
+  border-color: var(--ds-color-action-fill-active);
+}
+
+.ds-btn--secondary {
+  background: var(--ds-color-surface);
+  color: var(--ds-color-on-surface);
+  border-color: var(--ds-color-border-strong);
+}
+
+.ds-btn--secondary:hover:not(:disabled) {
+  background: var(--ds-color-action-outline-hover-bg);
+  border-color: var(--ds-color-action-outline);
+}
+
+.ds-btn--secondary:active:not(:disabled) {
+  background: var(--ds-chip-bg);
+}
+
+.ds-btn--danger {
+  background: var(--ds-color-danger-fill);
+  color: var(--ds-color-on-danger-fill);
+  border-color: var(--ds-color-danger-fill);
+}
+
+.ds-btn--danger:hover:not(:disabled) {
+  background: var(--ds-color-danger-fill-hover);
+  border-color: var(--ds-color-danger-fill-hover);
+}
+
+.ds-btn--danger:active:not(:disabled) {
+  background: var(--ds-color-danger-fill-active);
+  border-color: var(--ds-color-danger-fill-active);
+}
+
+/* --- Comptes & tables --- */
+.account-dl dt {
+  font-weight: 600;
+  margin-top: var(--ds-space-3);
+}
+
+.account-dl dd {
+  margin: 0.15rem 0 0 0;
+}
+
+table.sa-accounts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: var(--ds-space-3);
+}
+
+table.sa-accounts th,
+table.sa-accounts td {
+  border: 1px solid var(--ds-color-row-border);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  text-align: left;
+}
+
+table.sa-saga {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: var(--ds-space-2);
+}
+
+table.sa-saga th,
+table.sa-saga td {
+  border: 1px solid var(--ds-color-row-border);
+  padding: 0.3rem var(--ds-space-4);
+  text-align: left;
+  word-break: break-all;
+}
+
+.entries-toolbar label {
+  margin-top: var(--ds-space-2);
+}
+
+.entries-toolbar input[type="number"] {
+  max-width: 8rem;
+}
+
+table.entries-list {
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: var(--ds-space-2);
+}
+
+table.entries-list th,
+table.entries-list td {
+  border: 1px solid var(--ds-color-row-border);
+  padding: var(--ds-space-2) var(--ds-space-4);
+  text-align: left;
+}
+
+tr.entries-row-openable {
+  cursor: pointer;
+}
+
+tr.entries-row-openable:hover {
+  background: var(--ds-color-row-hover);
+}
+
+tr.entries-row-openable:focus-visible {
+  outline: 2px solid var(--ds-color-action-focus-ring);
+  outline-offset: -2px;
+}
+
+/* --- Zone danger --- */
+.danger-zone {
+  border: 2px solid var(--ds-color-danger-border);
+  background: var(--ds-color-danger-bg-subtle);
+  padding: 0.85rem var(--ds-space-6);
+  border-radius: var(--ds-radius-md);
+  margin-top: var(--ds-space-6);
+}
+
+.danger-zone h4 {
+  margin-top: 0;
+  color: var(--ds-color-danger-heading);
+  font-size: 1rem;
+}
+
+/* --- Assistance curateur (HTMX) --- */
+details.curator-assist {
+  margin-top: var(--ds-space-6);
+  padding: var(--ds-space-3) 0;
+}
+
+details.curator-assist summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.assist-busy {
+  color: var(--ds-color-fg-muted);
+  font-size: 0.9rem;
+  margin: var(--ds-space-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+
+details.curator-assist.htmx-request {
+  outline: 2px dashed var(--ds-color-action-focus-ring);
+}
+
+p.hx-indicator {
+  margin: var(--ds-space-2) 0;
+}
+
+/* Skeleton (indicateur chargement) */
+.ds-skeleton-line {
+  display: block;
+  height: 0.65rem;
+  border-radius: var(--ds-radius-pill);
+  background: linear-gradient(
+    90deg,
+    var(--ds-skeleton-base) 0%,
+    var(--ds-skeleton-shine) 50%,
+    var(--ds-skeleton-base) 100%
+  );
+  background-size: 200% 100%;
+  animation: ds-skeleton-shimmer var(--ds-skeleton-duration) ease-in-out infinite;
+  max-width: 12rem;
+}
+
+@keyframes ds-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* Préformaté (aperçus IA / LT) — pas de style inline dans le JS */
+.ds-pre {
+  white-space: pre-wrap;
+  margin: var(--ds-space-2) 0 0;
+  padding: var(--ds-space-3);
+  background: var(--ds-chip-bg);
+  border: 1px solid var(--ds-chip-border);
+  border-radius: var(--ds-radius-sm);
+  font-size: 0.85rem;
+  max-width: 36rem;
+}
+
+.ds-preview-label {
+  display: block;
+  margin-bottom: var(--ds-space-2);
+}
+
+/* Utilitaire visibilité (remplace display:none inline dans le JS) */
+.ds-hidden {
+  display: none !important;
+}
+
+/* Chip exemple (badges futurs / légendes) */
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  padding: var(--ds-chip-padding-y) var(--ds-chip-padding-x);
+  border-radius: var(--ds-chip-radius);
+  background: var(--ds-chip-bg);
+  color: var(--ds-chip-fg);
+  border: 1px solid var(--ds-chip-border);
+}
+
+/* --- Accessibilité : contraste élevé --- */
+@media (prefers-contrast: more) {
+  :root {
+    --ds-color-border-subtle: #6b7280;
+    --ds-color-border-strong: #374151;
+    --ds-color-fg-muted: #1f2937;
+    --ds-color-action-fill: #0f3d99;
+    --ds-color-danger-fill: #7f1d1d;
+  }
+
+  .ds-btn--secondary {
+    border-width: 2px;
+  }
+
+  tr.entries-row-openable:hover {
+    outline: 1px solid var(--ds-color-border-strong);
+  }
+}
+
+/* --- Mode contraste forcé (Windows) --- */
+@media (forced-colors: active) {
+  .ds-btn--primary {
+    background: ButtonText;
+    color: ButtonFace;
+    border-color: ButtonText;
+  }
+
+  .ds-btn--secondary {
+    background: ButtonFace;
+    color: ButtonText;
+    border-color: ButtonText;
+  }
+
+  .ds-btn--danger {
+    background: Mark;
+    color: MarkText;
+    border-color: Mark;
+  }
+
+  tr.entries-row-openable:hover {
+    background: Highlight;
+  }
+
+  .ds-skeleton-line {
+    background: ButtonFace;
+    border: 1px solid ButtonText;
+    animation: none;
+  }
+}
+
+/* --- Réduction des mouvements --- */
+@media (prefers-reduced-motion: reduce) {
+  .ds-btn {
+    transition: none;
+  }
+
+  .ds-skeleton-line {
+    animation: none;
+    background: var(--ds-skeleton-base);
+  }
+
+  details.curator-assist.htmx-request {
+    outline-style: solid;
+  }
+}

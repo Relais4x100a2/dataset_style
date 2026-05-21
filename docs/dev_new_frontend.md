@@ -30,6 +30,8 @@ docker compose --env-file .env up postgres supertokens webapp
 
 Interface locale : `http://localhost:8080` — healthcheck ops : `http://localhost:8080/health`.
 
+Les styles transverses de la coquille HTML sont dans `src/webapp/static/design_tokens.css` (montage `/static/…`). Voir `docs/design_tokens_webapp.md`.
+
 ## Cohérence auth (ADR 0006)
 
 - Aligner **`APP_PUBLIC_BASE_URL`** sur l’URL réellement servie aux testeurs (ex. `http://localhost:8080` pour un test local du slice web seul), afin que les liens invitation / reset et les cookies SuperTokens restent cohérents.

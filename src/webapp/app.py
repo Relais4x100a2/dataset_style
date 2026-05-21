@@ -8,6 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import pandas as pd
@@ -16,6 +17,7 @@ from fastapi import Body, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
@@ -399,6 +401,9 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    _static_dir = Path(__file__).resolve().parent / "static"
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index() -> str:
