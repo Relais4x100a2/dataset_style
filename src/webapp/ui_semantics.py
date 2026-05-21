@@ -15,6 +15,7 @@ from src.api_errors import (
     EXPORT_PAYLOAD_TOO_LARGE,
     FORBIDDEN,
     INTERNAL_ERROR,
+    MAIL_DELIVERY_FAILED,
     NOT_FOUND_GENERIC,
 )
 
@@ -37,6 +38,7 @@ _API_ERROR_CODE_TO_BANNER_VARIANT: dict[str, BannerVariant] = {
     # Limite métier export : réduction de périmètre.
     EXPORT_PAYLOAD_TOO_LARGE: "warning",
     INTERNAL_ERROR: "danger",
+    MAIL_DELIVERY_FAILED: "danger",
     _BAD_REQUEST: "warning",
     _CURATOR_LT_UNAVAILABLE: "danger",
     _CLIENT: "warning",

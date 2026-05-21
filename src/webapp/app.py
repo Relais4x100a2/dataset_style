@@ -23,9 +23,11 @@ from sqlalchemy.exc import OperationalError
 
 from src.api_errors import (
     ExportPayloadTooLargeError,
+    MailDeliveryFailedError,
     TenantResourceOpaqueDenial,
     error_envelope_for_client,
     log_resolved_api_error,
+    resolve_exception_for_api,
 )
 from src.auth import persist_user_from_signin_ok, verify_invitation_only_contract
 from src.database import (
@@ -858,16 +860,26 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 403,
                 error_envelope_for_client(exc, include_technical_detail=False),
             ) from exc
+        except MailDeliveryFailedError as exc:
+            log_resolved_api_error(logger, exc, extra_context={"route": "super_admin_invite"})
+            resolved = resolve_exception_for_api(exc, include_technical_detail=False)
+            raise EnvelopeHttpError(
+                resolved.http_status,
+                error_envelope_for_client(exc, include_technical_detail=None),
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             log_resolved_api_error(logger, exc, extra_context={"route": "super_admin_invite"})
             return JSONResponse(
                 status_code=500,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
             )
+        banner_tone = "warn" if outcome.mail_mode == "dev" else "ok"
         return {
             "status": "ok",
             "mailMode": outcome.mail_mode,
             "message": outcome.message_fr,
+            "inviteResult": outcome.invite_result,
+            "bannerTone": banner_tone,
         }
 
     @app.get("/api/super-admin/accounts")

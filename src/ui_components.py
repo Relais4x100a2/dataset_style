@@ -1289,7 +1289,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
         invite_submit = st.form_submit_button("Envoyer l'invitation")
     if invite_submit:
         try:
-            invite_link = create_invitation_link(engine, user.user_id, invite_email)
+            invite_link = create_invitation_link(engine, user.user_id, invite_email).link
             delivery = send_account_link_email(
                 to_email=invite_email.strip().lower(),
                 subject="Invitation Dataset Style Studio",

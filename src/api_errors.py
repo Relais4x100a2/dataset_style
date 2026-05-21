@@ -25,6 +25,7 @@ FORBIDDEN: Final = "FORBIDDEN"
 NOT_FOUND_GENERIC: Final = "NOT_FOUND_GENERIC"
 INTERNAL_ERROR: Final = "INTERNAL_ERROR"
 EXPORT_PAYLOAD_TOO_LARGE: Final = "EXPORT_PAYLOAD_TOO_LARGE"
+MAIL_DELIVERY_FAILED: Final = "MAIL_DELIVERY_FAILED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +54,14 @@ class ExportPayloadTooLargeError(Exception):
         self.row_count = row_count
         self.max_rows = max_rows
         super().__init__(f"export rows {row_count} > cap {max_rows}")
+
+
+class MailDeliveryFailedError(Exception):
+    """Échec d'envoi e-mail (SMTP ou transport) — ne pas exposer le message brut du fournisseur."""
+
+    def __init__(self, cause: BaseException) -> None:
+        self.cause = cause
+        super().__init__(str(cause))
 
 
 _CATALOG: dict[str, ResolvedApiError] = {
@@ -109,6 +118,19 @@ _CATALOG: dict[str, ResolvedApiError] = {
         message_fr="Une erreur technique s'est produite.",
         suggested_action_fr="Réessayez plus tard. Si le problème persiste, contactez l'administrateur.",
     ),
+    MAIL_DELIVERY_FAILED: ResolvedApiError(
+        code=MAIL_DELIVERY_FAILED,
+        http_status=502,
+        title_fr="Envoi d'e-mail impossible",
+        message_fr=(
+            "Le serveur n'a pas pu acheminer l'e-mail d'invitation (SMTP ou réseau). "
+            "Vérifiez la configuration d'envoi ou réessayez plus tard."
+        ),
+        suggested_action_fr=(
+            "Contrôlez les paramètres SMTP et les journaux serveur ; "
+            "en mode développement, utilisez MAIL_MODE=dev pour valider le flux sans SMTP."
+        ),
+    ),
 }
 
 
@@ -149,6 +171,8 @@ def resolve_exception_for_api(
             ),
             suggested_action_fr=base.suggested_action_fr,
         )
+    if isinstance(exc, MailDeliveryFailedError):
+        return _catalog_entry(MAIL_DELIVERY_FAILED)
     if isinstance(exc, OperationalError):
         return _catalog_entry(DB_UNAVAILABLE)
     if isinstance(exc, PermissionError):
@@ -176,6 +200,8 @@ def _sanitize_detail_fragment(text: str, *, max_len: int = 800) -> str:
 
 def technical_detail_text(exc: BaseException) -> str:
     """Chaîne courte pour champs ``detail`` (mode développement uniquement)."""
+    if isinstance(exc, MailDeliveryFailedError):
+        return _sanitize_detail_fragment(f"{type(exc.cause).__name__}: {exc.cause}")
     return _sanitize_detail_fragment(f"{type(exc).__name__}: {exc}")
 
 

@@ -56,12 +56,13 @@ Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la pag
 
 Variable optionnelle **`WEBAPP_EXPORT_MAX_ROWS`** : nombre maximum de lignes dans le périmètre d’export (`dataframe_for_export` après filtre de statut). Si le projet dépasse cette limite, `GET /api/projects/{id}/export.csv` et `…/export.jsonl` répondent **413** avec le code stable `EXPORT_PAYLOAD_TOO_LARGE` (enveloppe `src/api_errors.py`). Non défini = pas de plafond côté serveur (comportement par défaut en développement).
 
-## Super-admin — invitation par e-mail (issue-017 / GitHub #139)
+## Super-admin — invitation par e-mail (issue-007 / issue-017 / GitHub #181)
 
-- **`POST /api/super-admin/invite`** — corps JSON `{ "email": "…" }` (normalisation trim + casse côté serveur). Garde HTTP : `require_super_admin_app_user` (`users.is_super_admin`) ; chaîne métier : `create_invitation_link` (second contrôle SQL `require_super_admin`) puis `send_account_link_email` (`src/mailer.py`, `MAIL_MODE` = `dev` ou envoi SMTP).
+- **`POST /api/super-admin/invite`** — corps JSON `{ "email": "…" }` (normalisation trim + casse côté serveur). Garde HTTP : `require_super_admin_app_user` (`users.is_super_admin`) ; chaîne métier : `create_invitation_link` (second contrôle SQL `require_super_admin`) puis `send_account_link_email` (`src/mailer.py`, `MAIL_MODE` = `dev` ou envoi SMTP). Réponse succès : `status`, `mailMode`, `message`, `inviteResult` (`new_invitation` \| `existing_account_reset`), `bannerTone` (`ok` \| `warn`) pour le frontal ; **aucun jeton** dans le JSON.
 - **Invitation-only** : au démarrage du `webapp`, si `AUTH_ENFORCE_INVITATION_ONLY=true` alors `SUPERTOKENS_SIGNUP_DISABLED=true` est obligatoire (`verify_invitation_only_contract`, test `test_lifespan_raises_when_invitation_only_contract_broken`). Cela ne bloque pas la voie super-admin : le flux continue d’utiliser les primitives d’invitation côté fournisseur.
-- **Mode dev** : aucun envoi réel ; le JSON de succès contient un texte FR avec **`MailDeliveryResult.preview`** (aperçu masqué), jamais le jeton complet du lien (tests `tests/test_webapp_super_admin_invite_issue017.py`).
-- **E-mail déjà connu** : comportement voulu identique à Streamlit — pas de distinction dans l’interface ; le message de succès inclut une note support rappelant qu’un lien de réinitialisation peut avoir été renvoyé (`src/webapp/super_admin_invite.py`).
+- **Mode dev** : aucun envoi réel ; le JSON de succès contient un texte FR avec **`MailDeliveryResult.preview`** (aperçu masqué), jamais le jeton complet du lien ; journalisation `INFO` côté serveur avec le même aperçu masqué (`tests/test_webapp_super_admin_invite_issue017.py`).
+- **E-mail déjà connu** : message de succès **identique** à Streamlit (lien de réinitialisation) ; le discriminant machine est `inviteResult=existing_account_reset` (voir `docs/migration_parity_matrix.md`, flux SA-INVITE).
+- **Échec SMTP / transport** : **502** + enveloppe `MAIL_DELIVERY_FAILED` (`src/api_errors.py`).
 
 ## Tests et CI
 
