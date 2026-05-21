@@ -46,6 +46,14 @@ class CurrentUser:
     is_super_admin: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class CreateInvitationLinkResult:
+    """Lien d'activation / reset et statut fournisseur (issue-007 / SA-INVITE)."""
+
+    link: str
+    email_already_registered: bool
+
+
 def _signin(email: str, password: str) -> dict:
     return _signin_http(email, password)
 
@@ -145,8 +153,17 @@ def _mask_link(link: str) -> str:
     return f"{prefix}token={token_clean[:5]}...{token_clean[-5:]}"
 
 
-def create_invitation_link(engine: Engine, actor_user_id: str, email: str) -> str:
-    """Crée ou recycle un compte provider puis génère un lien de définition de mot de passe."""
+def create_invitation_link(
+    engine: Engine, actor_user_id: str, email: str
+) -> CreateInvitationLinkResult:
+    """Crée ou recycle un compte provider puis génère un lien de définition de mot de passe.
+
+    Si le fournisseur renvoie ``EMAIL_ALREADY_EXISTS_ERROR``, le flux continue comme
+    Streamlit : lien de réinitialisation (pas de seconde voie d'inscription publique).
+
+    Returns:
+        Lien complet (contient un jeton) et indicateur « e-mail déjà connu » côté fournisseur.
+    """
     require_super_admin(engine, actor_user_id)
     normalized_email = _normalize_email(email)
     temporary_password = f"Aa1!{secrets.token_urlsafe(24)}"
@@ -154,7 +171,9 @@ def create_invitation_link(engine: Engine, actor_user_id: str, email: str) -> st
     status = str(out.get("status") or "").strip()
     if status not in {"OK", "EMAIL_ALREADY_EXISTS_ERROR"}:
         raise RuntimeError(f"Invitation impossible: {status}")
-    return _create_password_reset_link(normalized_email)
+    already = status == "EMAIL_ALREADY_EXISTS_ERROR"
+    link = _create_password_reset_link(normalized_email)
+    return CreateInvitationLinkResult(link=link, email_already_registered=already)
 
 
 def request_password_reset_link(email: str) -> str:

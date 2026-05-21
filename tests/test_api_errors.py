@@ -38,6 +38,28 @@ def test_tenant_resource_opaque_denial_maps_to_not_found_generic_without_leak() 
     assert "@" not in resolved.message_fr
 
 
+def test_mail_delivery_failed_resolves_to_502() -> None:
+    from src.api_errors import (
+        MAIL_DELIVERY_FAILED,
+        MailDeliveryFailedError,
+        resolve_exception_for_api,
+    )
+
+    exc = MailDeliveryFailedError(RuntimeError("relay"))
+    resolved = resolve_exception_for_api(exc, include_technical_detail=False)
+    assert resolved.code == MAIL_DELIVERY_FAILED
+    assert resolved.http_status == 502
+
+
+def test_mail_delivery_failed_technical_detail_uses_cause() -> None:
+    from src.api_errors import MailDeliveryFailedError, technical_detail_text
+
+    exc = MailDeliveryFailedError(ValueError("inner"))
+    text = technical_detail_text(exc)
+    assert "ValueError" in text
+    assert "inner" in text
+
+
 def test_db_operational_error_maps_to_db_unavailable_503() -> None:
     from src.api_errors import DB_UNAVAILABLE, resolve_exception_for_api
 

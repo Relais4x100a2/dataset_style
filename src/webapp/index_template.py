@@ -223,44 +223,59 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     </div>
     <div class="panel" data-tab-idx="6">
       <h2>Super Admin</h2>
-      <p class="muted">Invitation d’un collaborateur (invitation-only). Aucune inscription publique.</p>
-      <label>E-mail du collaborateur <input type="email" id="saInviteEmail" autocomplete="off" /></label>
-      <div class="row"><button type="button" id="btnSaInvite">Envoyer l’invitation</button></div>
-      <div id="saInviteMsg" class="ds-banner-stack" aria-live="polite"></div>
-      <h3>Comptes actifs</h3>
-      <p class="muted">Liste paginée via <code>GET /api/super-admin/accounts</code> : <code>page</code> ≥ 1 ;
-        <code>page_size</code> entre 10 et 100 (défaut 25).</p>
-      <label>Taille de page
-        <select id="saAccountsPageSize">
-          <option value="10">10</option>
-          <option value="25" selected>25</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-      </label>
-      <label>Page <input type="number" id="saAccountsPage" min="1" value="1" /></label>
-      <div class="row"><button type="button" id="btnSaAccountsReload">Actualiser la liste</button></div>
-      <div id="saAccountsErr" class="ds-banner-stack" aria-live="polite"></div>
-      <p id="saAccountsSummary" class="muted"></p>
-      <div id="saAccountsTableWrap"></div>
-      <h3>Panneau technique (saga)</h3>
-      <p class="muted">Métriques alignées sur le studio : cartes = répartition sur les N dernières mises à jour ;
-        totaux = ensemble de la table. File = opérations éligibles au worker (<code>retry_deprovision_ops</code>).</p>
-      <p><button type="button" id="btnSaSagaReload">Actualiser la télémétrie</button></p>
-      <div id="saSagaErr" class="ds-banner-stack" aria-live="polite"></div>
-      <div id="saSagaSummary" class="muted"></div>
-      <div id="saSagaTables"></div>
-      <div class="danger-zone" id="saSagaDanger">
-        <h4>Zone sensible — relance manuelle (DLQ)</h4>
-        <p class="muted">Même effet qu'une relance confirmée côté studio. Ne pas utiliser sans diagnostic.</p>
-        <label>Opération en quarantaine
-          <select id="saSagaDlqSelect"></select>
+      <div class="sa-scope-lede muted" role="region" aria-label="Périmètre super admin">
+        <p><strong>Administration plateforme.</strong> Parcours invitation-only : aucune inscription publique ni
+        bouton « créer un compte » ici. Les actions ci-dessous ne font pas de vous un copropriétaire des projets des curateurs.</p>
+      </div>
+      <nav id="saSubtabNav" class="sa-subtabs" aria-label="Sections administration">
+        <button type="button" class="sa-subtab active" data-sa-sub="accounts">Comptes et invitations</button>
+        <button type="button" class="sa-subtab" data-sa-sub="tech">Suivi technique</button>
+      </nav>
+      <div id="saSubpanelAccounts">
+        <h3 class="sr-only">Invitations</h3>
+        <p class="muted">Inviter un collaborateur par e-mail (même chaîne que le studio Streamlit).</p>
+        <form id="saInviteForm" action="#" method="get" onsubmit="return false;">
+          <label>E-mail du collaborateur <input type="email" id="saInviteEmail" name="sa_invite_email" autocomplete="off" required /></label>
+          <div class="row"><button type="submit" id="btnSaInvite">Envoyer l’invitation</button></div>
+        </form>
+        <div id="saInviteMsg" class="ds-banner-stack" aria-live="polite"></div>
+        <h3>Comptes actifs</h3>
+        <p class="muted">Liste paginée via <code>GET /api/super-admin/accounts</code> : <code>page</code> ≥ 1 ;
+          <code>page_size</code> entre 10 et 100 (défaut 25).</p>
+        <label>Taille de page
+          <select id="saAccountsPageSize">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
         </label>
-        <label><input type="checkbox" id="saSagaReplayConfirm" /> Je confirme la remise en file de l'opération sélectionnée</label>
-        <div class="row">
-          <button type="button" id="btnSaSagaReplay" disabled>Relancer l'opération</button>
+        <label>Page <input type="number" id="saAccountsPage" min="1" value="1" /></label>
+        <div class="row"><button type="button" id="btnSaAccountsReload">Actualiser la liste</button></div>
+        <div id="saAccountsErr" class="ds-banner-stack" aria-live="polite"></div>
+        <p id="saAccountsSummary" class="muted"></p>
+        <div id="saAccountsTableWrap"></div>
+      </div>
+      <div id="saSubpanelTech" hidden>
+        <h3>Panneau technique (saga)</h3>
+        <p class="muted">Métriques alignées sur le studio : cartes = répartition sur les N dernières mises à jour ;
+          totaux = ensemble de la table. File = opérations éligibles au worker (<code>retry_deprovision_ops</code>).</p>
+        <p><button type="button" id="btnSaSagaReload">Actualiser la télémétrie</button></p>
+        <div id="saSagaErr" class="ds-banner-stack" aria-live="polite"></div>
+        <div id="saSagaSummary" class="muted"></div>
+        <div id="saSagaTables"></div>
+        <div class="danger-zone" id="saSagaDanger">
+          <h4>Zone sensible — relance manuelle (DLQ)</h4>
+          <p class="muted">Même effet qu'une relance confirmée côté studio. Ne pas utiliser sans diagnostic.</p>
+          <label>Opération en quarantaine
+            <select id="saSagaDlqSelect"></select>
+          </label>
+          <label><input type="checkbox" id="saSagaReplayConfirm" /> Je confirme la remise en file de l'opération sélectionnée</label>
+          <div class="row">
+            <button type="button" id="btnSaSagaReplay" disabled>Relancer l'opération</button>
+          </div>
+          <div id="saSagaReplayMsg" class="ds-banner-stack" aria-live="polite"></div>
         </div>
-        <div id="saSagaReplayMsg" class="ds-banner-stack" aria-live="polite"></div>
       </div>
     </div>
   </template>
@@ -773,8 +788,8 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
       }
       if (mainTabLabels[idx] === "Tableau de bord") loadDashboardBanners().catch(showErr);
       if (mainTabLabels[idx] === "Super Admin") {
+        wireSuperAdminSubtabs();
         loadSuperAdminAccounts().catch(showErr);
-        loadSuperAdminSagaTelemetry().catch(function() {});
       }
     }
 
@@ -801,6 +816,29 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
         p.classList.toggle("active", i === 0);
       });
       wireProjectAndEntries();
+    }
+
+    function wireSuperAdminSubtabs() {
+      const nav = document.getElementById("saSubtabNav");
+      const acc = document.getElementById("saSubpanelAccounts");
+      const tech = document.getElementById("saSubpanelTech");
+      if (!nav || !acc || !tech || nav.dataset.wired) return;
+      nav.dataset.wired = "1";
+      nav.querySelectorAll(".sa-subtab").forEach((btn) => {
+        btn.onclick = () => {
+          nav.querySelectorAll(".sa-subtab").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          const sub = btn.getAttribute("data-sa-sub");
+          acc.hidden = sub !== "accounts";
+          tech.hidden = sub !== "tech";
+          if (sub === "tech") loadSuperAdminSagaTelemetry().catch(function() {});
+        };
+      });
+    }
+
+    function superAdminInviteBannerVariant(out) {
+      if (out && out.bannerTone === "warn") return "warning";
+      return "success";
     }
 
     async function loadSuperAdminAccounts() {
@@ -842,11 +880,15 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
     }
 
     function wireSuperAdminInvite() {
+      const form = document.getElementById("saInviteForm");
       const btn = document.getElementById("btnSaInvite");
       const msg = document.getElementById("saInviteMsg");
       const inp = document.getElementById("saInviteEmail");
-      if (!btn || !msg || !inp) return;
-      btn.onclick = async () => {
+      if (!form || !btn || !msg || !inp) return;
+      if (form.dataset.wiredInvite) return;
+      form.dataset.wiredInvite = "1";
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
         clearDsBannerStack(msg);
         const email = inp.value.trim();
         if (!email) {
@@ -861,13 +903,9 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ email }),
           });
-          const okSmtp = out.mailMode === "smtp";
-          appendBannerToStack(
-            msg,
-            okSmtp ? "success" : "warning",
-            okSmtp ? "Invitation" : "Invitation (mail simulé)",
-            out.message || "OK"
-          );
+          const variant = superAdminInviteBannerVariant(out);
+          const title = out.mailMode === "smtp" ? "Invitation" : "Invitation (mail simulé)";
+          appendBannerToStack(msg, variant, title, out.message || "OK");
           loadSuperAdminAccounts().catch(function() {});
         } catch (e) {
           if (e && e.error) renderApiErrorIntoStack(msg, e.error);
@@ -880,7 +918,7 @@ _RAW_INDEX_HTML = """<!DOCTYPE html>
           btn.disabled = false;
           inp.disabled = false;
         }
-      };
+      });
     }
 
     function wireSuperAdminAccountsPanel() {

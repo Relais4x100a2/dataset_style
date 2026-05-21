@@ -30,6 +30,7 @@ from src.webapp.ui_semantics import (
         (NOT_FOUND_GENERIC, "info"),
         (EXPORT_PAYLOAD_TOO_LARGE, "warning"),
         (INTERNAL_ERROR, "danger"),
+        ("MAIL_DELIVERY_FAILED", "danger"),
         ("BAD_REQUEST", "warning"),
         ("CURATOR_LANGUAGETOOL_UNAVAILABLE", "danger"),
         ("CLIENT", "warning"),
@@ -65,6 +66,7 @@ def test_index_html_links_tokens_and_injects_api_banner_map() -> None:
     html = index_template.INDEX_HTML
     assert "/static/design_tokens.css" in html
     assert '"AUTH_SESSION_EXPIRED":"warning"' in html
+    assert '"MAIL_DELIVERY_FAILED":"danger"' in html
     assert "const API_ERROR_BANNER_VARIANT = {" in html
 
 

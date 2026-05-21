@@ -459,3 +459,49 @@ html[data-ds-reading="high_contrast"] .warn {
   margin: 0.5rem 0;
   font-size: 0.95rem;
 }
+
+/* Super-admin : sous-onglets alignés Streamlit (issue-007) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sa-scope-lede {
+  border-left: 4px solid var(--ds-color-focus-ring);
+  padding: 0.35rem 0 0.35rem 0.85rem;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.sa-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.sa-subtab {
+  font: inherit;
+  cursor: pointer;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--ds-color-border-subtle);
+  border-radius: 6px;
+  background: var(--ds-color-surface-muted);
+  color: var(--ds-color-text-primary);
+}
+
+.sa-subtab:hover {
+  background: var(--ds-color-nav-hover-bg);
+}
+
+.sa-subtab.active {
+  border-color: var(--ds-color-border-strong);
+  font-weight: 600;
+  background: var(--ds-color-surface-elevated);
+}
