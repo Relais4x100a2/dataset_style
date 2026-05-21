@@ -379,6 +379,12 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _ux_telemetry_response_headers(request: Request, call_next: Any) -> Response:
+        response = await call_next(request)
+        ux_telemetry.attach_ux_telemetry_response_markers(response, request)
+        return response
+
     _static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
@@ -508,7 +514,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         payload = projects_list_response(projects, active_hint)
         ux_telemetry.maybe_record_webapp_sb_ctx(
             request,
-            project_ids_in_order=[p.project_id for p in projects],
+            projects=projects,
             active_hint=active_hint,
         )
         return payload
@@ -625,6 +631,11 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         try:
             entry_mutations.apply_entry_field_updates(eng, project_id, user_id, entry_id, updates)
         except KeyError as exc:
+            ux_telemetry.maybe_record_webapp_entry_access_denied(
+                request,
+                project_id=project_id,
+                milestone_context=MILESTONE_EDI_SAVE,
+            )
             raise TenantResourceOpaqueDenial() from exc
         except ValueError as exc:
             raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
