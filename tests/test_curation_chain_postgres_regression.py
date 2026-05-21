@@ -1,4 +1,4 @@
-"""Jalon non-régression chaîne curation avec persistance Postgres (issue-009, GitHub #131).
+"""Jalon non-régression chaîne curation avec persistance Postgres (issue-009, GitHub #183).
 
 Les scénarios s'alignent sur les ID flux de ``docs/migration_parity_matrix.md`` (issue-004) :
 PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL. Aucun appel LLM ni calcul NLP

@@ -40,6 +40,8 @@ Renommer ultérieurement la branche impliquerait de mettre à jour **les mêmes 
 | `deploy-caprover-relais4` | App **`dataset-style`** (production Relais4), avec `APP_CONFIG_JSON` et stack PG + SuperTokens décrite dans `docs/caprover_deployment.md`. | **Oui** : push et PR ciblant cette branche. | **Planifié** (cron) ; **PR** si chemins sensibles. |
 | `deploy-newfrontend` | **Staging / préprod** dédié : triplet PG + SuperTokens + app(s) avec secrets et **`APP_PUBLIC_BASE_URL` préprod** (voir `docs/caprover_deployment.md` §4.6 et placeholders `docs/caprover_env_example.md`). | **Oui** : push et PR ciblant cette branche (listées dans `ci.yml`). | **Push** sur cette branche : workflow **complet** à chaque commit (pas de filtre `paths`, évite un faux négatif sur la rampe migration) ; **PR** si chemins sensibles ; **cron** inchangé. |
 
+**Jalon 009 (non-régression persistance + export PostgreSQL)** : procédure préprod, variable `DATASET_STYLE_REGRESSION_DATABASE_URL` et attestation produit — `docs/curation_chain_preprod_regression_issue_009.md` ; modèles — `docs/release_attestations/` ; après chaque run CI vert, artefact **`ci-jalon-009-handoff-bundle`** (JUnit + `AUTOMATED_GATE_ISSUE_009.md` + copie du modèle d’attestation).
+
 Détails des filtres `auth-contract` : voir `.github/workflows/auth-contract.yml` (`on.push.branches`, `on.pull_request.paths`).
 
 ## Procédure : valider avant merge sur la branche de déploiement

@@ -50,6 +50,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+# CI handoff bundle (generated locally if pytest --junitxml targets this dir)
+ci-release-bundle/
 
 # Translations
 *.mo
