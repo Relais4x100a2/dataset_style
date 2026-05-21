@@ -222,8 +222,9 @@ python3 -m pytest tests/test_webapp_issue010_shell.py -q
 python3 -m pytest tests/test_webapp_project_dimensions_settings.py tests/test_presets_dimensions_patch_validation.py -q
 python3 -m pytest tests/test_webapp_curator_ai.py tests/test_webapp_index_template_issue013.py -q
 python3 -m pytest tests/test_migration_parity_matrix_doc.py -q
-# issue-009 / GitHub #131 : persistance Postgres + export (PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL)
+# issue-009 / GitHub #183 : persistance Postgres + export (PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL)
 # Exporter DATASET_STYLE_REGRESSION_DATABASE_URL (postgresql://…) — en CI la variable est définie par .github/workflows/ci.yml
+# Recette préprod et attestation : docs/curation_chain_preprod_regression_issue_009.md
 python3 -m pytest tests/test_curation_chain_postgres_regression.py -q
 python3 -m pytest tests/test_tab_layout.py tests/test_export_utils.py tests/test_project_entries_cache.py -q
 python3 -m pytest tests/test_services.py tests/test_export_quality_recap_service.py -q
