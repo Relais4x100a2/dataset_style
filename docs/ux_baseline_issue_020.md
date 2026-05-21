@@ -1,6 +1,10 @@
 # Baseline UX — scénario critique (issue-020 / GitHub #142)
 
-**Objectif :** figer une baseline **Streamlit** reproductible pour comparer la future webapp en fin de migration (issue-001 archive de bascule), sans persistance PostgreSQL des événements UX (v1).
+**Objectif :** figer une baseline **Streamlit** reproductible pour comparer la webapp préprod en fin de migration (issue-001 archive de bascule), sans persistance PostgreSQL des événements UX (v1).
+
+## Protocole « une surface à la fois » (obligatoire en coexistence)
+
+Pendant la coexistence dev/staging **Streamlit** vs **webapp**, toute collecte baseline reste **mono-surface par `run_id`** : les jalons émis pour un `run_id` donné proviennent **d’une seule** origine UI avant fin de scénario (`EXP-DL` réussi ou fin explicite). Voir **`docs/migration_parity_matrix.md`** (*Protocole recette : une surface à la fois*) et **`docs/merge_ready_checklist.md`** §6.
 
 ## Scénario produit (aligné issue-009)
 
@@ -15,22 +19,38 @@ Parcours **projet → entrée → contrôle → export** :
 
 | Métrique | Définition | Jalons (codes stables) |
 | --- | --- | --- |
-| **Temps de parcours** | Écarts `monotonic_ns` entre jalons successifs du même `run_id` | `SB-CTX` → `ENT-NEW-WRITE` ou `EDI-SAVE` → `EXP-SCOPE` → `EXP-DL` |
+| **Temps de parcours** | Écarts `monotonic_ns` entre jalons successifs du même `run_id` | **Streamlit** : `SB-CTX` → `ENT-NEW-WRITE` ou `EDI-SAVE` → `EXP-SCOPE` → `EXP-DL`. **Webapp** : `SB-CTX` → `ENT-NEW-WRITE` ou `EDI-SAVE` → `EXP-DL` (un jalon par requête d’export ; pas de `EXP-SCOPE` — écart matrice issue-015). |
 | **Erreurs** | Comptage par `api_error_code` (webapp / contrat) ou `streamlit_category` contrôlée | Événements `kind: ux_error` |
 | **Questionnaire** | Perception post-tâche (interne) | Voir `docs/ux_baseline_questionnaire.md` — saisie hors bundle machine (formulaire interne) |
 
+## Rapport synthétique (template revue)
+
+À remplir après campagne **avant / après** (même compte test, deux `run_id` distincts, une surface à la fois). Les temps Δ sont dérivés des JSONL (`monotonic_ns`) ou chronomètre manuel si la collecte fichier est désactivée.
+
+| Panneau / campagne | Surface | `run_id` (8 premiers…) | Δ SB-CTX → entrée (ms) | Δ entrée → EXP-DL (ms) | Erreurs (`ux_error`) | Questionnaire (effort 1–7, confiance 1–7) |
+| --- | --- | --- | --- | --- | --- | --- |
+| *ex. sprint N* | Streamlit | `ux_a1b2…` | … | … | … | … |
+| *ex. sprint N* | Webapp préprod | `ux_c3d4…` | … | … | … | … |
+
+**Limites de lecture** : panel souvent composé de power users ; ne pas extrapoler à l’ensemble des curateurs. Le gap `EXP-SCOPE` webapp impose une comparaison « temps jusqu’au premier export » plutôt qu’au récap Streamlit.
+
 ## Cible documentée (nouveau frontal)
 
-- **Parité de jalons** : la webapp **émet** les mêmes `milestone_code` côté serveur (`src/webapp/ux_telemetry.py` + `src/webapp/app.py`) lorsque le client envoie un `run_id` anonyme ; voir section *Webapp* ci-dessous.
-- **Temps** : mesurer côté client la durée entre réponse `POST`/`PATCH` entrées (persistance réussie) et fin de préparation du fichier export (équivalent `EXP-DL`), ou horodatages serveur si instrumentés de façon comparable.
-- **Contrôle** : côté webapp, l’équivalent minimal v1 de `EXP-SCOPE` est émis **au moment où le périmètre d’export est résolu** sur le serveur (juste avant la sérialisation CSV/JSONL), **sans** récap qualité détaillé Streamlit — aligné sur l’**écart documenté** matrice (récap pré-export slice).
+- **Parité de jalons** : la webapp émet les mêmes `milestone_code` **hors** `EXP-SCOPE` (non porté par le slice HTTP — récap qualité pré-export : écart documenté matrice issue-015). Implémentation : `src/webapp/ux_telemetry.py` + routes `src/webapp/app.py`.
+- **Temps** : mesurer côté client la durée entre réponse `POST`/`PATCH` entrées (persistance réussie) et fin de préparation du fichier export (équivalent `EXP-DL`), ou horodatages serveur (`monotonic_ns` dans les JSONL).
+- **Contrôle** : côté webapp v1, pas d’équivalent au récap qualité Streamlit avant export ; le questionnaire et la grille d’erreurs restent la couche « contrôle perception » pour ce gap.
 
 ## Webapp (FastAPI)
 
-- **En-tête obligatoire pour toute écriture fichier** : `X-Dataset-Style-Ux-Run-Id: ux_<32 hex minuscules>` (même format que le `run_id` Streamlit).
-- **`SB-CTX`** : sur `GET /api/projects`, ajouter **`X-Dataset-Style-Ux-Shell-Init: 1`** **une seule fois** après connexion (premier chargement shell), avec le `run_id` ci-dessus — évite le bruit sur les polls de liste projets.
-- **Jalons automatiques** (si `run_id` valide) : `POST/PATCH …/entries` → `ENT-NEW-WRITE` / `EDI-SAVE` ; `GET …/export.csv` ou `export.jsonl` → enchaînement `EXP-SCOPE` puis `EXP-DL` pour **cette** requête (deux lignes JSONL ; comparer à Streamlit où les deux téléchargements peuvent partager un même rendu d’onglet).
-- **Erreur export 413** (`EXPORT_PAYLOAD_TOO_LARGE`) : événement `ux_error` avec `milestone_context: EXP-DL` si `run_id` présent.
+Prérequis serveur : **`DATASET_STYLE_UX_TELEMETRY_DIR`** défini (sinon aucune écriture JSONL ; les en-têtes de réponse ci-dessous ne sont pas ajoutés).
+
+- **`X-Dataset-Style-Ux-Run-Id`** (requête) : identifiant anonyme stable pour tout le parcours mesuré, même format que Streamlit : `ux_` + **8 à 120** caractères hexadécimaux (ex. `ux_` + UUID sans tirets). Le client doit réutiliser la **même** valeur du début du scénario jusqu’aux exports.
+- **`X-Dataset-Style-Ux-Scenario-Id`** (requête, optionnel) : identifiant de scénario versionné ; défaut = `critical_v1_issue_020` (même défaut que `src/ux_scenario_telemetry.py`).
+- **Réponses** : lorsque le répertoire télémétrie est actif **et** que la requête porte un `run_id` valide, le serveur renvoie **`X-Dataset-Style-Ux-Run-Id`** (écho) et **`X-Dataset-Style-Ux-Telemetry: 1`** pour corrélation outillage / captures réseau.
+- **`SB-CTX`** : `GET /api/projects` après résolution du projet actif (`active_hint` + liste projet) ; **dédupliqué** par couple `(run_id, empreinte projet)` pour limiter le bruit sur les rafraîchissements.
+- **`ENT-NEW-WRITE` / `EDI-SAVE`** : après succès de `POST` / `PATCH …/entries` (même `run_id` dans les en-têtes).
+- **`EXP-DL`** : une ligne par réponse `GET …/export.csv` ou `GET …/export.jsonl` réussie ; le champ `extra.delivery` vaut `csv` ou `jsonl`. Deux téléchargements (CSV puis JSONL) = **deux** jalons `EXP-DL` (à comparer au parcours Streamlit où un seul rendu d’onglet peut regrouper les deux fichiers).
+- **Erreurs** : `ux_error` avec codes `api_errors` si `run_id` présent — export **413** (`EXPORT_PAYLOAD_TOO_LARGE`) ; **404** opaque sur `PATCH …/entries` (entrée absente / refus).
 
 Implémentation webapp : `src/webapp/ux_telemetry.py`, routes dans `src/webapp/app.py`.
 

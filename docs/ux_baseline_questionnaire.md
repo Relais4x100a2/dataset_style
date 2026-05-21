@@ -8,7 +8,7 @@ Compléter les métriques « temps + erreurs » par 2 à 3 items **après** un p
 
 ## Modèle de formulaire (ex. Google Forms / LimeSurvey interne)
 
-1. **Identifiant de session technique** (optionnel) : copier le `run_id` affiché dans les notes de recette si la télémétrie fichier est activée.
+1. **Identifiant de session technique** (optionnel) : copier le `run_id` utilisé dans les en-têtes des requêtes webapp (`X-Dataset-Style-Ux-Run-Id`) ; si la télémétrie fichier est activée, les réponses peuvent réémettre ce même en-tête pour faciliter la copie depuis les outils réseau.
 2. **Effort perçu** (échelle 1–7) : « Cette chaîne projet → entrée → export m’a demandé un effort mental… » (très faible → très élevé).
 3. **Confiance dans l’export** (échelle 1–7) : « Je suis confiant·e que le fichier exporté reflète le périmètre choisi… »
 4. **Champ libre** (optionnel) : friction principale rencontrée (sans données personnelles de fiches).

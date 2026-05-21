@@ -32,14 +32,18 @@ Interface locale : `http://localhost:8080` — healthcheck ops : `http://localho
 
 Les **assets statiques** du slice (tokens CSS, etc.) sont servis sous `http://localhost:8080/static/…` (ex. `design_tokens.css`). Voir `docs/design_tokens_webapp.md`.
 
-## Mesure UX baseline (issue-020)
+## Mesure UX baseline (issue-020 / GitHub #182)
 
-Pour des séries comparables à Streamlit, le navigateur peut envoyer un identifiant anonyme
+Pour des séries comparables à Streamlit, le navigateur envoie un identifiant anonyme
 stable sur les requêtes du parcours critique : en-tête **`X-Dataset-Style-Ux-Run-Id`**
-(valeur `ux_` + 32 caractères hex minuscules). Pour le jalon **`SB-CTX`** uniquement,
-ajouter une fois **`X-Dataset-Style-Ux-Shell-Init: 1`** sur `GET /api/projects` après
-connexion. Définir **`DATASET_STYLE_UX_TELEMETRY_DIR`** sur le serveur webapp pour
-écrire les JSONL (voir `docs/ux_baseline_issue_020.md`).
+(valeur `ux_` + **8 à 120** caractères hex, ex. UUID sans tirets). Optionnel :
+**`X-Dataset-Style-Ux-Scenario-Id`** (sinon défaut `critical_v1_issue_020`). Définir
+**`DATASET_STYLE_UX_TELEMETRY_DIR`** sur le serveur webapp pour écrire les JSONL.
+Lorsque la collecte est active et le `run_id` valide, les réponses portent
+**`X-Dataset-Style-Ux-Run-Id`** (écho) et **`X-Dataset-Style-Ux-Telemetry: 1`**.
+Le jalon **`SB-CTX`** est émis sur `GET /api/projects` (projet actif résolu) avec
+déduplication serveur ; pas d’en-tête `Shell-Init` requis. Détail des jalons
+(`EXP-DL` par requête d’export, pas de `EXP-SCOPE`) : `docs/ux_baseline_issue_020.md`.
 
 ## Cohérence auth (ADR 0006)
 
@@ -66,7 +70,7 @@ Variable optionnelle **`WEBAPP_EXPORT_MAX_ROWS`** : nombre maximum de lignes dan
 
 ## Tests et CI
 
-Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, `tests/test_webapp_entry_mutations_issue012.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, `tests/test_webapp_entry_mutations_issue012.py`, `tests/test_webapp_ux_telemetry.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
 
 ## Shell curateur — projets et navigation (issue-010 / GitHub #132)
 
