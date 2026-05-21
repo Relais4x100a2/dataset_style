@@ -30,6 +30,7 @@ from src.api_errors import (
     resolve_exception_for_api,
 )
 from src.auth import persist_user_from_signin_ok, verify_invitation_only_contract
+from src.config import initialize_runtime_config
 from src.database import (
     STATUT_VALIDE,
     SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX,
@@ -339,6 +340,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        initialize_runtime_config()
         if engine is not None:
             app.state.engine = engine
         else:

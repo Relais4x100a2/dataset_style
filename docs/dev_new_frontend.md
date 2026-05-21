@@ -52,9 +52,9 @@ déduplication serveur ; pas d’en-tête `Shell-Init` requis. Détail des jalon
 
 Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` (statut **accepté** après jalon UX liste + fiche + IA / LT — GitHub **#177**) et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique). Pour rejouer le jalon : ouvrir `http://localhost:8080/` (après `make dev-web`), sélectionner un projet, parcourir **Gestion & édition**, **Nouvelle entrée** (IA) et les contrôles LT associés.
 
-## Bannière d’information (optionnel)
+## Bannière d'information (optionnel)
 
-Variable **`APP_MIGRATION_INFO_BANNER`** : texte brut affiché en haut de la page `GET /` du service `webapp` (ainsi que dans Streamlit lorsque les deux coexistent en recette). Voir `docs/migration_communication_plan.md`. Laisser vide pour masquer.
+Variable **`APP_MIGRATION_INFO_BANNER`** : **texte brut** ou **objet JSON** (`message` obligatoire ; liens `help_url` / `support_url` en `http`/`https`/`mailto` uniquement), affiché en haut de `GET /` du `webapp` et dans Streamlit en recette. Le `webapp` charge `APP_CONFIG_JSON` via **`initialize_runtime_config()`** au lifespan. Voir `docs/migration_communication_plan.md`. Laisser vide pour masquer.
 
 ## Export volumineux (issue-015)
 

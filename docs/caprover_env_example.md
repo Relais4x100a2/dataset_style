@@ -16,13 +16,14 @@ Exemple:
   "LLM_TIMEOUT_SECONDS": "300",
   "LANGUAGETOOL_BASE_URL": "http://srv-captain--languagetool:8010",
   "DISABLE_SELF_SERVICE_PROJECT_CREATION": "",
-  "DATASET_STYLE_UX_TELEMETRY_DIR": "/tmp/dataset_style_ux_telemetry"
+  "DATASET_STYLE_UX_TELEMETRY_DIR": "/tmp/dataset_style_ux_telemetry",
+  "APP_MIGRATION_INFO_BANNER": "{\"message\":\"L'URL du studio évolue — les exports CSV/JSONL restent inchangés.\",\"help_url\":\"https://docs.example.com/dataset-style\",\"help_label\":\"Documentation\",\"support_url\":\"mailto:support@example.com\",\"support_label\":\"Support\",\"calendar_note\":\"Fenêtre annoncée : voir le canal interne.\"}"
 }
 ```
 
 `DISABLE_SELF_SERVICE_PROJECT_CREATION` : laisser vide pour autoriser la création du premier projet depuis l’UI ; mettre `"true"` (ou `"1"`) pour un parcours **invitation uniquement** (message sans formulaire pour les utilisateurs sans projet).
 
-`APP_MIGRATION_INFO_BANNER` *(optionnel, issue-021 / #143)* : texte court affiché aux curateurs dans Streamlit et sur la page d’accueil du service `webapp` pendant une phase de communication (migration, maintenance annoncée). Laisser **absent** ou **vide** pour désactiver après cutover. Texte brut uniquement (pas de HTML).
+`APP_MIGRATION_INFO_BANNER` *(optionnel, issue-021 / #143, #184)* : désactivé si absent ou vide. **Texte brut** (historique) ou **objet JSON** avec au minimum `"message"` ; liens `help_url` / `support_url` limités à `http`, `https`, `mailto` (voir `docs/migration_communication_plan.md`).
 
 Ensuite, déploiement en une commande:
 
