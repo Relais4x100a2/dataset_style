@@ -28,6 +28,7 @@ from src.database import (
     upsert_user_from_su,
 )
 from src.flash_messages import render_post_rerun_flash_once
+from src.migration_communication import render_streamlit_migration_banner_if_configured
 from src.supertokens_recipe_client import recipe_post as _post
 from src.supertokens_recipe_client import signin_email_password as _signin_http
 from src.supertokens_recipe_client import signup_email_password as _signup_http
@@ -473,6 +474,10 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
     current = get_current_user()
     if current:
         return current
+
+    # Bannière migration : une seule fois par rerun — ici uniquement session déconnectée
+    # (les curateurs connectés la voient sous le titre dans ``main.py``).
+    render_streamlit_migration_banner_if_configured()
 
     try:
         ensure_invitation_only_policy()

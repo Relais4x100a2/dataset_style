@@ -19,6 +19,13 @@ Les retours utilisateur utilisent les classes BEM suivantes :
 
 Le conteneur empilable est `ds-banner-stack` (voir `src/webapp/index_template.py`).
 
+### Bannière migration (`ds-migration-banner`, issue-021 / #184)
+
+Sous-classes pour le texte secondaire et la rangée de liens (sans styles inline) :
+
+- `ds-migration-banner__calendar` — note calendrier sous le message principal.
+- `ds-migration-banner__links` — paragraphe des liens d’aide / support.
+
 ## Mapping erreurs API → variant
 
 Le script injecte `const API_ERROR_BANNER_VARIANT = { … }` depuis `src/webapp/ui_semantics.py` : chaque `error.code` stable (contrat `docs/api_error_contract.md`) est associé à un des quatre variants ci-dessus. Le frontal **ne** déduit **pas** la sémantique du seul statut HTTP.

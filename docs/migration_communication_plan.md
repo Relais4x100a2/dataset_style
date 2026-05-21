@@ -64,12 +64,36 @@ Rollback applicatif : `docs/streamlit_to_new_frontend_cutover.md` § critères d
 
 ---
 
-## 4. Bannière d’information optionnelle (Streamlit + webapp)
+## 4. Bannière d'information optionnelle (Streamlit + webapp)
 
-Variable d’environnement **`APP_MIGRATION_INFO_BANNER`** (également injectable via **`APP_CONFIG_JSON`** en CapRover) :
+Variable unique **`APP_MIGRATION_INFO_BANNER`** (injectable via **`APP_CONFIG_JSON`**). Le service **`webapp`** appelle **`initialize_runtime_config()`** au début du lifespan FastAPI pour fusionner la même config que Streamlit avant de lire cette variable.
 
-- **Contenu** : texte **brut** (pas de HTML) ; retours à la ligne autorisés ; affiché tel quel dans Streamlit (`st.info`) et **échappé** dans la page HTML du service `webapp`.
-- **Désactivation** : laisser la variable **absente** ou **vide** après le cutover.
+### Texte brut (historique #143)
+
+- Chaîne seule : pas de HTML ; contenu **échappé** dans le HTML du `webapp` ; côté Streamlit, même gabarit sémantique (`ds-banner--info`, classe stable **`ds-migration-banner`**, `role="region"`).
+
+### JSON structuré (#184)
+
+Objet JSON UTF-8 ; champs :
+
+| Champ | Obligatoire | Description |
+|--------|-------------|-------------|
+| `message` | oui | Texte court (FR recommandé), sans HTML. |
+| `calendar_note` | non | Fenêtre ou calendrier communiqué (texte brut). |
+| `help_url` | non | `http`, `https` ou `mailto` uniquement ; autres schémas ignorés. |
+| `help_label` | non | Libellé du lien (défaut : « Où trouver l'aide »). |
+| `support_url` | non | Idem schémas autorisés. |
+| `support_label` | non | Libellé (défaut : « Contacter le support »). |
+
+Exemple :
+
+```json
+{"message":"L'URL du studio change — vos exports restent identiques.","help_url":"https://intranet.example/docs/dataset-style","help_label":"Documentation interne","support_url":"mailto:support@example.org","support_label":"Support","calendar_note":"Bascule prévue : mardi 10 juin, 18h–19h (Paris)."}
+```
+
+**Désactivation** : variable absente ou vide après le cutover.
+
+Si la valeur commence par `{` (intention mode JSON) mais que le contenu n’est pas un objet JSON valide avec un ``message`` non vide, **aucune bannière** n’est affichée aux utilisateurs (pas de retombée en texte brut sur la chaîne JSON) ; les journaux côté serveur signalent l’erreur de configuration pour l’exploitation.
 
 Voir aussi `docs/caprover_env_example.md` et `.env.example`.
 

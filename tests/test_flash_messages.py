@@ -201,11 +201,50 @@ def test_render_auth_gate_invokes_post_rerun_flash_once() -> None:
     )
     state: dict[str, Any] = {}
     with patch.object(auth, "render_post_rerun_flash_once") as flash_mock:
-        with patch.object(auth.st, "session_state", state):
-            with patch.object(auth, "get_current_user", return_value=user):
-                out = auth.render_auth_gate(engine)
+        with patch.object(auth, "render_streamlit_migration_banner_if_configured") as mig_mock:
+            with patch.object(auth.st, "session_state", state):
+                with patch.object(auth, "get_current_user", return_value=user):
+                    out = auth.render_auth_gate(engine)
     flash_mock.assert_called_once_with(state)
+    mig_mock.assert_not_called()
     assert out == user
+
+
+def test_render_auth_gate_signed_out_calls_migration_banner_once() -> None:
+    """Bannière migration : affichée une fois sur l'écran de connexion (pas en double curateur)."""
+    from unittest.mock import MagicMock, patch
+
+    from src import auth
+
+    engine = MagicMock()
+
+    def _ctx() -> MagicMock:
+        m = MagicMock()
+        m.__enter__.return_value = MagicMock()
+        m.__exit__.return_value = None
+        return m
+
+    state: dict[str, Any] = {}
+    with patch.object(auth, "render_post_rerun_flash_once"):
+        with patch.object(auth, "get_current_user", return_value=None):
+            with patch.object(auth, "render_streamlit_migration_banner_if_configured") as mig_mock:
+                with patch.object(auth, "ensure_invitation_only_policy"):
+                    with patch.object(auth.st, "session_state", state):
+                        with patch.object(auth.st, "title"):
+                            with patch.object(auth.st, "caption"):
+                                with patch.object(auth.st, "form", return_value=_ctx()):
+                                    with patch.object(auth.st, "text_input", return_value=""):
+                                        with patch.object(
+                                            auth.st, "form_submit_button", return_value=False
+                                        ):
+                                            with patch.object(
+                                                auth.st, "expander", return_value=_ctx()
+                                            ):
+                                                with patch.object(
+                                                    auth.st, "button", return_value=False
+                                                ):
+                                                    auth.render_auth_gate(engine)
+    mig_mock.assert_called_once()
 
 
 def test_persist_settings_schedules_flash_not_ephemeral_success() -> None:
