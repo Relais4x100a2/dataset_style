@@ -47,6 +47,34 @@ def test_webapp_sb_ctx_emitted_without_shell_init_header(
     assert payload["run_id"] == rid
 
 
+def test_webapp_custom_scenario_id_in_sb_ctx_jsonl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(uxt.UX_TELEMETRY_DIR_ENV, str(tmp_path))
+    ux_telemetry.reset_webapp_ux_dedupe_for_tests()
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    fake_projects = [
+        ProjectRecord(project_id="p1", name="Alpha", role="admin"),
+    ]
+    rid = "ux_" + "9" * 32
+    scenario = "qa_baseline_panel_a"
+    with patch("src.webapp.app.list_projects_for_user", return_value=fake_projects):
+        with TestClient(app) as client:
+            r = client.get(
+                "/api/projects?active_hint=p1",
+                headers={
+                    "Authorization": "Bearer t",
+                    ux_telemetry.UX_RUN_ID_HEADER: rid,
+                    ux_telemetry.UX_SCENARIO_ID_HEADER: scenario,
+                },
+            )
+    assert r.status_code == 200
+    scenario_file = next(tmp_path.glob("ux_scenario_*.jsonl"))
+    payload = json.loads(scenario_file.read_text(encoding="utf-8").strip())
+    assert payload["scenario_id"] == scenario
+
+
 def test_webapp_sb_ctx_deduped_on_repeated_get(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -112,6 +140,47 @@ def test_webapp_export_emits_only_exp_dl(tmp_path: Path, monkeypatch: pytest.Mon
     m0 = json.loads(lines[0])
     assert m0["milestone_code"] == "EXP-DL"
     assert m0["extra"]["delivery"] == "csv"
+
+
+def test_webapp_repeated_identical_csv_export_emits_two_exp_dl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chaque GET réussi doit produire un jalon (relance export identique)."""
+    monkeypatch.setenv(uxt.UX_TELEMETRY_DIR_ENV, str(tmp_path))
+    ux_telemetry.reset_webapp_ux_dedupe_for_tests()
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    rid = "ux_" + "7" * 32
+    df = pd.DataFrame(
+        [
+            {
+                "id": "e1",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "a",
+                "output": "b",
+                "statut": STATUT_VALIDE,
+                "notes": "",
+            }
+        ]
+    )
+    auth = {"Authorization": "Bearer t", ux_telemetry.UX_RUN_ID_HEADER: rid}
+    with patch("src.webapp.app.load_project_entries", return_value=df):
+        with TestClient(app) as client:
+            for _ in range(2):
+                r = client.get("/api/projects/p1/export.csv", headers=auth)
+                assert r.status_code == 200
+    milestones: list[str] = []
+    for path in tmp_path.glob("ux_scenario_*.jsonl"):
+        for line in path.read_text(encoding="utf-8").strip().splitlines():
+            milestones.append(json.loads(line)["milestone_code"])
+    assert milestones.count("EXP-DL") == 2
 
 
 def test_webapp_export_csv_then_jsonl_two_exp_dl(
@@ -204,6 +273,49 @@ def test_webapp_patch_edi_save_milestone(tmp_path: Path, monkeypatch: pytest.Mon
     path = next(tmp_path.glob("ux_scenario_*.jsonl"))
     payload = json.loads(path.read_text(encoding="utf-8").strip())
     assert payload["milestone_code"] == "EDI-SAVE"
+
+
+def test_webapp_post_ent_new_write_milestone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(uxt.UX_TELEMETRY_DIR_ENV, str(tmp_path))
+    ux_telemetry.reset_webapp_ux_dedupe_for_tests()
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    rid = "ux_" + "f" * 32
+    df_after = pd.DataFrame(
+        [
+            {
+                "id": "e_new",
+                "project_id": "p1",
+                "date": "",
+                "type": "",
+                "structure": "",
+                "ton": "",
+                "format": "",
+                "public": "",
+                "input": "nin",
+                "output": "nout",
+                "statut": STATUT_VALIDE,
+                "notes": "",
+            }
+        ]
+    )
+    with (
+        patch("src.webapp.entry_mutations.append_minimal_entry", return_value="e_new"),
+        patch("src.webapp.app.load_project_entries", return_value=df_after),
+    ):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/projects/p1/entries",
+                headers={"Authorization": "Bearer t", ux_telemetry.UX_RUN_ID_HEADER: rid},
+                json={"input": "nin", "output": "nout"},
+            )
+    assert r.status_code == 200
+    path = next(tmp_path.glob("ux_scenario_*.jsonl"))
+    payload = json.loads(path.read_text(encoding="utf-8").strip())
+    assert payload["milestone_code"] == "ENT-NEW-WRITE"
 
 
 def test_webapp_patch_unknown_entry_records_ux_error(

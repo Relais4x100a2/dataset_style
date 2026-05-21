@@ -1,4 +1,4 @@
-# Baseline UX — scénario critique (issue-020 / GitHub #142)
+# Baseline UX — scénario critique (issue-020 / GitHub #182)
 
 **Objectif :** figer une baseline **Streamlit** reproductible pour comparer la webapp préprod en fin de migration (issue-001 archive de bascule), sans persistance PostgreSQL des événements UX (v1).
 
@@ -49,7 +49,7 @@ Prérequis serveur : **`DATASET_STYLE_UX_TELEMETRY_DIR`** défini (sinon aucune 
 - **Réponses** : lorsque le répertoire télémétrie est actif **et** que la requête porte un `run_id` valide, le serveur renvoie **`X-Dataset-Style-Ux-Run-Id`** (écho) et **`X-Dataset-Style-Ux-Telemetry: 1`** pour corrélation outillage / captures réseau.
 - **`SB-CTX`** : `GET /api/projects` après résolution du projet actif (`active_hint` + liste projet) ; **dédupliqué** par couple `(run_id, empreinte projet)` pour limiter le bruit sur les rafraîchissements.
 - **`ENT-NEW-WRITE` / `EDI-SAVE`** : après succès de `POST` / `PATCH …/entries` (même `run_id` dans les en-têtes).
-- **`EXP-DL`** : une ligne par réponse `GET …/export.csv` ou `GET …/export.jsonl` réussie ; le champ `extra.delivery` vaut `csv` ou `jsonl`. Deux téléchargements (CSV puis JSONL) = **deux** jalons `EXP-DL` (à comparer au parcours Streamlit où un seul rendu d’onglet peut regrouper les deux fichiers).
+- **`EXP-DL`** : une ligne par réponse `GET …/export.csv` ou `GET …/export.jsonl` **réussie** (chaque requête HTTP compte : un testeur qui relance le même export produit un nouveau jalon). Le champ `extra.delivery` vaut `csv` ou `jsonl`. Deux téléchargements (CSV puis JSONL) = **deux** jalons `EXP-DL` (à comparer au parcours Streamlit où un seul rendu d’onglet peut regrouper les deux fichiers).
 - **Erreurs** : `ux_error` avec codes `api_errors` si `run_id` présent — export **413** (`EXPORT_PAYLOAD_TOO_LARGE`) ; **404** opaque sur `PATCH …/entries` (entrée absente / refus).
 
 Implémentation webapp : `src/webapp/ux_telemetry.py`, routes dans `src/webapp/app.py`.

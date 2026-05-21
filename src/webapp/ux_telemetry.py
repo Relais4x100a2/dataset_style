@@ -6,9 +6,11 @@ l'envoie dans ``X-Dataset-Style-Ux-Run-Id``. L'écriture JSONL n'a lieu que si
 
 ``EXP-SCOPE`` n'est **pas** émis depuis les routes export : le récap qualité
 pré-export Streamlit n'a pas d'équivalent HTTP (écart documenté issue-015).
-Chaque téléchargement CSV ou JSONL émet un jalon ``EXP-DL`` (extra
-``delivery`` = ``csv`` | ``jsonl``) ; comparer les temps inter-jalons au
-parcours Streamlit en tenant compte de cette granularité.
+Chaque réponse HTTP d'export CSV ou JSONL réussie émet un jalon ``EXP-DL``
+(extra ``delivery`` = ``csv`` | ``jsonl``), y compris si le client relance
+le même téléchargement (pas de déduplication serveur sur ``EXP-DL``).
+Comparer les temps inter-jalons au parcours Streamlit en tenant compte de
+cette granularité.
 """
 
 from __future__ import annotations
@@ -205,8 +207,6 @@ def record_webapp_export_milestones(
     if rid is None:
         return
     fp = fingerprint_project(project_id)
-    if not _dedupe_consume(f"EXP-DL:{rid}:{fp}:{scope}:{delivery}"):
-        return
     dl_extra: dict[str, object] = {
         "export_scope": scope,
         "delivery": delivery,

@@ -1,4 +1,4 @@
-"""Télémétrie légère du scénario critique UX (issue-020 / GitHub #142).
+"""Télémétrie légère du scénario critique UX (issue-020 / GitHub #182).
 
 Append-only JSONL lorsque ``DATASET_STYLE_UX_TELEMETRY_DIR`` pointe vers un
 répertoire accessible en écriture. Aucune table PostgreSQL : bundle protocole
