@@ -76,6 +76,18 @@ Lien PR : https://github.com/Relais4x100a2/dataset_style/pull/151 (ferme #129).
 
 ---
 
+## Assistance curateur IA & LanguageTool (issue-006 / GitHub #180)
+
+Slice **webapp** : routes stateless `POST /api/projects/{id}/curator/llm-generate`, `POST /api/projects/{id}/curator/languagetool-check`, `GET …/curator/dimensions` (issue-013). Aucune persistance entrée depuis ces routes ; la coquille HTML (`src/webapp/index_template.py`) expose un panneau **Assistance IA & LanguageTool** (chargement type `hx-indicator`, anti double-clic, insertion / remplacement **explicites** pour LT et IA).
+
+| Décision | Détail |
+| --- | --- |
+| Échecs LLM « métier » | **HTTP 200** + `status: "failed"` + `message` en français (aligné matrice issue-013 / `tests/test_webapp_curator_ai.py`) — pas d’erreur HTTP générique pour un refus ou une réponse vide du fournisseur. |
+| Indisponibilité LanguageTool | **HTTP 503** + enveloppe `CURATOR_LANGUAGETOOL_UNAVAILABLE` (`src/api_errors.py`). |
+| Succès LanguageTool | **HTTP 200** + `status: "ok"` + `corrected` + `matches` ; texte vide → `status: "validation_error"` sans appel réseau. |
+
+---
+
 ## Mon compte curateur (issue-016 / GitHub #138)
 
 Slice **webapp** : `GET /api/account` (JSON whiteliste : `appUserId`, `email`, `displayName`, `counts.ownedProjects`, `counts.activeMemberships`) ; `POST /api/auth/signout` renvoie `redirect` allow-listé (`WEBAPP_SIGNOUT_REDIRECT_ALLOWLIST`, défaut `/`) ; coquille HTML : navigation shell + onglet **Mon compte** (issue-010).

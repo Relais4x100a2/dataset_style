@@ -1,4 +1,4 @@
-"""Parité curateur : génération IA et LanguageTool (issue-013).
+"""Parité curateur : génération IA et LanguageTool (issue-013, issue-006).
 
 Logique serveur partagée par le slice FastAPI ; réutilise ``llm_generate``,
 ``nlp_engine`` et les primitives ``database`` / ``presets`` (pas de clé API
@@ -33,25 +33,9 @@ CURATOR_LLM_EMPTY_OUTPUT_FR = (
     "Saisissez un texte généré (output) avant de lancer la génération du brouillon."
 )
 
-LT_UNAVAILABLE_TITLE_FR = "Correction linguistique indisponible"
-LT_UNAVAILABLE_MESSAGE_FR = (
-    "Impossible de joindre le service LanguageTool (réseau ou délai dépassé). "
-    "Vérifiez la connectivité ou réessayez."
+CURATOR_LT_EMPTY_TEXT_FR = (
+    "Saisissez du texte à contrôler (en général le champ output) avant d'appeler LanguageTool."
 )
-LT_UNAVAILABLE_ACTION_FR = "Réessayez dans quelques instants ou contactez un administrateur."
-
-
-def curator_languagetool_unavailable_envelope() -> dict[str, Any]:
-    """Enveloppe JSON (issue-005) lorsque LanguageTool est injoignable."""
-    return {
-        "error": {
-            "code": "CURATOR_LANGUAGETOOL_UNAVAILABLE",
-            "title": LT_UNAVAILABLE_TITLE_FR,
-            "message": LT_UNAVAILABLE_MESSAGE_FR,
-            "suggested_action": LT_UNAVAILABLE_ACTION_FR,
-            "detail": None,
-        }
-    }
 
 
 def build_curator_dimensions_payload(
@@ -132,7 +116,9 @@ def run_curator_languagetool_check(
 ) -> dict[str, Any]:
     """Contrôle LanguageTool : texte corrigé + suggestions (une requête HTTP LT)."""
     require_role(engine, project_id, user_id, ("admin", "collaborator"))
+    if not text.strip():
+        return {"status": "validation_error", "message": CURATOR_LT_EMPTY_TEXT_FR}
     settings = get_project_settings(engine, project_id)
     base = settings.languagetool_base_url or None
     corrected, matches = languagetool_fr_corrected_with_matches(text, languagetool_base_url=base)
-    return {"corrected": corrected, "matches": matches}
+    return {"status": "ok", "corrected": corrected, "matches": matches}

@@ -47,6 +47,11 @@ INDEX_HTML = """<!DOCTYPE html>
     table.entries-list { border-collapse: collapse; font-size: 0.9rem; margin-top: 0.35rem; }
     table.entries-list th, table.entries-list td { border: 1px solid #ccd; padding: 0.35rem 0.45rem; text-align: left; }
     tr.entries-row-openable:hover { background: #eef4ff; }
+    details.curator-assist { margin-top: 1rem; padding: 0.5rem 0; }
+    details.curator-assist summary { cursor: pointer; font-weight: 600; }
+    .assist-busy { color: #555; font-size: 0.9rem; margin: 0.35rem 0; }
+    details.curator-assist.htmx-request { outline: 2px dashed #7a9fd1; }
+    p.hx-indicator { margin: 0.35rem 0; }
   </style>
 </head>
 <body>
@@ -105,6 +110,31 @@ INDEX_HTML = """<!DOCTYPE html>
       <label>input <textarea id="newInput"></textarea></label>
       <label>output <textarea id="newOutput"></textarea></label>
       <div class="row"><button type="button" id="btnCreate">Créer une fiche</button></div>
+      <details class="curator-assist">
+        <summary>Assistance IA &amp; LanguageTool</summary>
+        <p class="muted">Aucune écriture en base : les résultats restent dans le navigateur jusqu'à la création de la fiche.
+          Appels stateless : <code>/curator/llm-generate</code>, <code>/curator/languagetool-check</code>.</p>
+        <p id="assistBusyNew" class="assist-busy hx-indicator" style="display:none" aria-live="polite">Chargement…</p>
+        <label>Type <select id="assistNewType"><option value="">—</option></select></label>
+        <label>Structure <select id="assistNewStructure"><option value="">—</option></select></label>
+        <label>Ton <select id="assistNewTon"><option value="">—</option></select></label>
+        <label>Format <select id="assistNewFormat"><option value="">—</option></select></label>
+        <label>Public <select id="assistNewPublic"><option value="">—</option></select></label>
+        <div class="row"><button type="button" id="btnAssistLlmDoNew">Générer output depuis le brouillon (IA)</button></div>
+        <div class="row"><button type="button" id="btnAssistLlmOdNew">Générer brouillon depuis l'output (IA)</button></div>
+        <div class="row"><button type="button" id="btnAssistLtNew">Contrôler LanguageTool sur l'output</button></div>
+        <p id="assistMsgNew" role="status" class="muted" aria-live="polite"></p>
+        <div id="assistLlmPreviewNew" class="muted" hidden></div>
+        <div class="row" id="assistLlmActionsNew" hidden>
+          <button type="button" id="btnAssistLlmInsertNew">Insérer le résultat IA</button>
+          <button type="button" id="btnAssistLlmDismissNew">Ignorer</button>
+        </div>
+        <div id="assistLtPreviewNew" class="muted" hidden></div>
+        <div class="row" id="assistLtActionsNew" hidden>
+          <button type="button" id="btnAssistLtReplaceNew">Remplacer tout l'output par la proposition LanguageTool</button>
+          <button type="button" id="btnAssistLtDismissNew">Ignorer la proposition</button>
+        </div>
+      </details>
     </div>
     <div class="panel" data-tab-idx="3">
       <h2>Gestion &amp; édition</h2>
@@ -141,6 +171,31 @@ INDEX_HTML = """<!DOCTYPE html>
       <label>input <textarea id="fldInput"></textarea></label>
       <label>output <textarea id="fldOutput"></textarea></label>
       <div class="row"><button type="button" id="btnSave">Enregistrer</button></div>
+      <details class="curator-assist">
+        <summary>Assistance IA &amp; LanguageTool</summary>
+        <p class="muted">Aucune écriture en base : enregistrez la fiche (<code>PATCH …/entries/…</code>) pour persister les changements.
+          Appels stateless : <code>/curator/llm-generate</code>, <code>/curator/languagetool-check</code>.</p>
+        <p id="assistBusyEdit" class="assist-busy hx-indicator" style="display:none" aria-live="polite">Chargement…</p>
+        <label>Type <select id="assistEditType"><option value="">—</option></select></label>
+        <label>Structure <select id="assistEditStructure"><option value="">—</option></select></label>
+        <label>Ton <select id="assistEditTon"><option value="">—</option></select></label>
+        <label>Format <select id="assistEditFormat"><option value="">—</option></select></label>
+        <label>Public <select id="assistEditPublic"><option value="">—</option></select></label>
+        <div class="row"><button type="button" id="btnAssistLlmDoEdit">Générer output depuis le brouillon (IA)</button></div>
+        <div class="row"><button type="button" id="btnAssistLlmOdEdit">Générer brouillon depuis l'output (IA)</button></div>
+        <div class="row"><button type="button" id="btnAssistLtEdit">Contrôler LanguageTool sur l'output</button></div>
+        <p id="assistMsgEdit" role="status" class="muted" aria-live="polite"></p>
+        <div id="assistLlmPreviewEdit" class="muted" hidden></div>
+        <div class="row" id="assistLlmActionsEdit" hidden>
+          <button type="button" id="btnAssistLlmInsertEdit">Insérer le résultat IA</button>
+          <button type="button" id="btnAssistLlmDismissEdit">Ignorer</button>
+        </div>
+        <div id="assistLtPreviewEdit" class="muted" hidden></div>
+        <div class="row" id="assistLtActionsEdit" hidden>
+          <button type="button" id="btnAssistLtReplaceEdit">Remplacer tout l'output par la proposition LanguageTool</button>
+          <button type="button" id="btnAssistLtDismissEdit">Ignorer la proposition</button>
+        </div>
+      </details>
     </div>
     <div class="panel" data-tab-idx="4">
       <h2>Tableau de bord</h2>
@@ -200,6 +255,7 @@ INDEX_HTML = """<!DOCTYPE html>
     const LS = "slice_vertical_access_token";
     const SS = "webapp_active_project_id";
     const SS_EDITION_FILTER_PREFIX = "webapp_edition_filters:";
+    let curatorDimsCache = null;
     const authMsg = document.getElementById("authMsg");
     const workspace = document.getElementById("workspace");
     const mainNav = document.getElementById("mainNav");
@@ -659,6 +715,326 @@ INDEX_HTML = """<!DOCTYPE html>
       if (inc) inc.onchange = onFilterChange;
     }
 
+    function assistSetBusy(prefix, busy) {
+      const busyEl = document.getElementById("assistBusy" + prefix);
+      const det = busyEl ? busyEl.closest("details.curator-assist") : null;
+      if (busyEl) busyEl.style.display = busy ? "block" : "none";
+      if (det) det.classList.toggle("htmx-request", !!busy);
+      [
+        "btnAssistLlmDo" + prefix,
+        "btnAssistLlmOd" + prefix,
+        "btnAssistLlmInsert" + prefix,
+        "btnAssistLlmDismiss" + prefix,
+        "btnAssistLt" + prefix,
+        "btnAssistLtReplace" + prefix,
+        "btnAssistLtDismiss" + prefix,
+      ].forEach((bid) => {
+        const b = document.getElementById(bid);
+        if (b) b.disabled = !!busy;
+      });
+    }
+
+    function assistFillSelect(selectId, values) {
+      const el = document.getElementById(selectId);
+      if (!el) return;
+      el.innerHTML = "<option value=\"\">—</option>";
+      for (const v of values || []) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        el.appendChild(o);
+      }
+    }
+
+    async function assistLoadDimensions(prefix) {
+      const pid = document.getElementById("projectSel").value;
+      if (!pid) {
+        throw { error: { title: "Projet", message: "Sélectionnez un projet actif.", code: "CLIENT" } };
+      }
+      if (!curatorDimsCache) {
+        curatorDimsCache = await api(
+          "/api/projects/" + encodeURIComponent(pid) + "/curator/dimensions"
+        );
+      }
+      const dims = curatorDimsCache.dimensions || {};
+      const p = prefix;
+      assistFillSelect("assist" + p + "Type", dims.types);
+      assistFillSelect("assist" + p + "Structure", dims.structures);
+      assistFillSelect("assist" + p + "Ton", dims.tons);
+      assistFillSelect("assist" + p + "Format", dims.formats);
+      assistFillSelect("assist" + p + "Public", dims.publics);
+    }
+
+    function assistDimPayload(prefix) {
+      const g = (id) => {
+        const el = document.getElementById(id);
+        return el && el.value ? el.value : "";
+      };
+      const p = prefix;
+      return {
+        type: g("assist" + p + "Type"),
+        structure: g("assist" + p + "Structure"),
+        ton: g("assist" + p + "Ton"),
+        format: g("assist" + p + "Format"),
+        public: g("assist" + p + "Public"),
+      };
+    }
+
+    function assistClearLlmUi(prefix) {
+      const preview = document.getElementById("assistLlmPreview" + prefix);
+      const actions = document.getElementById("assistLlmActions" + prefix);
+      if (preview) {
+        preview.hidden = true;
+        preview.innerHTML = "";
+      }
+      if (actions) actions.hidden = true;
+      window["__llmText" + prefix] = null;
+      window["__llmMode" + prefix] = null;
+    }
+
+    function assistClearLtUi(prefix) {
+      const preview = document.getElementById("assistLtPreview" + prefix);
+      const actions = document.getElementById("assistLtActions" + prefix);
+      if (preview) {
+        preview.hidden = true;
+        preview.innerHTML = "";
+      }
+      if (actions) actions.hidden = true;
+      window["__ltCorrected" + prefix] = null;
+    }
+
+    function assistClearAssistMsg(prefix) {
+      const msg = document.getElementById("assistMsg" + prefix);
+      if (msg) {
+        msg.textContent = "";
+        msg.className = "muted";
+      }
+    }
+
+    function wireCuratorAssistance() {
+      function bindLlm(prefix, inputId, outputId) {
+        const doBtn = document.getElementById("btnAssistLlmDo" + prefix);
+        const odBtn = document.getElementById("btnAssistLlmOd" + prefix);
+        const run = async (mode) => {
+          const msg = document.getElementById("assistMsg" + prefix);
+          assistClearLlmUi(prefix);
+          assistClearLtUi(prefix);
+          assistClearAssistMsg(prefix);
+          assistSetBusy(prefix, true);
+          try {
+            await assistLoadDimensions(prefix);
+            const pid = document.getElementById("projectSel").value;
+            const dim = assistDimPayload(prefix);
+            const inp = document.getElementById(inputId);
+            const out = document.getElementById(outputId);
+            const body = {
+              mode: mode,
+              input: inp ? inp.value : "",
+              output: out ? out.value : "",
+              type: dim.type,
+              structure: dim.structure,
+              ton: dim.ton,
+              format: dim.format,
+              public: dim.public,
+            };
+            const res = await api(
+              "/api/projects/" + encodeURIComponent(pid) + "/curator/llm-generate",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              }
+            );
+            if (!msg) return;
+            if (res.status === "validation_error") {
+              msg.textContent = res.message || "Saisie invalide.";
+              msg.className = "err";
+              return;
+            }
+            if (res.status === "failed") {
+              msg.textContent = res.message || "La génération a échoué.";
+              msg.className = "err";
+              return;
+            }
+            if (res.status === "ok" && res.text != null) {
+              window["__llmText" + prefix] = res.text;
+              window["__llmMode" + prefix] = mode;
+              if (msg) {
+                msg.textContent =
+                  mode === "draft_to_output"
+                    ? "Génération prête : examinez la proposition puis insérez-la dans output si elle convient."
+                    : "Génération prête : examinez la proposition puis insérez-la dans le brouillon (input) si elle convient.";
+                msg.className = "ok";
+              }
+              const lp = document.getElementById("assistLlmPreview" + prefix);
+              const la = document.getElementById("assistLlmActions" + prefix);
+              const insBtn = document.getElementById("btnAssistLlmInsert" + prefix);
+              if (lp) {
+                lp.hidden = false;
+                lp.innerHTML =
+                  "<strong>Proposition IA</strong><pre style='white-space:pre-wrap'>"
+                  + escapeHtml(res.text) + "</pre>";
+              }
+              if (insBtn) {
+                insBtn.textContent =
+                  mode === "draft_to_output"
+                    ? "Insérer dans output"
+                    : "Insérer dans le brouillon (input)";
+              }
+              if (la) la.hidden = false;
+              return;
+            }
+            msg.textContent = "Réponse inattendue du service.";
+            msg.className = "err";
+          } catch (e) {
+            if (msg) {
+              msg.className = "err";
+              if (e && e.error) {
+                msg.textContent =
+                  (e.error.title || "") + "\\n" + (e.error.message || "")
+                  + (e.error.suggested_action ? "\\n" + e.error.suggested_action : "");
+              } else {
+                msg.textContent = "Erreur réseau ou serveur.";
+              }
+            }
+          } finally {
+            assistSetBusy(prefix, false);
+          }
+        };
+        if (doBtn) doBtn.onclick = () => run("draft_to_output");
+        if (odBtn) odBtn.onclick = () => run("output_to_draft");
+        const insLlm = document.getElementById("btnAssistLlmInsert" + prefix);
+        const disLlm = document.getElementById("btnAssistLlmDismiss" + prefix);
+        if (insLlm) {
+          insLlm.onclick = () => {
+            const text = window["__llmText" + prefix];
+            const mode = window["__llmMode" + prefix];
+            const targetId = mode === "draft_to_output" ? outputId : inputId;
+            const tel = document.getElementById(targetId);
+            if (tel && text != null) {
+              tel.value = text;
+              tel.focus();
+            }
+            assistClearLlmUi(prefix);
+            const m = document.getElementById("assistMsg" + prefix);
+            if (m) {
+              m.textContent = "Texte IA inséré dans le champ (non enregistré en base).";
+              m.className = "ok";
+            }
+          };
+        }
+        if (disLlm) {
+          disLlm.onclick = () => {
+            assistClearLlmUi(prefix);
+            const m = document.getElementById("assistMsg" + prefix);
+            if (m) {
+              m.textContent = "Proposition IA ignorée.";
+              m.className = "muted";
+            }
+          };
+        }
+      }
+      function bindLt(prefix, outputId) {
+        const ltBtn = document.getElementById("btnAssistLt" + prefix);
+        const repBtn = document.getElementById("btnAssistLtReplace" + prefix);
+        const disBtn = document.getElementById("btnAssistLtDismiss" + prefix);
+        if (ltBtn) {
+          ltBtn.onclick = async () => {
+            const msg = document.getElementById("assistMsg" + prefix);
+            const preview = document.getElementById("assistLtPreview" + prefix);
+            const actions = document.getElementById("assistLtActions" + prefix);
+            assistSetBusy(prefix, true);
+            assistClearLlmUi(prefix);
+            assistClearLtUi(prefix);
+            assistClearAssistMsg(prefix);
+            try {
+              const pid = document.getElementById("projectSel").value;
+              const outEl = document.getElementById(outputId);
+              const text = outEl ? outEl.value : "";
+              const res = await api(
+                "/api/projects/" + encodeURIComponent(pid) + "/curator/languagetool-check",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text: text }),
+                }
+              );
+              if (res.status === "validation_error") {
+                if (msg) {
+                  msg.textContent = res.message || "Texte vide.";
+                  msg.className = "err";
+                }
+                return;
+              }
+              if (res.status === "ok") {
+                if (msg) {
+                  msg.textContent =
+                    "Contrôle terminé : proposition affichée (aucune écriture en base tant que vous n'enregistrez pas).";
+                  msg.className = "ok";
+                }
+                window["__ltCorrected" + prefix] = res.corrected;
+                if (preview) {
+                  preview.hidden = false;
+                  preview.innerHTML =
+                    "<strong>Texte corrigé proposé</strong><pre style='white-space:pre-wrap'>"
+                    + escapeHtml(res.corrected) + "</pre>";
+                }
+                if (actions) actions.hidden = false;
+                return;
+              }
+              if (msg) {
+                msg.textContent = "Réponse LanguageTool inattendue.";
+                msg.className = "err";
+              }
+            } catch (e) {
+              if (msg) {
+                msg.className = "err";
+                if (e && e.error) {
+                  msg.textContent =
+                    (e.error.title || "") + "\\n" + (e.error.message || "")
+                    + (e.error.suggested_action ? "\\n" + e.error.suggested_action : "");
+                } else {
+                  msg.textContent = "Échec du contrôle LanguageTool.";
+                }
+              }
+            } finally {
+              assistSetBusy(prefix, false);
+            }
+          };
+        }
+        if (repBtn) {
+          repBtn.onclick = () => {
+            const corrected = window["__ltCorrected" + prefix];
+            const outEl = document.getElementById(outputId);
+            if (outEl && corrected != null) {
+              outEl.value = corrected;
+              outEl.focus();
+            }
+            const msg = document.getElementById("assistMsg" + prefix);
+            if (msg) {
+              msg.textContent = "Proposition appliquée au champ output (non enregistrée).";
+              msg.className = "ok";
+            }
+            assistClearLtUi(prefix);
+          };
+        }
+        if (disBtn) {
+          disBtn.onclick = () => {
+            assistClearLtUi(prefix);
+            const msg = document.getElementById("assistMsg" + prefix);
+            if (msg) {
+              msg.textContent = "Proposition ignorée.";
+              msg.className = "muted";
+            }
+          };
+        }
+      }
+      bindLlm("Edit", "fldInput", "fldOutput");
+      bindLlm("New", "newInput", "newOutput");
+      bindLt("Edit", "fldOutput");
+      bindLt("New", "newOutput");
+    }
+
     function wireProjectAndEntries() {
       const ps = document.getElementById("projectSel");
       if (ps) ps.onchange = onProjectChanged;
@@ -678,6 +1054,7 @@ INDEX_HTML = """<!DOCTYPE html>
       if (b7) b7.onclick = () => downloadJsonl();
       wireEditionFilterControls();
       wireSuperAdminAccountsPanel();
+      wireCuratorAssistance();
     }
 
     document.getElementById("btnSignin").onclick = async () => {
@@ -742,6 +1119,7 @@ INDEX_HTML = """<!DOCTYPE html>
     function onProjectChanged() {
       const sel = document.getElementById("projectSel");
       const pid = sel ? sel.value : "";
+      curatorDimsCache = null;
       setActiveProjectHint(pid);
       clearEntryState();
       restoreEditionFiltersFromSession();

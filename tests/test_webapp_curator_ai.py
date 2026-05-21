@@ -153,8 +153,31 @@ def test_curator_languagetool_returns_corrected_and_matches() -> None:
             )
     assert r.status_code == 200
     body = r.json()
+    assert body["status"] == "ok"
     assert body["corrected"] == "très bien"
     assert body["matches"] == fake_matches
+
+
+def test_curator_languagetool_validation_error_when_text_blank() -> None:
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u1"
+    with (
+        patch("src.webapp.curator_ai.require_role", return_value="admin"),
+        patch("src.webapp.curator_ai.get_project_settings", return_value=ProjectSettings()),
+        patch("src.webapp.curator_ai.languagetool_fr_corrected_with_matches") as lt_m,
+    ):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/projects/p1/curator/languagetool-check",
+                headers={"Authorization": "Bearer t", "Content-Type": "application/json"},
+                json={"text": "   "},
+            )
+    assert r.status_code == 200
+    lt_m.assert_not_called()
+    data = r.json()
+    assert data["status"] == "validation_error"
+    assert "message" in data
 
 
 def test_curator_languagetool_maps_timeout_to_envelope_503() -> None:
