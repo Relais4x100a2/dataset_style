@@ -347,6 +347,15 @@ table.sa-saga td {
   margin-bottom: 0.75rem;
 }
 
+.ds-migration-banner__calendar {
+  margin-top: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.ds-migration-banner__links {
+  margin-top: 0.5rem;
+}
+
 /* Retours inline courts (issue-023, onglet Mon compte) */
 .ok {
   color: var(--ds-banner-success-text);

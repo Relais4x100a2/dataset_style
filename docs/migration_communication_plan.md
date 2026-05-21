@@ -93,6 +93,8 @@ Exemple :
 
 **Désactivation** : variable absente ou vide après le cutover.
 
+Si la valeur commence par `{` (intention mode JSON) mais que le contenu n’est pas un objet JSON valide avec un ``message`` non vide, **aucune bannière** n’est affichée aux utilisateurs (pas de retombée en texte brut sur la chaîne JSON) ; les journaux côté serveur signalent l’erreur de configuration pour l’exploitation.
+
 Voir aussi `docs/caprover_env_example.md` et `.env.example`.
 
 ---

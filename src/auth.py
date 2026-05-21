@@ -471,10 +471,13 @@ def render_auth_gate(engine: Engine) -> CurrentUser | None:
     qu'il survive à ``st.rerun()`` après actions destructives ou persistance.
     """
     render_post_rerun_flash_once(st.session_state)
-    render_streamlit_migration_banner_if_configured()
     current = get_current_user()
     if current:
         return current
+
+    # Bannière migration : une seule fois par rerun — ici uniquement session déconnectée
+    # (les curateurs connectés la voient sous le titre dans ``main.py``).
+    render_streamlit_migration_banner_if_configured()
 
     try:
         ensure_invitation_only_policy()

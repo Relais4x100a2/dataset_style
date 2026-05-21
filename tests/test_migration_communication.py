@@ -148,6 +148,44 @@ def test_structured_html_includes_actionable_links(monkeypatch: pytest.MonkeyPat
     assert ">Documentation<" in html
 
 
+def test_migration_info_banner_html_fragment_empty_when_invalid_json_intent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON annoncé (``{``) mais invalide : pas d'affichage de la charge brute (#184 / QA)."""
+    monkeypatch.setenv(MIGRATION_INFO_BANNER_ENV, "{not-json")
+    assert migration_info_banner_html_fragment() == ""
+
+
+def test_migration_info_banner_text_none_when_invalid_json_intent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(MIGRATION_INFO_BANNER_ENV, '{"message":""}')
+    assert migration_info_banner_text() is None
+
+
+def test_structured_html_escapes_link_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        MIGRATION_INFO_BANNER_ENV,
+        json.dumps(
+            {
+                "message": "Annonce",
+                "help_url": "https://docs.example/a",
+                "help_label": "<em>arnaque</em>",
+                "support_url": "mailto:s@example.org",
+                "support_label": '"><script>x</script>',
+            },
+            ensure_ascii=False,
+        ),
+    )
+    cfg = parse_migration_banner_config()
+    assert cfg is not None
+    html = migration_banner_html_section(cfg)
+    assert "<em>" not in html
+    assert "&lt;em&gt;" in html
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
 def test_index_template_contains_placeholder() -> None:
     from src.webapp import index_template
 

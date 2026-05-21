@@ -91,9 +91,13 @@ def parse_migration_banner_config(
         logger.warning("APP_MIGRATION_INFO_BANNER JSON invalide: %s", exc)
         return None
     if not isinstance(data, dict):
+        logger.warning("APP_MIGRATION_INFO_BANNER: le JSON doit être un objet (clé « message »).")
         return None
     message = _clip_text(data.get("message"), max_len=_MAX_MESSAGE_LEN)
     if not message:
+        logger.warning(
+            "APP_MIGRATION_INFO_BANNER: clé « message » absente, vide ou uniquement des espaces."
+        )
         return None
 
     help_raw = _clip_text(data.get("help_url"), max_len=_MAX_URL_LEN)
@@ -123,6 +127,8 @@ def migration_info_banner_text() -> str | None:
     cfg = parse_migration_banner_config()
     if cfg is not None:
         return cfg.message
+    if raw.startswith("{"):
+        return None
     return raw
 
 
@@ -144,7 +150,7 @@ def _structured_banner_html(cfg: MigrationBannerConfig) -> str:
     ]
     if cfg.calendar_note:
         parts.append(
-            f'<p class="ds-banner__message" style="margin-top:0.35rem;font-size:0.95rem;">'
+            f'<p class="ds-banner__message ds-migration-banner__calendar">'
             f"{escape(cfg.calendar_note)}</p>"
         )
     links: list[str] = []
@@ -165,7 +171,7 @@ def _structured_banner_html(cfg: MigrationBannerConfig) -> str:
         )
     if links:
         joined = ' <span aria-hidden="true">·</span> '.join(links)
-        parts.append(f'<p class="ds-banner__message" style="margin-top:0.5rem;">{joined}</p>')
+        parts.append(f'<p class="ds-banner__message ds-migration-banner__links">{joined}</p>')
     parts.append("</section>")
     return "".join(parts)
 
@@ -191,6 +197,8 @@ def migration_info_banner_html_fragment() -> str:
     cfg = parse_migration_banner_config()
     if cfg is not None:
         return _structured_banner_html(cfg)
+    if raw.startswith("{"):
+        return ""
     return _legacy_plain_banner_html(raw)
 
 
@@ -204,5 +212,7 @@ def render_streamlit_migration_banner_if_configured() -> None:
     cfg = parse_migration_banner_config()
     if cfg is not None:
         st.markdown(_structured_banner_html(cfg), unsafe_allow_html=True)
-    else:
-        st.markdown(_legacy_plain_banner_html(raw), unsafe_allow_html=True)
+        return
+    if raw.startswith("{"):
+        return
+    st.markdown(_legacy_plain_banner_html(raw), unsafe_allow_html=True)

@@ -14,9 +14,10 @@ Super-admin actions use ``channel="super_admin"`` and a dedicated session key
 scheduling on one channel clears the other channel’s pending payload.
 
 La bannière de migration (``APP_MIGRATION_INFO_BANNER``) est rendue **après** le
-flash consommé et **avant** le formulaire de connexion dans ``render_auth_gate``,
-puis sous le titre principal côté curateur connecté : elle reste visible tant
-que la variable est définie, indépendamment du flash « une exécution ».
+flash consommé. **Session déconnectée** : affichée dans ``render_auth_gate`` avant
+le formulaire de connexion. **Curateur connecté** : une seule fois sous le titre
+dans ``main.py`` (pas de double rendu avec ``render_auth_gate``). Elle reste
+visible tant que la variable est définie, indépendamment du flash « une exécution ».
 """
 
 from __future__ import annotations
