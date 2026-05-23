@@ -7,6 +7,7 @@ import math
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -25,6 +26,7 @@ from src.api_errors import (
     ExportPayloadTooLargeError,
     MailDeliveryFailedError,
     TenantResourceOpaqueDenial,
+    curator_languagetool_unavailable_envelope,
     error_envelope_for_client,
     log_resolved_api_error,
     resolve_exception_for_api,
@@ -122,6 +124,84 @@ def _edition_filter_params_present(
             edition_score_include_na,
         )
     )
+
+
+@dataclass(frozen=True, slots=True)
+class EditionEntriesFilterParams:
+    """Paramètres query ``edition_*`` communs à GET/PATCH/POST sur ``…/entries`` (issue-179)."""
+
+    edition_statut: str | None
+    edition_score_mode: str | None
+    edition_score_threshold_lt: int | None
+    edition_score_bucket_decile: int | None
+    edition_score_include_na: bool | None
+
+    def serialize_public_entry_rows(self, df: pd.DataFrame) -> list[Any]:
+        """Sérialise les lignes visibles : même filtre que ``GET …/entries`` ou jeu complet."""
+        if not _edition_filter_params_present(
+            self.edition_statut,
+            self.edition_score_mode,
+            self.edition_score_threshold_lt,
+            self.edition_score_bucket_decile,
+            self.edition_score_include_na,
+        ):
+            return _serialize_entries_df(df)
+        statut_filter = (self.edition_statut or "").strip() or None
+        mode = self.edition_score_mode or "all"
+        try:
+            score_spec = build_edition_score_filter_spec(
+                mode,
+                threshold_lt=self.edition_score_threshold_lt
+                if self.edition_score_threshold_lt is not None
+                else 50,
+                bucket_decile=self.edition_score_bucket_decile
+                if self.edition_score_bucket_decile is not None
+                else 0,
+                include_na=self.edition_score_include_na
+                if self.edition_score_include_na is not None
+                else False,
+            )
+        except ValueError as exc:
+            raise EnvelopeHttpError(
+                400,
+                error_envelope_for_client(exc, include_technical_detail=False),
+            ) from exc
+        basis = prepare_for_edition_tab(df)
+        view = filter_edition_entries_dataframe(
+            basis,
+            statut_label=statut_filter,
+            score_spec=score_spec,
+        )
+        return _serialize_entries_df(view)
+
+
+def edition_entries_filter_params_dependency(
+    edition_statut: Annotated[str | None, Query(alias="edition_statut")] = None,
+    edition_score_mode: Annotated[str | None, Query(alias="edition_score_mode")] = None,
+    edition_score_threshold_lt: Annotated[
+        int | None, Query(alias="edition_score_threshold_lt", ge=0, le=100)
+    ] = None,
+    edition_score_bucket_decile: Annotated[
+        int | None, Query(alias="edition_score_bucket_decile", ge=0, le=9)
+    ] = None,
+    edition_score_include_na: Annotated[
+        bool | None, Query(alias="edition_score_include_na")
+    ] = None,
+) -> EditionEntriesFilterParams:
+    """Injecte les filtres édition (query) pour les routes qui renvoient un tableau ``entries``."""
+    return EditionEntriesFilterParams(
+        edition_statut=edition_statut,
+        edition_score_mode=edition_score_mode,
+        edition_score_threshold_lt=edition_score_threshold_lt,
+        edition_score_bucket_decile=edition_score_bucket_decile,
+        edition_score_include_na=edition_score_include_na,
+    )
+
+
+EditionEntriesFilterDep = Annotated[
+    EditionEntriesFilterParams,
+    Depends(edition_entries_filter_params_dependency),
+]
 
 
 class SigninBody(BaseModel):
@@ -546,56 +626,12 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         request: Request,
         project_id: str,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
-        edition_statut: Annotated[str | None, Query(alias="edition_statut")] = None,
-        edition_score_mode: Annotated[str | None, Query(alias="edition_score_mode")] = None,
-        edition_score_threshold_lt: Annotated[
-            int | None, Query(alias="edition_score_threshold_lt", ge=0, le=100)
-        ] = None,
-        edition_score_bucket_decile: Annotated[
-            int | None, Query(alias="edition_score_bucket_decile", ge=0, le=9)
-        ] = None,
-        edition_score_include_na: Annotated[
-            bool | None, Query(alias="edition_score_include_na")
-        ] = None,
+        edition_filters: EditionEntriesFilterDep,
     ) -> dict[str, Any]:
         """Liste les entrées ; paramètres ``edition_*`` optionnels = mêmes filtres que Streamlit."""
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
-        if _edition_filter_params_present(
-            edition_statut,
-            edition_score_mode,
-            edition_score_threshold_lt,
-            edition_score_bucket_decile,
-            edition_score_include_na,
-        ):
-            statut_filter = (edition_statut or "").strip() or None
-            mode = edition_score_mode or "all"
-            try:
-                score_spec = build_edition_score_filter_spec(
-                    mode,
-                    threshold_lt=edition_score_threshold_lt
-                    if edition_score_threshold_lt is not None
-                    else 50,
-                    bucket_decile=edition_score_bucket_decile
-                    if edition_score_bucket_decile is not None
-                    else 0,
-                    include_na=edition_score_include_na
-                    if edition_score_include_na is not None
-                    else False,
-                )
-            except ValueError as exc:
-                raise EnvelopeHttpError(
-                    400,
-                    error_envelope_for_client(exc, include_technical_detail=False),
-                ) from exc
-            basis = prepare_for_edition_tab(df)
-            df = filter_edition_entries_dataframe(
-                basis,
-                statut_label=statut_filter,
-                score_spec=score_spec,
-            )
-        rows = _serialize_entries_df(df)
-        return {"entries": rows}
+        return {"entries": edition_filters.serialize_public_entry_rows(df)}
 
     @app.get("/api/projects/{project_id}/dashboard")
     async def api_project_dashboard(
@@ -627,6 +663,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         entry_id: str,
         body: EntryPatchBody,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        edition_filters: EditionEntriesFilterDep,
     ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         updates = {k: v for k, v in body.model_dump(exclude_none=True).items()}
@@ -647,7 +684,10 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             project_id=project_id,
             milestone_code=MILESTONE_EDI_SAVE,
         )
-        return {"status": "ok", "entries": _serialize_entries_df(df)}
+        return {
+            "status": "ok",
+            "entries": edition_filters.serialize_public_entry_rows(df),
+        }
 
     @app.post("/api/projects/{project_id}/entries")
     async def api_create_entry(
@@ -655,6 +695,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         project_id: str,
         body: NewEntryBody,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        edition_filters: EditionEntriesFilterDep,
     ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         missing = new_entry_missing_required_body_message(body.input, body.output)
@@ -684,7 +725,11 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             project_id=project_id,
             milestone_code=MILESTONE_ENT_NEW_WRITE,
         )
-        return {"id": new_id, "status": "ok", "entries": _serialize_entries_df(df)}
+        return {
+            "id": new_id,
+            "status": "ok",
+            "entries": edition_filters.serialize_public_entry_rows(df),
+        }
 
     @app.get("/api/projects/{project_id}/export.csv")
     async def api_export_csv(
@@ -855,7 +900,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             logger.warning("curator_languagetool_check failed: %s", exc, exc_info=True)
             raise EnvelopeHttpError(
                 503,
-                curator_ai.curator_languagetool_unavailable_envelope(),
+                curator_languagetool_unavailable_envelope(),
             ) from exc
 
     @app.post("/api/super-admin/invite")
