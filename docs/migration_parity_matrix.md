@@ -78,7 +78,7 @@ Parcours minimal livré côté **service `webapp`** (FastAPI, port **8080** par 
 | --- | --- |
 | SB-CTX | OK — jeton vérifié (`/recipe/session/verify`) + résolution `users.su_user_id` |
 | PRJ-VIEW | OK — `GET /api/projects` |
-| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès ; filtres édition optionnels sur `GET .../entries` (`edition_*`) |
+| EDI-SAVE | OK — `PATCH /api/projects/{id}/entries/{entry_id}` (+ `POST` création) ; corps `entries` après succès (filtré comme `GET` si mêmes query `edition_*`) ; filtres édition optionnels sur `GET .../entries` (`edition_*`) |
 | EXP-DL | OK — `GET .../export.csv` et `.../export.jsonl` (plafond `WEBAPP_EXPORT_MAX_ROWS`, JSONL stylométrie issue-015) |
 
 **Issue-010 (coquille curateur / webapp / GitHub #132)** : navigation par onglets alignée sur `main_tab_labels` (`GET /api/me`), ordre workflow = `EXPECTED_WORKFLOW_TAB_ORDER` + `Mon compte` (+ `Super Admin` si super-admin), persistance du projet actif côté client (`sessionStorage` clé `webapp_active_project_id` + paramètre query `active_hint` sur `GET /api/projects`), création et suppression projet via `POST` / `DELETE /api/projects` (primitives `database.create_project`, `delete_project_as_admin` / RBAC `require_admin`). Voir `src/webapp/index_template.py`, `src/webapp/workspace_payload.py`. Tests automatisés : `tests/test_webapp_issue010_shell.py`.
@@ -178,6 +178,27 @@ Chaque cellule = **`OK`**, **`N/A`** ou **`Écart documenté`** + **référence*
 
 ---
 
+## Protocole recette : une surface à la fois (coexistence dev/staging)
+
+**Référence processus / PR** : checklist pré-merge **`docs/merge_ready_checklist.md`** §6 ; clôture suivi GitHub **#178**.
+
+Pendant la double exposition (**Streamlit** port **8501**, **webapp** port **8080** par défaut), la règle de recette est : **un scénario ne change pas d’origine UI** (Streamlit vs webapp) avant la **fin de scénario** — **export réussi** (`EXP-DL`) ou **terminaison explicite** (abandon noté, fin de session de test). Les **IDs de flux** de cette matrice (`SB-CTX`, `PRJ-VIEW`, `ENT-NEW-WRITE`, `EDI-SAVE`, `EXP-SCOPE`, `EXP-DL`, etc.) servent de fil conducteur : une fois le scénario démarré sur une surface, **liste → fiche → export** s’exécute **entièrement** sur cette surface.
+
+**Exemple attendu** : même compte, même projet — parcourir la chaîne curation **sans** alternance mid-scénario ; pour comparer les deux UIs, enchaîner **deux runs distincts** (scénario complet Streamlit, puis scénario complet webapp, ou l’inverse), pas des allers-retours entre onglets / ports entre deux jalons du même parcours.
+
+**Base de données partagée** : PostgreSQL est **unique** entre les deux interfaces. La **non-régression « données »** (contrats API, tests, état relu en base) et la **non-régression « perception UI »** (cache navigateur, reruns Streamlit, fragments HTMX, cookies SuperTokens) ne sont **pas** équivalentes. Ce protocole réduit surtout les **fausses régressions** d’**attribution causale** côté perception. Les tests de **divergence volontaire** entre surfaces restent **hors chemin critique** de recette standard, sauf **story** ou ticket dédié qui en fixe le périmètre.
+
+### Alternances volontaires (documentées avant exécution)
+
+Toute exception au mono-surface **mid-scénario** doit être **nommée**, **justifiée** (objectif) et accompagnée de **données figées** (compte, projet, révision des entrées ou jeu de test) dans la recette, le ticket ou la PR — afin d’éviter les conclusions hâtives sur le backend.
+
+| Cas | Objectif | Données figées (minimum) |
+| --- | --- | --- |
+| **Test de divergence volontaire** | Mesurer ou prouver un écart d’affichage / de parcours entre Streamlit et webapp sur un **même** état de données | Compte, `project_id` (ou identifiant de jeu), état des entrées figé (pas d’écritures concurrentes pendant la comparaison) |
+| **Reprise après incident** | Reprendre un scénario interrompu (crash, session expirée) | Nouveau scénario explicite : noter la surface de reprise et la raison ; ne pas mélanger les jalons d’un `run_id` baseline entre deux origines |
+
+---
+
 ## Comparaison coexistence Streamlit vs webapp
 
 Pendant la double exposition (**Streamlit** port **8501**, **webapp** slice vertical port **8080** par défaut), rejouer la même séquence sur les deux interfaces avec le même compte et le même projet : **PRJ-CREATE** (ou sélection), **ENT-NEW-WRITE** / **EDI-SAVE**, puis **EXP-SCOPE** + **EXP-DL** (CSV et JSONL). Les téléchargements côté webapp appliquent **`export_utils`** (périmètres `validated_only` / `full_dataset`) et la règle **CSV sans colonnes préfixées `_`** via `public_export_column_names` / `csv_text_from_export_dataframe` (alignée sur la sérialisation API des entrées). **Écart documenté** : le CSV Streamlit appelle `to_csv` sur le slice complet et inclut donc encore les colonnes cache `_*`. Toute divergence volontaire ou constatée avec Streamlit doit être notée en **Écart documenté** dans la matrice ou la recette associée.
@@ -201,7 +222,7 @@ Détail : `docs/ux_baseline_issue_020.md` § Webapp ; agrégation : `scripts/agg
 
 ## Checklist recette minimale (manuelle)
 
-Chaîne **projet → entrée → export** à rejouer après chaque bascule majeure UI / API :
+Chaîne **projet → entrée → export** à rejouer après chaque bascule majeure UI / API. **Coexistence Streamlit / webapp** : respecter le protocole **une surface à la fois** (section ci-dessus) — ne pas alterner les ports au milieu du scénario.
 
 1. **Projet** : créer un projet (ou sélectionner un projet test), vérifier sidebar + onglet Projets.
 2. **Réglages** : ouvrir **Réglages & Export**, vérifier chargement des réglages (Streamlit : `get_project_settings` ; slice webapp : `GET /api/projects/{id}/settings/dimensions`).

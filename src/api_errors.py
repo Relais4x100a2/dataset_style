@@ -25,6 +25,7 @@ FORBIDDEN: Final = "FORBIDDEN"
 NOT_FOUND_GENERIC: Final = "NOT_FOUND_GENERIC"
 INTERNAL_ERROR: Final = "INTERNAL_ERROR"
 EXPORT_PAYLOAD_TOO_LARGE: Final = "EXPORT_PAYLOAD_TOO_LARGE"
+CURATOR_LANGUAGETOOL_UNAVAILABLE: Final = "CURATOR_LANGUAGETOOL_UNAVAILABLE"
 MAIL_DELIVERY_FAILED: Final = "MAIL_DELIVERY_FAILED"
 
 
@@ -118,6 +119,16 @@ _CATALOG: dict[str, ResolvedApiError] = {
         message_fr="Une erreur technique s'est produite.",
         suggested_action_fr="Réessayez plus tard. Si le problème persiste, contactez l'administrateur.",
     ),
+    CURATOR_LANGUAGETOOL_UNAVAILABLE: ResolvedApiError(
+        code=CURATOR_LANGUAGETOOL_UNAVAILABLE,
+        http_status=503,
+        title_fr="Correction linguistique indisponible",
+        message_fr=(
+            "Impossible de joindre le service LanguageTool (réseau ou délai dépassé). "
+            "Vérifiez la connectivité ou réessayez."
+        ),
+        suggested_action_fr=("Réessayez dans quelques instants ou contactez un administrateur."),
+    ),
     MAIL_DELIVERY_FAILED: ResolvedApiError(
         code=MAIL_DELIVERY_FAILED,
         http_status=502,
@@ -136,6 +147,20 @@ _CATALOG: dict[str, ResolvedApiError] = {
 
 def _catalog_entry(code: str) -> ResolvedApiError:
     return _CATALOG.get(code, _CATALOG[INTERNAL_ERROR])
+
+
+def curator_languagetool_unavailable_envelope() -> dict[str, Any]:
+    """Enveloppe JSON ``CURATOR_LANGUAGETOOL_UNAVAILABLE`` (issue-006 / parité issue-005)."""
+    resolved = _catalog_entry(CURATOR_LANGUAGETOOL_UNAVAILABLE)
+    return {
+        "error": {
+            "code": resolved.code,
+            "title": resolved.title_fr,
+            "message": resolved.message_fr,
+            "suggested_action": resolved.suggested_action_fr,
+            "detail": None,
+        }
+    }
 
 
 def resolve_db_startup_category(category: DbFailureCategory) -> ResolvedApiError:

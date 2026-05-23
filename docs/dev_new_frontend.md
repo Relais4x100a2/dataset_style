@@ -68,6 +68,12 @@ Variable optionnelle **`WEBAPP_EXPORT_MAX_ROWS`** : nombre maximum de lignes dan
 - **E-mail déjà connu** : message de succès **identique** à Streamlit (lien de réinitialisation) ; le discriminant machine est `inviteResult=existing_account_reset` (voir `docs/migration_parity_matrix.md`, flux SA-INVITE).
 - **Échec SMTP / transport** : **502** + enveloppe `MAIL_DELIVERY_FAILED` (`src/api_errors.py`).
 
+## Contexte liste / fiche entrées (issue-179)
+
+- **Filtres édition** : les paramètres query `edition_statut`, `edition_score_mode`, `edition_score_threshold_lt`, `edition_score_bucket_decile`, `edition_score_include_na` sur `GET /api/projects/{project_id}/entries` sont les mêmes que ceux documentés pour Streamlit (voir `docs/migration_parity_matrix.md`). Après `POST` ou `PATCH` sur une entrée, le tableau JSON `entries` de la réponse applique **les mêmes** filtres si la requête de mutation répète ces paramètres en query string — le client ne doit pas reconstruire une vue filtrée localement.
+- **Persistance navigateur** : la coquille HTML (`GET /`) mémorise les réglages de filtre par projet dans `sessionStorage` sous la clé `webapp_edition_filters:<project_id>` (JSON : `statut`, `scoreMode`, `threshold`, `decile`, `includeNa`). Le projet actif reste `webapp_active_project_id` (voir issue-010).
+- **Export perçu** : les téléchargements CSV/JSONL restent alignés sur les périmètres `validated_only` / `full_dataset` (`GET …/export.*`) — pas sur la vue filtrée édition ; voir matrice de parité.
+
 ## Tests et CI
 
 Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, `tests/test_webapp_entry_mutations_issue012.py`, `tests/test_webapp_ux_telemetry.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.

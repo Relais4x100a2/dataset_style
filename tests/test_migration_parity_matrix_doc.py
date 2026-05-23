@@ -50,6 +50,13 @@ def test_migration_parity_matrix_documents_ux_baseline_issue020() -> None:
     assert "DATASET_STYLE_UX_TELEMETRY_DIR" in text
 
 
+def test_migration_parity_matrix_documents_one_surface_recipe_protocol() -> None:
+    """GitHub #178 : protocole recette mono-surface lié aux IDs flux (coexistence dev/staging)."""
+    text = _DOC_PATH.read_text()
+    assert "## Protocole recette : une surface à la fois" in text
+    assert "docs/merge_ready_checklist.md" in text
+
+
 def test_migration_parity_matrix_documents_issue007_vertical_slice() -> None:
     """issue-004 : marquage slice vertical + service webapp versionné."""
     text = _DOC_PATH.read_text()

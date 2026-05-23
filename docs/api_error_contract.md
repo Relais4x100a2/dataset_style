@@ -45,6 +45,7 @@ Liste et détail doivent appliquer **strictement** la même réponse (pas de `40
 | `FORBIDDEN` | 403 | Accès refusé | Vous n'avez pas les droits suffisants pour cette opération. | Si vous pensez qu'il s'agit d'une erreur, contactez un administrateur. |
 | `NOT_FOUND_GENERIC` | 404 | Ressource introuvable | Cette ressource n'existe pas, n'est plus disponible, ou vous n'y avez pas accès. | Vérifiez votre sélection ou l'URL ; reconnectez-vous si besoin. |
 | `INTERNAL_ERROR` | 500 | Erreur interne | Une erreur technique s'est produite. | Réessayez plus tard. Si le problème persiste, contactez l'administrateur. |
+| `CURATOR_LANGUAGETOOL_UNAVAILABLE` | 503 | Correction linguistique indisponible | Impossible de joindre le service LanguageTool (réseau ou délai dépassé). Vérifiez la connectivité ou réessayez. | Réessayez dans quelques instants ou contactez un administrateur. |
 | `MAIL_DELIVERY_FAILED` | 502 | Envoi d'e-mail impossible | Le serveur n'a pas pu acheminer l'e-mail d'invitation (SMTP ou réseau). Vérifiez la configuration d'envoi ou réessayez plus tard. | Contrôlez les paramètres SMTP et les journaux serveur ; en mode développement, utilisez `MAIL_MODE=dev` pour valider le flux sans SMTP. |
 
 Les entrées du tableau correspondent aux constantes et textes dans `src/api_errors.py` (source de vérité pour le mapping).
@@ -52,6 +53,7 @@ Les entrées du tableau correspondent aux constantes et textes dans `src/api_err
 ## Intégration FastAPI (futur BFF)
 
 - Importer `error_envelope_for_client(exc, include_technical_detail=None)` et renvoyer le dict comme corps JSON avec le statut `resolve_exception_for_api(...).http_status`.
+- Erreur LanguageTool injoignable : `curator_languagetool_unavailable_envelope()` (code `CURATOR_LANGUAGETOOL_UNAVAILABLE`, HTTP 503).
 - Ne pas exposer `HTTPException.detail` texte brut provider : passer toujours par ce module.
 
 ## UI Streamlit (préparation issue-022)
