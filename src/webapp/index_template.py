@@ -3,10 +3,12 @@
 # Contenu servi tel quel par ``GET /`` ; pas de logique Python ici (uniquement chaîne).
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="fr">
+<script>(function(){try{var r=sessionStorage.getItem('ds_ui_prefs_v1');if(!r)return;var o=JSON.parse(r);if(!o||typeof o!=='object')return;var e=document.documentElement;if(o.density&&o.density!=='default')e.setAttribute('data-ds-density',o.density);else e.removeAttribute('data-ds-density');if(o.readingComfort&&o.readingComfort!=='default')e.setAttribute('data-ds-reading',o.readingComfort);else e.removeAttribute('data-ds-reading');}catch(x){}})();</script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dataset Style — curateur</title>
+  <link rel="stylesheet" href="/static/design_tokens.css" />
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f6f7f9; color: #1a1a1a; }
     .wrap { max-width: 56rem; margin: 0 auto; padding: 1rem 1rem 2rem; }
@@ -205,6 +207,24 @@ INDEX_HTML = """<!DOCTYPE html>
       <h2>Mon compte</h2>
       <p class="muted">Profil curateur (issue-016) — pas d’indicateurs super-admin.</p>
       <div id="accountDetail" class="account-dl"></div>
+      <h3>Réglages d&apos;affichage</h3>
+      <p class="muted">Optionnel — par défaut l&apos;interface reste celle recommandée.</p>
+      <label>Densité
+        <select id="prefDensity">
+          <option value="default">Recommandée</option>
+          <option value="compact">Compacte</option>
+          <option value="comfortable">Confortable</option>
+        </select>
+      </label>
+      <label>Confort lecture
+        <select id="prefReading">
+          <option value="default">Recommandé</option>
+          <option value="high_contrast">Contraste renforcé</option>
+          <option value="reduced_motion">Moins d&apos;animation</option>
+        </select>
+      </label>
+      <div class="row"><button type="button" id="btnSaveUiPrefs">Enregistrer l&apos;affichage</button></div>
+      <p id="uiPrefsMsg" class="muted" aria-live="polite"></p>
       <p id="accountLoadErr" class="err" aria-live="polite"></p>
     </div>
     <div class="panel" data-tab-idx="6">
@@ -254,6 +274,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <script>
     const LS = "slice_vertical_access_token";
     const SS = "webapp_active_project_id";
+    const UIPREFS_SS = "ds_ui_prefs_v1";
     const SS_EDITION_FILTER_PREFIX = "webapp_edition_filters:";
     let curatorDimsCache = null;
     const authMsg = document.getElementById("authMsg");
@@ -437,6 +458,61 @@ INDEX_HTML = """<!DOCTYPE html>
       return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;");
     }
 
+    function applyUiPrefsToDom(p) {
+      const el = document.documentElement;
+      if (!p) return;
+      if (p.density && p.density !== "default") el.setAttribute("data-ds-density", p.density);
+      else el.removeAttribute("data-ds-density");
+      if (p.readingComfort && p.readingComfort !== "default") el.setAttribute("data-ds-reading", p.readingComfort);
+      else el.removeAttribute("data-ds-reading");
+    }
+
+    function persistUiPrefsCache(p) {
+      try { sessionStorage.setItem(UIPREFS_SS, JSON.stringify(p)); } catch (_) {}
+      applyUiPrefsToDom(p);
+    }
+
+    async function syncUiPrefsFromAccount() {
+      if (!token()) return;
+      try {
+        const a = await api("/api/account");
+        if (a.uiPreferences) persistUiPrefsCache(a.uiPreferences);
+      } catch (_) { /* session expirée : pas bloquant */ }
+    }
+
+    function wireAccountUiPrefsOnce() {
+      const btn = document.getElementById("btnSaveUiPrefs");
+      if (!btn || btn.dataset.wired === "1") return;
+      btn.dataset.wired = "1";
+      btn.onclick = async () => {
+        const msg = document.getElementById("uiPrefsMsg");
+        if (msg) { msg.textContent = ""; msg.className = "muted"; }
+        const d = document.getElementById("prefDensity");
+        const r = document.getElementById("prefReading");
+        const body = {};
+        if (d) body.density = d.value;
+        if (r) body.readingComfort = r.value;
+        btn.disabled = true;
+        try {
+          const out = await api("/api/account/ui-preferences", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (out.uiPreferences) persistUiPrefsCache(out.uiPreferences);
+          if (msg) { msg.textContent = "Préférences enregistrées."; msg.className = "ok"; }
+        } catch (e) {
+          if (msg) {
+            msg.className = "err";
+            if (e && e.error) msg.textContent = (e.error.message || "") + " (" + (e.error.code || "") + ")";
+            else msg.textContent = "Enregistrement impossible.";
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    }
+
     async function loadAccountPanel() {
       const errEl = document.getElementById("accountLoadErr");
       const detail = document.getElementById("accountDetail");
@@ -444,6 +520,12 @@ INDEX_HTML = """<!DOCTYPE html>
       errEl.textContent = "";
       try {
         const a = await api("/api/account");
+        if (a.uiPreferences) persistUiPrefsCache(a.uiPreferences);
+        const pd = document.getElementById("prefDensity");
+        const pr = document.getElementById("prefReading");
+        if (pd && a.uiPreferences) pd.value = a.uiPreferences.density || "default";
+        if (pr && a.uiPreferences) pr.value = a.uiPreferences.readingComfort || "default";
+        wireAccountUiPrefsOnce();
         detail.innerHTML =
           "<dl>"
           + "<dt>Identifiant applicatif</dt><dd><code>" + escapeHtml(a.appUserId) + "</code></dd>"
@@ -1073,6 +1155,7 @@ INDEX_HTML = """<!DOCTYPE html>
         document.getElementById("userLine").textContent =
           me.user.displayName + " · " + me.user.email + (me.user.isSuperAdmin ? " · super admin" : "");
         renderMainTabs(me.mainTabLabels);
+        await syncUiPrefsFromAccount();
         await loadProjects();
       } catch (e) { showErr(e); }
     };
@@ -1090,8 +1173,13 @@ INDEX_HTML = """<!DOCTYPE html>
       } catch (_) { /* jeton déjà invalide : on purge quand même */ }
       setToken("");
       sessionStorage.removeItem(SS);
+      sessionStorage.removeItem(UIPREFS_SS);
+      document.documentElement.removeAttribute("data-ds-density");
+      document.documentElement.removeAttribute("data-ds-reading");
       window.location.assign(target);
     };
+
+    if (token()) syncUiPrefsFromAccount().catch(function() {});
 
     async function loadProjects() {
       const hint = activeProjectHint();

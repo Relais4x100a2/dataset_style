@@ -8,6 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import pandas as pd
@@ -16,6 +17,7 @@ from fastapi import Body, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
@@ -40,10 +42,12 @@ from src.database import (
     create_project,
     delete_project_as_admin,
     get_user_email_display_name_by_id,
+    get_user_ui_preferences_raw,
     list_accounts_for_super_admin,
     list_projects_for_user,
     load_project_entries,
     replay_quarantined_operation,
+    update_user_ui_preferences_raw,
     validate_super_admin_accounts_list_params,
 )
 from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
@@ -56,6 +60,11 @@ from src.services.edition_filters_service import build_edition_score_filter_spec
 from src.services.project_dataframe_view import prepare_for_edition_tab
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.tab_layout import main_tab_labels
+from src.ui_preferences import (
+    load_from_stored_raw,
+    merge_patch_into_canonical,
+    serialize_canonical_preferences,
+)
 from src.webapp import curator_ai, entry_mutations
 from src.webapp import deps as webapp_deps
 from src.webapp.errors import EnvelopeHttpError
@@ -189,6 +198,15 @@ class SignoutBody(BaseModel):
 
     access_token: str | None = None
     redirect_after: str | None = None
+
+
+class AccountUiPreferencesPatchBody(BaseModel):
+    """Mise à jour partielle des préférences d'affichage (issue-023 / #186)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    density: Literal["default", "compact", "comfortable"] | None = None
+    readingComfort: Literal["default", "high_contrast", "reduced_motion"] | None = None
 
 
 class NewEntryBody(BaseModel):
@@ -355,6 +373,19 @@ def approved_post_signout_redirect(requested: str | None) -> str:
     return candidate if candidate in allow else default
 
 
+def _bad_request_client_envelope(message: str) -> dict[str, Any]:
+    """Charge utile JSON 400 alignée sur les autres routes ``webapp`` (code ``BAD_REQUEST``)."""
+    return {
+        "error": {
+            "code": "BAD_REQUEST",
+            "title": "Requête invalide",
+            "message": message,
+            "suggested_action": "Corrigez le corps JSON puis réessayez.",
+            "detail": None,
+        }
+    }
+
+
 def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     """Fabrique l'application ; ``engine`` injectable pour les tests."""
 
@@ -399,6 +430,9 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    _static_dir = Path(__file__).resolve().parent / "static"
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index() -> str:
@@ -453,6 +487,10 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         if row is None:
             raise TenantResourceOpaqueDenial()
         email, display_name = row
+        prefs_raw = get_user_ui_preferences_raw(eng, user_id)
+        if prefs_raw is None:
+            raise TenantResourceOpaqueDenial()
+        ui_preferences = load_from_stored_raw(prefs_raw)
         return {
             "appUserId": user_id,
             "email": email,
@@ -461,7 +499,33 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 "ownedProjects": count_owned_projects(eng, user_id),
                 "activeMemberships": count_active_memberships(eng, user_id),
             },
+            "uiPreferences": ui_preferences,
         }
+
+    @app.patch("/api/account/ui-preferences")
+    async def api_patch_account_ui_preferences(
+        request: Request,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        body: AccountUiPreferencesPatchBody,
+    ) -> dict[str, Any]:
+        """Fusion partielle des préférences d'affichage (densité, confort lecture) — issue-023."""
+        eng = webapp_deps.get_engine(request)
+        row = get_user_email_display_name_by_id(eng, user_id)
+        if row is None:
+            raise TenantResourceOpaqueDenial()
+        prefs_raw = get_user_ui_preferences_raw(eng, user_id)
+        if prefs_raw is None:
+            raise TenantResourceOpaqueDenial()
+        patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        current = load_from_stored_raw(prefs_raw)
+        try:
+            merged = merge_patch_into_canonical(current, patch)
+            if patch:
+                blob = serialize_canonical_preferences(merged)
+                update_user_ui_preferences_raw(eng, user_id, blob)
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
+        return {"uiPreferences": merged}
 
     @app.get("/api/me")
     async def api_me(

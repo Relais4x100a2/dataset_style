@@ -200,16 +200,21 @@ def test_account_json_is_whitelisted_curator_fields() -> None:
         ),
         patch("src.webapp.app.count_owned_projects", return_value=2),
         patch("src.webapp.app.count_active_memberships", return_value=1),
+        patch(
+            "src.webapp.app.get_user_ui_preferences_raw",
+            return_value="{}",
+        ),
     ):
         with TestClient(app) as client:
             r = client.get("/api/account", headers={"Authorization": "Bearer t"})
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == {"appUserId", "email", "displayName", "counts"}
+    assert set(body.keys()) == {"appUserId", "email", "displayName", "counts", "uiPreferences"}
     assert body["appUserId"] == "u_cur"
     assert body["email"] == "me@example.com"
     assert body["displayName"] == "Me Display"
     assert body["counts"] == {"ownedProjects": 2, "activeMemberships": 1}
+    assert body["uiPreferences"] == {"density": "default", "readingComfort": "default"}
     assert "is_super_admin" not in body
     assert "su_user_id" not in body
     assert "suUserId" not in body
@@ -224,6 +229,69 @@ def test_account_unknown_profile_returns_opaque_404() -> None:
             r = client.get("/api/account", headers={"Authorization": "Bearer t"})
     assert r.status_code == 404
     assert "error" in r.json()
+
+
+def test_patch_ui_preferences_requires_bearer() -> None:
+    app = create_slice_app(engine=MagicMock())
+    with TestClient(app) as client:
+        r = client.patch("/api/account/ui-preferences", json={"density": "compact"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "AUTH_SESSION_EXPIRED"
+
+
+def test_patch_ui_preferences_updates_db_when_authenticated() -> None:
+    """issue-023 : PATCH fusionne et persiste via ``update_user_ui_preferences_raw``."""
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u_cur"
+    with (
+        patch("src.webapp.app.get_user_email_display_name_by_id", return_value=("a@b.c", "N")),
+        patch(
+            "src.webapp.app.get_user_ui_preferences_raw",
+            return_value='{"density":"default","readingComfort":"default"}',
+        ),
+        patch("src.webapp.app.update_user_ui_preferences_raw", return_value=True) as upd,
+    ):
+        with TestClient(app) as client:
+            r = client.patch(
+                "/api/account/ui-preferences",
+                headers={"Authorization": "Bearer t"},
+                json={"density": "compact", "readingComfort": "high_contrast"},
+            )
+    assert r.status_code == 200
+    assert r.json()["uiPreferences"] == {
+        "density": "compact",
+        "readingComfort": "high_contrast",
+    }
+    upd.assert_called_once()
+    assert upd.call_args[0][0] is engine
+    assert upd.call_args[0][1] == "u_cur"
+    saved = upd.call_args[0][2]
+    assert '"density":"compact"' in saved.replace(" ", "")
+    assert '"readingComfort":"high_contrast"' in saved.replace(" ", "")
+
+
+def test_patch_ui_preferences_no_op_when_body_empty() -> None:
+    """Corps vide (aucune clé fournie) : pas d'UPDATE SQL."""
+    app = create_slice_app(engine=MagicMock())
+    app.dependency_overrides[webapp_deps.require_app_user_id] = lambda: "u_cur"
+    with (
+        patch("src.webapp.app.get_user_email_display_name_by_id", return_value=("a@b.c", "N")),
+        patch(
+            "src.webapp.app.get_user_ui_preferences_raw",
+            return_value='{"density":"compact","readingComfort":"default"}',
+        ),
+        patch("src.webapp.app.update_user_ui_preferences_raw") as upd,
+    ):
+        with TestClient(app) as client:
+            r = client.patch(
+                "/api/account/ui-preferences",
+                headers={"Authorization": "Bearer t"},
+                json={},
+            )
+    assert r.status_code == 200
+    assert r.json()["uiPreferences"]["density"] == "compact"
+    upd.assert_not_called()
 
 
 def test_signout_returns_allowlisted_redirect_only() -> None:
