@@ -15,7 +15,7 @@ Documentation canonique : **`docs/release_train_caprover.md`** (tableau branche 
 
 ## CI / qualité
 
-- **Lint + tests** : `.github/workflows/ci.yml` sur `main` et `deploy-caprover-relais4`.
+- **Lint + tests** : `.github/workflows/ci.yml` sur `main`, `deploy-caprover-relais4` et `deploy-newfrontend` (préprod / migration).
 - **Contrats auth** : `.github/workflows/auth-contract.yml` (cron + PR sur chemins sensibles).
 
 En local : `ruff check .`, `ruff format --check .`, `pytest -q`, `uv run python scripts/bootstrap_check.py`.

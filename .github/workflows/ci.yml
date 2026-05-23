@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, deploy-caprover-relais4]
+    branches: [main, deploy-caprover-relais4, deploy-newfrontend]
   pull_request:
-    branches: [main, deploy-caprover-relais4]
+    branches: [main, deploy-caprover-relais4, deploy-newfrontend]
 
 jobs:
   lint-and-tests:
@@ -43,10 +43,44 @@ jobs:
       - name: Healthcheck HTTP FastAPI (issue-008)
         run: pytest -q tests/test_webapp_health_issue008.py
       - name: Run tests
-        run: pytest -q --junitxml=junit-report.xml
-      - name: Upload JUnit report
+        id: pytest
+        continue-on-error: true
+        run: |
+          mkdir -p ci-release-bundle
+          pytest -q --junitxml=ci-release-bundle/junit-report.xml
+      - name: Assemble jalon 009 handoff bundle (JUnit + attestation)
+        if: always()
+        env:
+          PYTEST_OUTCOME: ${{ steps.pytest.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-release-bundle
+          cp docs/release_attestations/TEMPLATE_jalon_009_curation_chain_preprod.md \
+            ci-release-bundle/ATTESTATION_PRODUIT.template.md
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "# Jalon 009 — gate automatisé (persistance PostgreSQL)"
+            echo ""
+            echo "- **Commit**: \`${GITHUB_SHA}\`"
+            echo "- **Exécution workflow**: [${RUN_URL}](${RUN_URL})"
+            echo "- **Résultat pytest (job CI)**: ${PYTEST_OUTCOME}"
+            echo ""
+            echo "Ce document est une **preuve automatisée** pour la persistance et l’export"
+            echo "(PRJ-CREATE, ENT-NEW-WRITE, EDI-SAVE, EXP-SCOPE, EXP-DL via \`tests/test_curation_chain_postgres_regression.py\`)."
+            echo "Il **ne** remplace **pas** une validation SuperTokens / navigateur."
+            echo ""
+            echo "Compléter le parcours critique avec la checklist manuelle et le modèle"
+            echo "[\`ATTESTATION_PRODUIT.template.md\`](./ATTESTATION_PRODUIT.template.md) (nom, date, réserves)."
+            echo ""
+            echo "Matrice de parité : \`docs/migration_parity_matrix.md\`."
+            echo "Recette préprod : \`docs/curation_chain_preprod_regression_issue_009.md\`."
+          } > ci-release-bundle/AUTOMATED_GATE_ISSUE_009.md
+      - name: Upload CI / jalon-009 handoff bundle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: junit-report
-          path: junit-report.xml
+          name: ci-jalon-009-handoff-bundle
+          path: ci-release-bundle/
+      - name: Fail if tests failed
+        if: steps.pytest.outcome != 'success'
+        run: exit 1

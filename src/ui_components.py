@@ -135,6 +135,7 @@ from src.services.entry_nlp_persist_service import (
 )
 from src.services.export_quality_recap_service import build_export_quality_recap
 from src.services.export_scope_service import summarize_export_perimeter
+from src.services.new_entry_validation import new_entry_missing_required_body_message
 from src.services.project_dataframe_view import prepare_for_dashboard_tab, prepare_for_edition_tab
 from src.super_admin_ui_texts import (
     SUPER_ADMIN_ACCOUNT_MANAGEMENT_HUB_TITLE,
@@ -523,21 +524,6 @@ def ensure_new_entry_widget_keys_initialized(
         session[keys["notes"]] = ""
     _discard_legacy_new_entry_keys_for_project(session, legacy)
     return keys
-
-
-def new_entry_missing_required_body_message(input_text: str, output_text: str) -> str | None:
-    """Validate that both body fields are non-empty before persisting.
-
-    Args:
-        input_text: Draft (brouillon) content.
-        output_text: Generated text content.
-
-    Returns:
-        A short French error message if validation fails, otherwise ``None``.
-    """
-    if not str(input_text).strip() or not str(output_text).strip():
-        return "Brouillon/Texte généré obligatoires."
-    return None
 
 
 def new_entry_pending_clear_session_key(project_id: str, user_id: str) -> str:
@@ -1303,7 +1289,7 @@ def _render_super_admin_accounts_panel(user: CurrentUser, engine: Engine) -> Non
         invite_submit = st.form_submit_button("Envoyer l'invitation")
     if invite_submit:
         try:
-            invite_link = create_invitation_link(engine, user.user_id, invite_email)
+            invite_link = create_invitation_link(engine, user.user_id, invite_email).link
             delivery = send_account_link_email(
                 to_email=invite_email.strip().lower(),
                 subject="Invitation Dataset Style Studio",

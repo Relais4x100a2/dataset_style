@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from src.auth import CreateInvitationLinkResult
 from src.database import UserRecord
 from src.mailer import MailDeliveryResult
 from src.webapp import deps as webapp_deps
@@ -42,6 +43,27 @@ def test_super_admin_invite_returns_403_for_non_super_admin() -> None:
     assert r.json()["error"]["code"] == "FORBIDDEN"
 
 
+def test_super_admin_invite_invalid_email_returns_422() -> None:
+    app = create_slice_app(engine=MagicMock())
+    user = UserRecord(
+        user_id="admin1",
+        email="admin@example.com",
+        display_name="A",
+        is_super_admin=True,
+    )
+    app.dependency_overrides[webapp_deps.require_app_user] = lambda: user
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/super-admin/invite",
+            headers={"Authorization": "Bearer t"},
+            json={"email": "sans-arobase"},
+        )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, list) and detail
+    assert "Adresse e-mail invalide" in str(detail[0].get("msg", ""))
+
+
 def test_super_admin_invite_returns_200_without_raw_token_in_json() -> None:
     engine = MagicMock()
     app = create_slice_app(engine=engine)
@@ -58,7 +80,10 @@ def test_super_admin_invite_returns_200_without_raw_token_in_json() -> None:
     with (
         patch(
             "src.webapp.super_admin_invite.create_invitation_link",
-            return_value=fake_link,
+            return_value=CreateInvitationLinkResult(
+                link=fake_link,
+                email_already_registered=False,
+            ),
         ),
         patch(
             "src.webapp.super_admin_invite.send_account_link_email",
@@ -75,6 +100,8 @@ def test_super_admin_invite_returns_200_without_raw_token_in_json() -> None:
     body = r.json()
     assert body["status"] == "ok"
     assert body["mailMode"] == "dev"
+    assert body["inviteResult"] == "new_invitation"
+    assert body["bannerTone"] == "warn"
     assert "masked-preview" in body["message"]
     assert secret_token not in body["message"]
     raw = r.text
@@ -95,7 +122,10 @@ def test_super_admin_invite_smtp_success_message() -> None:
     with (
         patch(
             "src.webapp.super_admin_invite.create_invitation_link",
-            return_value="https://app.example/?flow=set-password&token=abc",
+            return_value=CreateInvitationLinkResult(
+                link="https://app.example/?flow=set-password&token=abc",
+                email_already_registered=False,
+            ),
         ),
         patch(
             "src.webapp.super_admin_invite.send_account_link_email",
@@ -109,5 +139,83 @@ def test_super_admin_invite_smtp_success_message() -> None:
                 json={"email": "bob@example.com"},
             )
     assert r.status_code == 200
-    assert r.json()["mailMode"] == "smtp"
+    assert r.json()["inviteResult"] == "new_invitation"
+    assert r.json()["bannerTone"] == "ok"
     assert "Invitation envoyée" in r.json()["message"]
+
+
+def test_invite_collaborator_by_email_returns_invite_result_for_support() -> None:
+    """SMTP : un seul message succès ; le cas « e-mail déjà connu » est dans ``invite_result``."""
+    from src.webapp.super_admin_invite import invite_collaborator_by_email
+
+    engine = MagicMock()
+    delivery = MailDeliveryResult(mode="smtp", delivered=True, preview="x")
+    with (
+        patch(
+            "src.webapp.super_admin_invite.create_invitation_link",
+            return_value=CreateInvitationLinkResult(
+                link="https://app.example/?flow=set-password&token=abc",
+                email_already_registered=True,
+            ),
+        ),
+        patch(
+            "src.webapp.super_admin_invite.send_account_link_email",
+            return_value=delivery,
+        ),
+    ):
+        out = invite_collaborator_by_email(engine, "actor", "bob@example.com")
+    assert out.mail_mode == "smtp"
+    assert out.invite_result == "existing_account_reset"
+    assert "Invitation envoyée" in out.message_fr
+    with (
+        patch(
+            "src.webapp.super_admin_invite.create_invitation_link",
+            return_value=CreateInvitationLinkResult(
+                link="https://app.example/?flow=set-password&token=abc",
+                email_already_registered=False,
+            ),
+        ),
+        patch(
+            "src.webapp.super_admin_invite.send_account_link_email",
+            return_value=delivery,
+        ),
+    ):
+        out_new = invite_collaborator_by_email(engine, "actor", "new@example.com")
+    assert out_new.invite_result == "new_invitation"
+    assert out.message_fr == out_new.message_fr
+
+
+def test_super_admin_invite_smtp_failure_returns_502_envelope() -> None:
+    import smtplib
+
+    engine = MagicMock()
+    app = create_slice_app(engine=engine)
+    user = UserRecord(
+        user_id="admin1",
+        email="admin@example.com",
+        display_name="A",
+        is_super_admin=True,
+    )
+    app.dependency_overrides[webapp_deps.require_app_user] = lambda: user
+    with (
+        patch(
+            "src.webapp.super_admin_invite.create_invitation_link",
+            return_value=CreateInvitationLinkResult(
+                link="https://app.example/?flow=set-password&token=abc",
+                email_already_registered=False,
+            ),
+        ),
+        patch(
+            "src.webapp.super_admin_invite.send_account_link_email",
+            side_effect=smtplib.SMTPException("relay denied"),
+        ),
+    ):
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/super-admin/invite",
+                headers={"Authorization": "Bearer t"},
+                json={"email": "bob@example.com"},
+            )
+    assert r.status_code == 502
+    body = r.json()
+    assert body["error"]["code"] == "MAIL_DELIVERY_FAILED"

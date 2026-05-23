@@ -10,7 +10,7 @@ Document de référence pour débloquer auth, domaines CapRover et le plan suppo
 | Sujet | Décision |
 |-------|----------|
 | **Mode en production** | **Cutover unique** : après la bascule, **une seule** interface applicative est servie sur l’URL de production ; pas de double interface officielle pérenne côté utilisateurs. |
-| **Intégration avant prod** | Développement et recettes sur une **rampe de type** `deploy-newfrontend` (nom exact à figer côté produit) + **environnement CapRover préprod / staging** distinct de la production Relais4 (`deploy-caprover-relais4`). Voir `docs/release_train_caprover.md`. |
+| **Intégration avant prod** | Développement et recettes sur la branche **`deploy-newfrontend`** + **environnement CapRover préprod / staging** distinct de la production Relais4 (`deploy-caprover-relais4`). Voir `docs/release_train_caprover.md` (publication de la branche distante, CI, merge vers prod). |
 | **Coexistence deux interfaces en prod** | **Non retenue.** Durée maximale d’une double interface **en production** : **0 jour** (bascule unique ; pas de période documentée où deux URL « officielles » coexisteraient pour le même usage métier). |
 | **Surface canonique pour le support** | L’**URL publique unique** effectivement servie en production, **alignée sur `APP_PUBLIC_BASE_URL`** (liens d’invitation et de reset e‑mail, cohérence avec la configuration SuperTokens et les origines autorisées). Avant cutover : l’URL Streamlit actuelle en prod ; après cutover : l’URL du nouveau frontal telle qu’arrêtée en release. |
 
@@ -73,3 +73,16 @@ Les user stories **007 à 016** (implémentation du nouveau frontal, côté dép
 - Train de release et branche prod : `docs/release_train_caprover.md`
 - Déploiement CapRover : `docs/caprover_deployment.md`
 - Variables d’environnement : `docs/caprover_env_example.md`
+- Stack frontal cible (jalon UX, ADR accepté) : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md`
+- Parité fonctionnelle Streamlit → API : `docs/migration_parity_matrix.md`
+- Communication migration (e-mail type, exports, bannière optionnelle) : `docs/migration_communication_plan.md`
+
+## 8. Artefacts mesure UX (issue-020 / #142)
+
+Pour la revue de bascule (issue-001), archiver avec le paquet décisionnel :
+
+- le répertoire ou une copie des fichiers sous **`DATASET_STYLE_UX_TELEMETRY_DIR`** (`ux_scenario_*.jsonl`, `ux_error_*.jsonl`) ;
+- la sortie TSV de **`scripts/aggregate_ux_baseline_jsonl.py`** (voir `docs/ux_baseline_issue_020.md`) ;
+- les réponses au questionnaire interne (`docs/ux_baseline_questionnaire.md`) si la campagne l’a prévu.
+
+Les métriques ne sont **pas** stockées dans les tables métier PostgreSQL en v1.

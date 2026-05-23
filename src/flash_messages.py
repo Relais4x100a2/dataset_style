@@ -12,6 +12,12 @@ you schedule again — équivalent produit d’un TTL d’**une exécution**.
 Super-admin actions use ``channel="super_admin"`` and a dedicated session key
 (``POST_RERUN_FLASH_ADMIN_KEY``) so their flashes do not collide with curator keys;
 scheduling on one channel clears the other channel’s pending payload.
+
+La bannière de migration (``APP_MIGRATION_INFO_BANNER``) est rendue **après** le
+flash consommé. **Session déconnectée** : affichée dans ``render_auth_gate`` avant
+le formulaire de connexion. **Curateur connecté** : une seule fois sous le titre
+dans ``main.py`` (pas de double rendu avec ``render_auth_gate``). Elle reste
+visible tant que la variable est définie, indépendamment du flash « une exécution ».
 """
 
 from __future__ import annotations

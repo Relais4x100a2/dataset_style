@@ -14,6 +14,7 @@ from src.db_startup import (
     is_development_ui,
     technical_hint_for_dev,
 )
+from src.migration_communication import render_streamlit_migration_banner_if_configured
 from src.presets import load_active_dimensions
 from src.project_entries_cache import cached_load_project_entries
 from src.tab_layout import EXPECTED_WORKFLOW_TAB_ORDER, main_tab_labels
@@ -100,6 +101,7 @@ if not user:
     st.stop()
 
 st.title("Dataset Style Studio · Multi-projet")
+render_streamlit_migration_banner_if_configured()
 with st.sidebar:
     project_id, role = render_sidebar(user, engine)
 

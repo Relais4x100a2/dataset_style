@@ -49,6 +49,31 @@ def export_perimeter_ui_recap_fr(row_count: int, scope: ExportScope) -> tuple[st
     return summary, None
 
 
+def public_export_column_names(df: pd.DataFrame) -> list[str]:
+    """Colonnes exportées côté webapp CSV et corps JSON des entrées (hors préfixe ``_``).
+
+    Streamlit inclut encore les colonnes cache ``_*`` dans le CSV téléchargé
+    (:func:`pandas.DataFrame.to_csv` sur le slice complet) ; le slice HTTP et
+    l'API d'entrées n'exposent pas ces champs — alignement documenté dans
+    ``docs/migration_parity_matrix.md`` (issue-015).
+
+    Args:
+        df: Dataframe projet ou sous-ensemble déjà filtré pour l'export.
+
+    Returns:
+        Liste des noms de colonnes « publiques ».
+    """
+    return [c for c in df.columns if not str(c).startswith("_")]
+
+
+def csv_text_from_export_dataframe(export_df: pd.DataFrame) -> str:
+    """Sérialise un slice post-:func:`dataframe_for_export` en CSV sans colonnes ``_*``."""
+    cols = public_export_column_names(export_df)
+    if not cols:
+        return pd.DataFrame().to_csv(index=False)
+    return export_df[cols].to_csv(index=False)
+
+
 def dataframe_for_export(df: pd.DataFrame, scope: ExportScope) -> pd.DataFrame:
     """
     Rows included in CSV and JSONL for a given export perimeter.

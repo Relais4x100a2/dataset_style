@@ -30,14 +30,43 @@ docker compose --env-file .env up postgres supertokens webapp
 
 Interface locale : `http://localhost:8080` — healthcheck ops : `http://localhost:8080/health`.
 
-Les styles transverses de la coquille HTML sont dans `src/webapp/static/design_tokens.css` (montage `/static/…`). Voir `docs/design_tokens_webapp.md`.
+Les **assets statiques** du slice (tokens CSS, etc.) sont servis sous `http://localhost:8080/static/…` (ex. `design_tokens.css`). Voir `docs/design_tokens_webapp.md`.
+
+## Mesure UX baseline (issue-020 / GitHub #182)
+
+Pour des séries comparables à Streamlit, le navigateur envoie un identifiant anonyme
+stable sur les requêtes du parcours critique : en-tête **`X-Dataset-Style-Ux-Run-Id`**
+(valeur `ux_` + **8 à 120** caractères hex, ex. UUID sans tirets). Optionnel :
+**`X-Dataset-Style-Ux-Scenario-Id`** (sinon défaut `critical_v1_issue_020`). Définir
+**`DATASET_STYLE_UX_TELEMETRY_DIR`** sur le serveur webapp pour écrire les JSONL.
+Lorsque la collecte est active et le `run_id` valide, les réponses portent
+**`X-Dataset-Style-Ux-Run-Id`** (écho) et **`X-Dataset-Style-Ux-Telemetry: 1`**.
+Le jalon **`SB-CTX`** est émis sur `GET /api/projects` (projet actif résolu) avec
+déduplication serveur ; pas d’en-tête `Shell-Init` requis. Détail des jalons
+(`EXP-DL` par requête d’export, pas de `EXP-SCOPE`) : `docs/ux_baseline_issue_020.md`.
 
 ## Cohérence auth (ADR 0006)
 
 - Aligner **`APP_PUBLIC_BASE_URL`** sur l’URL réellement servie aux testeurs (ex. `http://localhost:8080` pour un test local du slice web seul), afin que les liens invitation / reset et les cookies SuperTokens restent cohérents.
 - **`WEBAPP_CORS_ORIGINS`** : liste fermée d’origines autorisées (séparées par des virgules) si le navigateur appelle le BFF depuis une origine distincte ; en monorigine (même schéma, hôte et port), la valeur par défaut `http://localhost:8080` suffit.
 
-Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique).
+Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` (statut **accepté** après jalon UX liste + fiche + IA / LT — GitHub **#177**) et `docs/streamlit_to_new_frontend_cutover.md` pour le mode production (cutover unique). Pour rejouer le jalon : ouvrir `http://localhost:8080/` (après `make dev-web`), sélectionner un projet, parcourir **Gestion & édition**, **Nouvelle entrée** (IA) et les contrôles LT associés.
+
+## Bannière d'information (optionnel)
+
+Variable **`APP_MIGRATION_INFO_BANNER`** : **texte brut** ou **objet JSON** (`message` obligatoire ; liens `help_url` / `support_url` en `http`/`https`/`mailto` uniquement), affiché en haut de `GET /` du `webapp` et dans Streamlit en recette. Le `webapp` charge `APP_CONFIG_JSON` via **`initialize_runtime_config()`** au lifespan. Voir `docs/migration_communication_plan.md`. Laisser vide pour masquer.
+
+## Export volumineux (issue-015)
+
+Variable optionnelle **`WEBAPP_EXPORT_MAX_ROWS`** : nombre maximum de lignes dans le périmètre d’export (`dataframe_for_export` après filtre de statut). Si le projet dépasse cette limite, `GET /api/projects/{id}/export.csv` et `…/export.jsonl` répondent **413** avec le code stable `EXPORT_PAYLOAD_TOO_LARGE` (enveloppe `src/api_errors.py`). Non défini = pas de plafond côté serveur (comportement par défaut en développement).
+
+## Super-admin — invitation par e-mail (issue-007 / issue-017 / GitHub #181)
+
+- **`POST /api/super-admin/invite`** — corps JSON `{ "email": "…" }` (normalisation trim + casse côté serveur). Garde HTTP : `require_super_admin_app_user` (`users.is_super_admin`) ; chaîne métier : `create_invitation_link` (second contrôle SQL `require_super_admin`) puis `send_account_link_email` (`src/mailer.py`, `MAIL_MODE` = `dev` ou envoi SMTP). Réponse succès : `status`, `mailMode`, `message`, `inviteResult` (`new_invitation` \| `existing_account_reset`), `bannerTone` (`ok` \| `warn`) pour le frontal ; **aucun jeton** dans le JSON.
+- **Invitation-only** : au démarrage du `webapp`, si `AUTH_ENFORCE_INVITATION_ONLY=true` alors `SUPERTOKENS_SIGNUP_DISABLED=true` est obligatoire (`verify_invitation_only_contract`, test `test_lifespan_raises_when_invitation_only_contract_broken`). Cela ne bloque pas la voie super-admin : le flux continue d’utiliser les primitives d’invitation côté fournisseur.
+- **Mode dev** : aucun envoi réel ; le JSON de succès contient un texte FR avec **`MailDeliveryResult.preview`** (aperçu masqué), jamais le jeton complet du lien ; journalisation `INFO` côté serveur avec le même aperçu masqué (`tests/test_webapp_super_admin_invite_issue017.py`).
+- **E-mail déjà connu** : message de succès **identique** à Streamlit (lien de réinitialisation) ; le discriminant machine est `inviteResult=existing_account_reset` (voir `docs/migration_parity_matrix.md`, flux SA-INVITE).
+- **Échec SMTP / transport** : **502** + enveloppe `MAIL_DELIVERY_FAILED` (`src/api_errors.py`).
 
 ## Contexte liste / fiche entrées (issue-179)
 
@@ -47,4 +76,41 @@ Référence : `docs/adr/0006-front-stack-bff-spa-vs-htmx.md` et `docs/streamlit_
 
 ## Tests et CI
 
-Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+Les routes FastAPI sont couvertes par `pytest` (`tests/test_webapp_vertical_slice.py`, `tests/test_webapp_health_issue008.py`, `tests/test_webapp_project_dimensions_settings.py`, `tests/test_webapp_curator_ai.py`, `tests/test_webapp_entry_mutations_issue012.py`, `tests/test_webapp_ux_telemetry.py`, spike ADR `tests/test_bff_spike_issue006.py`). Le workflow `.github/workflows/ci.yml` inclut une étape de smoke dédiée au healthcheck avant la suite complète.
+
+## Shell curateur — projets et navigation (issue-010 / GitHub #132)
+
+- **`GET /api/me`** : `user` (identité + `isSuperAdmin`) et `mainTabLabels` — même ordre que Streamlit (`src/tab_layout.main_tab_labels`).
+- **`GET /api/projects`** : liste des projets du tenant + `activeProjectId` résolu (paramètre optionnel `active_hint` = dernier projet choisi côté navigateur).
+- **`POST /api/projects`** / **`DELETE /api/projects/{id}`** : création et suppression (admin propriétaire uniquement ; refus = enveloppe opaque `404` / `NOT_FOUND_GENERIC`, comme les autres routes protégées).
+- **Persistance client** : la coquille HTML (`GET /`) mémorise l’identifiant projet actif dans `sessionStorage` sous la clé `webapp_active_project_id` (équivalent fonctionnel de `st.session_state["project_id"]` côté Streamlit). Voir aussi `docs/session_state_keys.md` (section webapp).
+
+Tests : `tests/test_webapp_issue010_shell.py`.
+
+## API — presets et dimensions projet (issue-011)
+
+- `GET /api/projects/{project_id}/settings/dimensions` — lecture après contrôle d’accès (`load_project_entries`) : `activePresetKey`, `dimensions` (effectives), liste `presets` (`key` + `label`), `projectRole`, `canEditDimensions` (admin projet uniquement).
+- `PATCH /api/projects/{project_id}/settings/dimensions` — mutations réservées à l’admin (`require_admin` + `update_project_settings`), corps JSON `action` : `load_preset` (`preset_key`), `replace_dimensions` (`dimensions` objet), `save_custom_preset` (`custom_preset_name`, `custom_preset_label`, `dimensions`). Validation et persistance alignées sur `src/presets.py` (mêmes champs `project_settings` que Streamlit).
+
+## Entrées — création, édition, filtres (issue-012 / GitHub #134)
+
+- `GET /api/projects/{project_id}/entries` — liste ; paramètres query optionnels `edition_*` (mêmes noms que le filtre Streamlit : `edition_statut`, `edition_score_mode`, `edition_score_threshold_lt`, `edition_score_bucket_decile`, `edition_score_include_na`) ; logique serveur = `prepare_for_edition_tab` + `build_edition_score_filter_spec` + `filter_edition_entries_dataframe` (`src/webapp/app.py`).
+- `POST /api/projects/{project_id}/entries` — corps JSON : `input` / `output` obligatoires (non vides, règle partagée `src/services/new_entry_validation.py` avec Streamlit) ; champs de dimensions fermées optionnels (`type`, `structure`, `ton`, `format`, `public`, `statut`, `notes`) validés contre le preset actif dans `entry_mutations.append_minimal_entry` → `entry_nlp_persist_service.persist_new_entry_with_nlp_cache` → `update_project_entries`.
+- `PATCH /api/projects/{project_id}/entries/{entry_id}` — champs partiels (`EntryPatchBody`) ; persistance `entry_mutations.apply_entry_field_updates` → `persist_edited_entry_with_nlp_cache` → `update_project_entries`. Les dimensions fermées (`type`, `structure`, `ton`, `format`, `public`, `statut`) sont contrôlées contre `load_active_dimensions` comme pour `POST` (réponse `400` + `BAD_REQUEST` si valeur hors liste).
+- **Coquille HTML** (`src/webapp/index_template.py`) : filtres liste + clic ligne pour ouvrir la fiche ; après `POST`/`PATCH`, rafraîchissement du tableau depuis la propriété `entries` de la réponse (documenté dans `docs/migration_parity_matrix.md`). **Suppression d’une fiche** : non couverte par l’UI Streamlit actuelle — pas d’endpoint dédié dans ce livrable.
+
+Tests : `tests/test_webapp_vertical_slice.py`, `tests/test_webapp_entry_mutations_issue012.py`.
+
+## Génération IA & LanguageTool (issue-013 / GitHub #135)
+
+- `GET /api/projects/{project_id}/curator/dimensions` — dimensions actives pour les sélecteurs d'aide (profil `load_active_dimensions`).
+- `POST /api/projects/{project_id}/curator/llm-generate` — génération brouillon↔output (`src/llm_generate`, timeouts et URL LLM issus des réglages projet ; pas de clé exposée au navigateur).
+- `POST /api/projects/{project_id}/curator/languagetool-check` — texte corrigé + suggestions (`src/nlp_engine` ; URL LT projet ou défaut).
+
+La coquille `GET /` appelle ces routes depuis les onglets **Nouvelle entrée** et **Gestion & édition** (bandeaux `ds-banner-stack`). Tests : `tests/test_webapp_curator_ai.py`, `tests/test_webapp_index_template_issue013.py`.
+
+## Préférences d'affichage (issue-023)
+
+- Lecture : champ `uiPreferences` sur `GET /api/account` (`density`, `readingComfort`, valeurs par défaut `default`).
+- Mise à jour : `PATCH /api/account/ui-preferences` avec corps JSON partiel (`density` et/ou `readingComfort`). Réponse : `{ "uiPreferences": { ... } }`.
+- Persistance : colonne `users.ui_preferences_json` (créée par `ensure_schema()` au boot Streamlit / webapp). Détails UX et mapping CSS : `docs/ui_display_preferences.md`.

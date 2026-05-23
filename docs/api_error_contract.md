@@ -46,6 +46,7 @@ Liste et détail doivent appliquer **strictement** la même réponse (pas de `40
 | `NOT_FOUND_GENERIC` | 404 | Ressource introuvable | Cette ressource n'existe pas, n'est plus disponible, ou vous n'y avez pas accès. | Vérifiez votre sélection ou l'URL ; reconnectez-vous si besoin. |
 | `INTERNAL_ERROR` | 500 | Erreur interne | Une erreur technique s'est produite. | Réessayez plus tard. Si le problème persiste, contactez l'administrateur. |
 | `CURATOR_LANGUAGETOOL_UNAVAILABLE` | 503 | Correction linguistique indisponible | Impossible de joindre le service LanguageTool (réseau ou délai dépassé). Vérifiez la connectivité ou réessayez. | Réessayez dans quelques instants ou contactez un administrateur. |
+| `MAIL_DELIVERY_FAILED` | 502 | Envoi d'e-mail impossible | Le serveur n'a pas pu acheminer l'e-mail d'invitation (SMTP ou réseau). Vérifiez la configuration d'envoi ou réessayez plus tard. | Contrôlez les paramètres SMTP et les journaux serveur ; en mode développement, utilisez `MAIL_MODE=dev` pour valider le flux sans SMTP. |
 
 Les entrées du tableau correspondent aux constantes et textes dans `src/api_errors.py` (source de vérité pour le mapping).
 
@@ -58,3 +59,8 @@ Les entrées du tableau correspondent aux constantes et textes dans `src/api_err
 ## UI Streamlit (préparation issue-022)
 
 - `src/flash_messages.py` accepte un champ optionnel **`code`** sur les flashes post-rerun ; le rendu affiche une légende `code: …` pour corrélation support / futur mapping toasts.
+
+## Slice webapp (issue-022 livré)
+
+- Fichier CSS : `src/webapp/static/design_tokens.css` ; mapping Python `error.code` → variant : `src/webapp/ui_semantics.py`.
+- Guide produit / contraste / XSS : `docs/design_tokens_webapp.md`.

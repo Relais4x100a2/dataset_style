@@ -7,7 +7,6 @@ import math
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -24,12 +23,14 @@ from sqlalchemy.exc import OperationalError
 
 from src.api_errors import (
     ExportPayloadTooLargeError,
+    MailDeliveryFailedError,
     TenantResourceOpaqueDenial,
-    curator_languagetool_unavailable_envelope,
     error_envelope_for_client,
     log_resolved_api_error,
+    resolve_exception_for_api,
 )
 from src.auth import persist_user_from_signin_ok, verify_invitation_only_contract
+from src.config import initialize_runtime_config
 from src.database import (
     STATUT_VALIDE,
     SUPER_ADMIN_ACCOUNTS_PAGE_SIZE_MAX,
@@ -42,26 +43,52 @@ from src.database import (
     create_project,
     delete_project_as_admin,
     get_user_email_display_name_by_id,
+    get_user_ui_preferences_raw,
     list_accounts_for_super_admin,
     list_projects_for_user,
     load_project_entries,
     replay_quarantined_operation,
+    update_user_ui_preferences_raw,
     validate_super_admin_accounts_list_params,
 )
-from src.export_utils import ExportFormat, ExportScope, convert_to_jsonl, dataframe_for_export
+from src.empty_project_onboarding import workspace_onboarding_for_webapp_me
+from src.export_utils import (
+    ExportFormat,
+    ExportScope,
+    convert_to_jsonl,
+    csv_text_from_export_dataframe,
+    dataframe_for_export,
+    public_export_column_names,
+)
+from src.migration_communication import (
+    INDEX_HTML_BANNER_PLACEHOLDER,
+    migration_info_banner_html_fragment,
+)
 from src.nlp_engine import filter_edition_entries_dataframe
 from src.services.curator_dashboard_snapshot import (
     DashboardStylometryScope,
     build_curator_dashboard_envelope,
 )
 from src.services.edition_filters_service import build_edition_score_filter_spec
+from src.services.new_entry_validation import new_entry_missing_required_body_message
 from src.services.project_dataframe_view import prepare_for_edition_tab
 from src.supertokens_recipe_client import signin_email_password, try_revoke_access_token
 from src.tab_layout import main_tab_labels
-from src.webapp import curator_ai, entry_mutations
+from src.ui_preferences import (
+    load_from_stored_raw,
+    merge_patch_into_canonical,
+    serialize_canonical_preferences,
+)
+from src.ux_scenario_telemetry import MILESTONE_EDI_SAVE, MILESTONE_ENT_NEW_WRITE
+from src.webapp import curator_ai, entry_mutations, ux_telemetry
 from src.webapp import deps as webapp_deps
 from src.webapp.errors import EnvelopeHttpError
 from src.webapp.index_template import INDEX_HTML as _INDEX_HTML
+from src.webapp.project_dimensions_settings import (
+    ProjectDimensionsPatchBody,
+    apply_project_dimensions_settings_patch,
+    build_project_dimensions_settings_payload,
+)
 from src.webapp.super_admin_invite import invite_collaborator_by_email
 from src.webapp.super_admin_saga import build_deprovision_telemetry_payload
 from src.webapp.workspace_payload import projects_list_response
@@ -71,7 +98,7 @@ logger = logging.getLogger(__name__)
 
 def _serialize_entries_df(df: pd.DataFrame) -> list[Any]:
     """Sérialise les colonnes « publiques » ; exclut le cache NLP et champs internes (préfixe ``_``)."""
-    cols = [c for c in df.columns if not str(c).startswith("_")]
+    cols = public_export_column_names(df)
     if not cols:
         return []
     return jsonable_encoder(df[cols].to_dict(orient="records"))
@@ -97,84 +124,6 @@ def _edition_filter_params_present(
     )
 
 
-@dataclass(frozen=True, slots=True)
-class EditionEntriesFilterParams:
-    """Paramètres query ``edition_*`` communs à GET/PATCH/POST sur ``…/entries`` (issue-179)."""
-
-    edition_statut: str | None
-    edition_score_mode: str | None
-    edition_score_threshold_lt: int | None
-    edition_score_bucket_decile: int | None
-    edition_score_include_na: bool | None
-
-    def serialize_public_entry_rows(self, df: pd.DataFrame) -> list[Any]:
-        """Sérialise les lignes visibles : même filtre que ``GET …/entries`` ou jeu complet."""
-        if not _edition_filter_params_present(
-            self.edition_statut,
-            self.edition_score_mode,
-            self.edition_score_threshold_lt,
-            self.edition_score_bucket_decile,
-            self.edition_score_include_na,
-        ):
-            return _serialize_entries_df(df)
-        statut_filter = (self.edition_statut or "").strip() or None
-        mode = self.edition_score_mode or "all"
-        try:
-            score_spec = build_edition_score_filter_spec(
-                mode,
-                threshold_lt=self.edition_score_threshold_lt
-                if self.edition_score_threshold_lt is not None
-                else 50,
-                bucket_decile=self.edition_score_bucket_decile
-                if self.edition_score_bucket_decile is not None
-                else 0,
-                include_na=self.edition_score_include_na
-                if self.edition_score_include_na is not None
-                else False,
-            )
-        except ValueError as exc:
-            raise EnvelopeHttpError(
-                400,
-                error_envelope_for_client(exc, include_technical_detail=False),
-            ) from exc
-        basis = prepare_for_edition_tab(df)
-        view = filter_edition_entries_dataframe(
-            basis,
-            statut_label=statut_filter,
-            score_spec=score_spec,
-        )
-        return _serialize_entries_df(view)
-
-
-def edition_entries_filter_params_dependency(
-    edition_statut: Annotated[str | None, Query(alias="edition_statut")] = None,
-    edition_score_mode: Annotated[str | None, Query(alias="edition_score_mode")] = None,
-    edition_score_threshold_lt: Annotated[
-        int | None, Query(alias="edition_score_threshold_lt", ge=0, le=100)
-    ] = None,
-    edition_score_bucket_decile: Annotated[
-        int | None, Query(alias="edition_score_bucket_decile", ge=0, le=9)
-    ] = None,
-    edition_score_include_na: Annotated[
-        bool | None, Query(alias="edition_score_include_na")
-    ] = None,
-) -> EditionEntriesFilterParams:
-    """Injecte les filtres édition (query) pour les routes qui renvoient un tableau ``entries``."""
-    return EditionEntriesFilterParams(
-        edition_statut=edition_statut,
-        edition_score_mode=edition_score_mode,
-        edition_score_threshold_lt=edition_score_threshold_lt,
-        edition_score_bucket_decile=edition_score_bucket_decile,
-        edition_score_include_na=edition_score_include_na,
-    )
-
-
-EditionEntriesFilterDep = Annotated[
-    EditionEntriesFilterParams,
-    Depends(edition_entries_filter_params_dependency),
-]
-
-
 class SigninBody(BaseModel):
     """Corps de connexion slice vertical."""
 
@@ -193,13 +142,29 @@ class SignoutBody(BaseModel):
     redirect_after: str | None = None
 
 
+class AccountUiPreferencesPatchBody(BaseModel):
+    """Mise à jour partielle des préférences d'affichage (issue-023 / #145)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    density: Literal["default", "compact", "comfortable"] | None = None
+    readingComfort: Literal["default", "high_contrast", "reduced_motion"] | None = None
+
+
 class NewEntryBody(BaseModel):
-    """Création minimale d'une fiche."""
+    """Création d'une fiche (corps + dimensions fermées optionnelles, aligné Streamlit)."""
 
     model_config = ConfigDict(extra="forbid")
 
     input: str = ""
     output: str = ""
+    type: str | None = None
+    structure: str | None = None
+    ton: str | None = None
+    format: str | None = None
+    public: str | None = None
+    statut: str | None = None
+    notes: str | None = None
 
 
 class EntryPatchBody(BaseModel):
@@ -357,11 +322,25 @@ def approved_post_signout_redirect(requested: str | None) -> str:
     return candidate if candidate in allow else default
 
 
+def _bad_request_client_envelope(message: str) -> dict[str, Any]:
+    """Charge utile JSON 400 alignée sur les autres routes ``webapp`` (code ``BAD_REQUEST``)."""
+    return {
+        "error": {
+            "code": "BAD_REQUEST",
+            "title": "Requête invalide",
+            "message": message,
+            "suggested_action": "Corrigez le corps JSON puis réessayez.",
+            "detail": None,
+        }
+    }
+
+
 def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     """Fabrique l'application ; ``engine`` injectable pour les tests."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        initialize_runtime_config()
         if engine is not None:
             app.state.engine = engine
         else:
@@ -402,11 +381,20 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _ux_telemetry_response_headers(request: Request, call_next: Any) -> Response:
+        response = await call_next(request)
+        ux_telemetry.attach_ux_telemetry_response_markers(response, request)
+        return response
+
     _static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index() -> str:
+        frag = migration_info_banner_html_fragment()
+        if frag and INDEX_HTML_BANNER_PLACEHOLDER in _INDEX_HTML:
+            return _INDEX_HTML.replace(INDEX_HTML_BANNER_PLACEHOLDER, frag, 1)
         return _INDEX_HTML
 
     @app.post("/api/auth/signin", response_model=None)
@@ -458,6 +446,10 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         if row is None:
             raise TenantResourceOpaqueDenial()
         email, display_name = row
+        prefs_raw = get_user_ui_preferences_raw(eng, user_id)
+        if prefs_raw is None:
+            raise TenantResourceOpaqueDenial()
+        ui_preferences = load_from_stored_raw(prefs_raw)
         return {
             "appUserId": user_id,
             "email": email,
@@ -466,13 +458,39 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 "ownedProjects": count_owned_projects(eng, user_id),
                 "activeMemberships": count_active_memberships(eng, user_id),
             },
+            "uiPreferences": ui_preferences,
         }
+
+    @app.patch("/api/account/ui-preferences")
+    async def api_patch_account_ui_preferences(
+        request: Request,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+        body: AccountUiPreferencesPatchBody,
+    ) -> dict[str, Any]:
+        """Fusion partielle des préférences d'affichage (densité, confort lecture) — issue-023."""
+        eng = webapp_deps.get_engine(request)
+        row = get_user_email_display_name_by_id(eng, user_id)
+        if row is None:
+            raise TenantResourceOpaqueDenial()
+        prefs_raw = get_user_ui_preferences_raw(eng, user_id)
+        if prefs_raw is None:
+            raise TenantResourceOpaqueDenial()
+        patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        current = load_from_stored_raw(prefs_raw)
+        try:
+            merged = merge_patch_into_canonical(current, patch)
+            if patch:
+                blob = serialize_canonical_preferences(merged)
+                update_user_ui_preferences_raw(eng, user_id, blob)
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
+        return {"uiPreferences": merged}
 
     @app.get("/api/me")
     async def api_me(
         user: Annotated[UserRecord, Depends(webapp_deps.require_app_user)],
     ) -> dict[str, Any]:
-        """Contexte utilisateur + ordre des onglets (``main_tab_labels`` / issue-010)."""
+        """Contexte utilisateur + onglets (issue-010) + fragments onboarding (issue-015)."""
         labels = main_tab_labels(include_super_admin=bool(user.is_super_admin))
         return {
             "user": {
@@ -482,6 +500,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 "isSuperAdmin": bool(user.is_super_admin),
             },
             "mainTabLabels": labels,
+            "workspaceOnboarding": workspace_onboarding_for_webapp_me(),
         }
 
     @app.get("/api/projects")
@@ -494,7 +513,13 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         eng = webapp_deps.get_engine(request)
         projects = list_projects_for_user(eng, user_id)
-        return projects_list_response(projects, active_hint)
+        payload = projects_list_response(projects, active_hint)
+        ux_telemetry.maybe_record_webapp_sb_ctx(
+            request,
+            projects=projects,
+            active_hint=active_hint,
+        )
+        return payload
 
     @app.post("/api/projects")
     async def api_create_project(
@@ -521,12 +546,56 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         request: Request,
         project_id: str,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
-        edition_filters: EditionEntriesFilterDep,
+        edition_statut: Annotated[str | None, Query(alias="edition_statut")] = None,
+        edition_score_mode: Annotated[str | None, Query(alias="edition_score_mode")] = None,
+        edition_score_threshold_lt: Annotated[
+            int | None, Query(alias="edition_score_threshold_lt", ge=0, le=100)
+        ] = None,
+        edition_score_bucket_decile: Annotated[
+            int | None, Query(alias="edition_score_bucket_decile", ge=0, le=9)
+        ] = None,
+        edition_score_include_na: Annotated[
+            bool | None, Query(alias="edition_score_include_na")
+        ] = None,
     ) -> dict[str, Any]:
         """Liste les entrées ; paramètres ``edition_*`` optionnels = mêmes filtres que Streamlit."""
         eng = webapp_deps.get_engine(request)
         df = load_project_entries(eng, project_id, user_id)
-        return {"entries": edition_filters.serialize_public_entry_rows(df)}
+        if _edition_filter_params_present(
+            edition_statut,
+            edition_score_mode,
+            edition_score_threshold_lt,
+            edition_score_bucket_decile,
+            edition_score_include_na,
+        ):
+            statut_filter = (edition_statut or "").strip() or None
+            mode = edition_score_mode or "all"
+            try:
+                score_spec = build_edition_score_filter_spec(
+                    mode,
+                    threshold_lt=edition_score_threshold_lt
+                    if edition_score_threshold_lt is not None
+                    else 50,
+                    bucket_decile=edition_score_bucket_decile
+                    if edition_score_bucket_decile is not None
+                    else 0,
+                    include_na=edition_score_include_na
+                    if edition_score_include_na is not None
+                    else False,
+                )
+            except ValueError as exc:
+                raise EnvelopeHttpError(
+                    400,
+                    error_envelope_for_client(exc, include_technical_detail=False),
+                ) from exc
+            basis = prepare_for_edition_tab(df)
+            df = filter_edition_entries_dataframe(
+                basis,
+                statut_label=statut_filter,
+                score_spec=score_spec,
+            )
+        rows = _serialize_entries_df(df)
+        return {"entries": rows}
 
     @app.get("/api/projects/{project_id}/dashboard")
     async def api_project_dashboard(
@@ -558,20 +627,27 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         entry_id: str,
         body: EntryPatchBody,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
-        edition_filters: EditionEntriesFilterDep,
     ) -> dict[str, Any]:
-        """Met à jour une fiche ; ``entries`` reflète la vue liste (mêmes ``edition_*`` que ``GET``)."""
         eng = webapp_deps.get_engine(request)
         updates = {k: v for k, v in body.model_dump(exclude_none=True).items()}
         try:
             entry_mutations.apply_entry_field_updates(eng, project_id, user_id, entry_id, updates)
         except KeyError as exc:
+            ux_telemetry.maybe_record_webapp_entry_access_denied(
+                request,
+                project_id=project_id,
+                milestone_context=MILESTONE_EDI_SAVE,
+            )
             raise TenantResourceOpaqueDenial() from exc
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
-        return {
-            "status": "ok",
-            "entries": edition_filters.serialize_public_entry_rows(df),
-        }
+        ux_telemetry.record_webapp_persist_entry_milestone(
+            request,
+            project_id=project_id,
+            milestone_code=MILESTONE_EDI_SAVE,
+        )
+        return {"status": "ok", "entries": _serialize_entries_df(df)}
 
     @app.post("/api/projects/{project_id}/entries")
     async def api_create_entry(
@@ -579,23 +655,36 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         project_id: str,
         body: NewEntryBody,
         user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
-        edition_filters: EditionEntriesFilterDep,
     ) -> dict[str, Any]:
-        """Crée une fiche ; ``entries`` aligné sur ``GET`` avec les mêmes filtres query (issue-179)."""
         eng = webapp_deps.get_engine(request)
-        new_id = entry_mutations.append_minimal_entry(
-            eng,
-            project_id,
-            user_id,
-            input_text=body.input,
-            output_text=body.output,
-        )
+        missing = new_entry_missing_required_body_message(body.input, body.output)
+        if missing:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(missing))
+        extras = body.model_dump(exclude_none=True)
+        try:
+            new_id = entry_mutations.append_minimal_entry(
+                eng,
+                project_id,
+                user_id,
+                input_text=body.input,
+                output_text=body.output,
+                type_=extras.get("type"),
+                structure=extras.get("structure"),
+                ton=extras.get("ton"),
+                format_=extras.get("format"),
+                public=extras.get("public"),
+                statut=extras.get("statut"),
+                notes=extras.get("notes"),
+            )
+        except ValueError as exc:
+            raise EnvelopeHttpError(400, _bad_request_client_envelope(str(exc))) from exc
         df = load_project_entries(eng, project_id, user_id)
-        return {
-            "id": new_id,
-            "status": "ok",
-            "entries": edition_filters.serialize_public_entry_rows(df),
-        }
+        ux_telemetry.record_webapp_persist_entry_milestone(
+            request,
+            project_id=project_id,
+            milestone_code=MILESTONE_ENT_NEW_WRITE,
+        )
+        return {"id": new_id, "status": "ok", "entries": _serialize_entries_df(df)}
 
     @app.get("/api/projects/{project_id}/export.csv")
     async def api_export_csv(
@@ -610,12 +699,26 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         try:
             _enforce_export_row_cap(export_df)
         except ExportPayloadTooLargeError as exc:
+            ux_telemetry.record_webapp_export_payload_too_large(
+                request, project_id=project_id, exc=exc
+            )
             return JSONResponse(
                 status_code=413,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
             )
-        cols = [c for c in export_df.columns if not str(c).startswith("_")]
-        text = export_df[cols].to_csv(index=False)
+        text = csv_text_from_export_dataframe(export_df)
+        scope_str = str(scope)
+        row_n = int(len(export_df.index))
+        ux_telemetry.record_webapp_export_milestones(
+            request,
+            project_id=project_id,
+            scope=scope_str,
+            export_row_count=row_n,
+            delivery="csv",
+            csv_byte_len=len(text.encode("utf-8")),
+            jsonl_byte_len=None,
+            jsonl_format=None,
+        )
         return PlainTextResponse(
             content=text,
             media_type="text/csv; charset=utf-8",
@@ -636,6 +739,9 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
         try:
             _enforce_export_row_cap(export_df)
         except ExportPayloadTooLargeError as exc:
+            ux_telemetry.record_webapp_export_payload_too_large(
+                request, project_id=project_id, exc=exc
+            )
             return JSONResponse(
                 status_code=413,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
@@ -646,11 +752,58 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             include_stylometry=True,
             scope=scope,
         )
+        scope_str = str(scope)
+        row_n = int(len(export_df.index))
+        ux_telemetry.record_webapp_export_milestones(
+            request,
+            project_id=project_id,
+            scope=scope_str,
+            export_row_count=row_n,
+            delivery="jsonl",
+            csv_byte_len=0,
+            jsonl_byte_len=len(payload.encode("utf-8")),
+            jsonl_format=str(export_format),
+        )
         return PlainTextResponse(
             content=payload,
             media_type="application/x-ndjson; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="export-{project_id}.jsonl"'},
         )
+
+    @app.get("/api/projects/{project_id}/settings/dimensions")
+    async def api_get_project_dimensions_settings(
+        request: Request,
+        project_id: str,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Presets et dimensions effectives (lecture : issue-011, aligné ``src/presets``)."""
+        eng = webapp_deps.get_engine(request)
+        return build_project_dimensions_settings_payload(eng, project_id, user_id)
+
+    @app.patch("/api/projects/{project_id}/settings/dimensions")
+    async def api_patch_project_dimensions_settings(
+        request: Request,
+        project_id: str,
+        body: ProjectDimensionsPatchBody,
+        user_id: Annotated[str, Depends(webapp_deps.require_app_user_id)],
+    ) -> dict[str, Any]:
+        """Mutation presets / dimensions (admin projet uniquement)."""
+        eng = webapp_deps.get_engine(request)
+        out, err = apply_project_dimensions_settings_patch(eng, project_id, user_id, body)
+        if err:
+            raise EnvelopeHttpError(
+                400,
+                {
+                    "error": {
+                        "code": "BAD_REQUEST",
+                        "title": "Réglages dimensions",
+                        "message": err,
+                        "suggested_action": "Corrigez les valeurs envoyées puis réessayez.",
+                        "detail": None,
+                    }
+                },
+            )
+        return out
 
     @app.get("/api/projects/{project_id}/curator/dimensions")
     async def api_curator_dimensions(
@@ -702,7 +855,7 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
             logger.warning("curator_languagetool_check failed: %s", exc, exc_info=True)
             raise EnvelopeHttpError(
                 503,
-                curator_languagetool_unavailable_envelope(),
+                curator_ai.curator_languagetool_unavailable_envelope(),
             ) from exc
 
     @app.post("/api/super-admin/invite")
@@ -720,16 +873,26 @@ def create_slice_app(*, engine: Engine | None = None) -> FastAPI:
                 403,
                 error_envelope_for_client(exc, include_technical_detail=False),
             ) from exc
+        except MailDeliveryFailedError as exc:
+            log_resolved_api_error(logger, exc, extra_context={"route": "super_admin_invite"})
+            resolved = resolve_exception_for_api(exc, include_technical_detail=False)
+            raise EnvelopeHttpError(
+                resolved.http_status,
+                error_envelope_for_client(exc, include_technical_detail=None),
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             log_resolved_api_error(logger, exc, extra_context={"route": "super_admin_invite"})
             return JSONResponse(
                 status_code=500,
                 content=error_envelope_for_client(exc, include_technical_detail=None),
             )
+        banner_tone = "warn" if outcome.mail_mode == "dev" else "ok"
         return {
             "status": "ok",
             "mailMode": outcome.mail_mode,
             "message": outcome.message_fr,
+            "inviteResult": outcome.invite_result,
+            "bannerTone": banner_tone,
         }
 
     @app.get("/api/super-admin/accounts")
